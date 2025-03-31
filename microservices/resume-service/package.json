@@ -1,0 +1,30 @@
+{
+    "name": "resume-service",
+    "version": "1.0.0",
+    "description": "A microservice for generating resumes using Kafka and Gemini AI",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "nodemon index.js"
+    },
+    "dependencies": {
+        "@google/genai": "^0.7.0",
+        "@google/generative-ai": "^0.22.0",
+        "aws-sdk": "^2.1692.0",
+        "child_process": "^1.0.2",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.7",
+        "express": "^4.18.2",
+        "fs-extra": "^11.3.0",
+        "kafkajs": "^2.2.4",
+        "mammoth": "^1.9.0",
+        "mongoose": "^8.12.1",
+        "multer": "^1.4.5-lts.1",
+        "path": "^0.12.7",
+        "pdfkit": "^0.16.0",
+        "uuid": "^11.1.0"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    }
+}
