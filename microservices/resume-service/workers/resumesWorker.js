@@ -202,6 +202,18 @@ Analyze the uploaded resumes based on the given job description and required ski
       ctc,
     };
 
+    const existingApplication = await JobApplication.findOne({
+      jobId,
+      email: jobData.email,
+    });
+
+    if (existingApplication) {
+      console.log(
+        `🚫 Resume already exists for jobId: ${jobId} and email: ${jobData.email}. Skipping processing.`
+      );
+      return;
+    }
+
     const result = await JobApplication.create(jobData);
 
     // File upload
