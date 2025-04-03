@@ -115,9 +115,7 @@ const createConsumer = async (id) => {
           JD: ${JD}
           Experience required For Job Role: (${experience}
         `;
-
-        console.log(prompt, 189);
-
+        
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const result = await model.generateContent(prompt);
