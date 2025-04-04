@@ -149,6 +149,19 @@ const JobApplicationSchema = new mongoose.Schema(
         },
       },
     ],
+    languages: {
+      type: [
+        {
+          name: {
+            type: String,
+          },
+          proficiency: {
+            type: String,
+            enum: ["beginner", "intermediate", "advanced"],
+          },
+        },
+      ],
+    },
     formFields: {
       type: Array,
       //   required: true,

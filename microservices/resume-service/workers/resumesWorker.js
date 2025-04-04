@@ -54,11 +54,6 @@ const createConsumer = async (consumerId) => {
       try {
         const reqId = message.key.toString();
         const parsedMessage = JSON.parse(message.value.toString());
-
-        console.log(
-          `Consumer ${consumerId} processing message on partition ${partition}`
-        );
-
         processResume(parsedMessage, topic, reqId, partition);
       } catch (error) {
         console.error(`❌ Error in consumer ${consumerId}:`, error);
@@ -146,6 +141,8 @@ Analyze the uploaded resumes based on the given job description and required ski
 ### 6. Experience:
 - **Experience is the no of years of experience mentioned in resume.
 
+### 7. languages - If proficiency is missing or invalid, only add name.
+
 ---
 
 ### Important Notes:
@@ -164,7 +161,7 @@ Analyze the uploaded resumes based on the given job description and required ski
 ✅ **Do not infer or assume skills based on context—match only exact words or defined synonyms.**
 
     
-    JSON schema: {\"analysis\": {\"name\": \"<String>\", \"email\": \"<String>\", \"mobile\": \"<String>\", \"experience\": <int>, \"overallMatch\": <int>, \"educationMatch\": <int>, \"softSkillsMatch\": <int>, \"experienceMatch\": <int>, \"primaryMatchedSkills\": [\"<Skill1>\", \"<Skill2>\"], \"primaryUnmatchedSkills\": [\"<Skill3>\", \"<Skill4>\"], \"secondaryMatchedSkills\": [\"<Skill5>\", \"<Skill6>\"], \"secondaryUnmatchedSkills\": [\"<Skill7>\", \"<Skill8>\"], \"contextualMatch\": <int>, \"matchContexts\":  \"<String explanation>\", \"matchExplanation\": \"<String>\", \"resumeSummary\": \"<String>\"}}`;
+JSON schema: {\"analysis\": {\"name\": \"<String>\", \"email\": \"<String>\", \"mobile\": \"<String>\", \"experience\": <int>, \"overallMatch\": <int>, \"educationMatch\": <int>, \"softSkillsMatch\": <int>, \"experienceMatch\": <int>, \"primaryMatchedSkills\": [\"<Skill1>\", \"<Skill2>\"], \"primaryUnmatchedSkills\": [\"<Skill3>\", \"<Skill4>\"], \"secondaryMatchedSkills\": [\"<Skill5>\", \"<Skill6>\"], \"secondaryUnmatchedSkills\": [\"<Skill7>\", \"<Skill8>\"], \"contextualMatch\": <int>, \"matchContexts\":  \"<String explanation>\", \"matchExplanation\": \"<String>\", \"resumeSummary\": \"<String>\", \"languages\": [{\"name\": \"<String>\"} {\"proficiency\": \"<String> (only 'beginner', 'intermediate', or 'advanced')\" if available}]}};`;
 
     const geminiPart = await remotePdfToPart(
       finalFilePath,
@@ -208,9 +205,21 @@ Analyze the uploaded resumes based on the given job description and required ski
     });
 
     if (existingApplication) {
-      console.log(
-        `🚫 Resume already exists for jobId: ${jobId} and email: ${jobData.email}. Skipping processing.`
-      );
+      producer.send({
+        topic: replyTopic,
+        messages: [
+          {
+            key: `req-${Date.now()}`,
+            value: JSON.stringify({
+              error: `Already exists for jobId: ${jobId} and email: ${jobData.email}.`,
+              fileName: file.originalname,
+              analysis: geminiResult.response.text(),
+              requestId: requestId,
+            }),
+          },
+        ],
+      });
+
       return;
     }
 
@@ -229,8 +238,6 @@ Analyze the uploaded resumes based on the given job description and required ski
       { _id: result._id },
       { $set: { ...jobData, resumeId: fileId } }
     );
-
-    console.log(`✅ Processed ${file.originalname} successfully`);
 
     if (finalFilePath) {
       fs.unlink(finalFilePath, (err) => {

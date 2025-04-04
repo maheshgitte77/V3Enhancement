@@ -53,11 +53,23 @@ const analyzeResumes = async (req, res) => {
       if (!validFiles.length)
         return res.status(400).json({ error: "No valid files uploaded" });
       if (typeof req.body.referralDetails === "string") {
-        req.body.referralDetails = JSON.parse(req.body.referralDetails);
+        try {
+          req.body.referralDetails = JSON.parse(req.body.referralDetails);
+        } catch (parseError) {
+          return res
+            .status(400)
+            .json({ error: "Invalid JSON in referralDetails" });
+        }
       }
+
       if (typeof req.body.ctc === "string") {
-        req.body.ctc = JSON.parse(req.body.ctc);
+        try {
+          req.body.ctc = JSON.parse(req.body.ctc);
+        } catch (parseError) {
+          return res.status(400).json({ error: "Invalid JSON in ctc" });
+        }
       }
+
       const {
         jobDescription,
         primarySkills,
