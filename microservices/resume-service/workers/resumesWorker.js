@@ -200,7 +200,7 @@ JSON schema: {\"analysis\": {\"name\": \"<String>\", \"email\": \"<String>\", \"
     };
 
     const existingApplication = await JobApplication.findOne({
-      jobId,
+      jobId: jobId,
       email: jobData.email,
     });
 
