@@ -40,8 +40,10 @@ const createConsumer = async (id) => {
         JD,
         category,
         CandidateResumeData,
+        questionsArray,
       } = JSON.parse(message.value.toString());
       let tailorMadeQuestions = "";
+      let existingQuestionsArray = "";
 
       if (tailorMade === "true") {
         tailorMadeQuestions = `
@@ -52,6 +54,14 @@ const createConsumer = async (id) => {
           - Prioritize topics the candidate has worked on.
           - Adjust difficulty based on experience.
           - Keep formatting consistent with the structure below.
+        `;
+      }
+
+      if (questionsArray.length > 0) {
+        existingQuestionsArray = `
+      ### Important Note:
+      - I have already asked the following questions. Please provide questions other than these:
+       ${questionsArray.map((q) => `- ${q}`).join("\n")}
         `;
       }
 
@@ -112,10 +122,12 @@ const createConsumer = async (id) => {
           - If "MCQ", include "options" and "answer".
           - The number of questions per type matches the provided "number".
           - "options" for MCQ is in "Key" "value" pair.
+          - 
           JD: ${JD}
           Experience required For Job Role: (${experience}
+          ${existingQuestionsArray}
         `;
-        
+
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const result = await model.generateContent(prompt);

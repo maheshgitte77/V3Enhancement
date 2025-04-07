@@ -1,5 +1,3 @@
-
-
 const generateScreeningQuestion = async (req, res) => {
   try {
     const {
@@ -10,6 +8,7 @@ const generateScreeningQuestion = async (req, res) => {
       proposedSeniority,
       JD,
       CandidateResumeData,
+      questionsArray,
     } = req.body;
 
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -32,6 +31,7 @@ const generateScreeningQuestion = async (req, res) => {
         category,
         tailorMade,
         CandidateResumeData,
+        questionsArray,
       }),
     }));
 

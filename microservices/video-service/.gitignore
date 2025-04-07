@@ -34,4 +34,6 @@ Dockerfile
 /docker
 .docker-compose.yml
 /docker/.docker-compose.yml
-
+gcp-key.json
+workers/gcp-key.json
+.gcp-key.json
