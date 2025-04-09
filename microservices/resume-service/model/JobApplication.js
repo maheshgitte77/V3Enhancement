@@ -16,6 +16,12 @@ const JobApplicationSchema = new mongoose.Schema(
     mobile: {
       type: String,
     },
+    gender: {
+      type: String,
+    },
+    dateOfBirth: {
+      type: Date,
+    },
     noticePeriod: {
       type: String,
     },
@@ -29,16 +35,17 @@ const JobApplicationSchema = new mongoose.Schema(
     locationPreference: {
       type: String,
     },
-    referralFrom: {
-      type: String,
-    },
     experience: {
-      type: Number,
+      type: {
+        years: {
+          type: Number,
+        },
+        months: {
+          type: Number,
+        },
+      },
     },
     overallMatch: {
-      type: Number,
-    },
-    softSkillsMatch: {
       type: Number,
     },
     experienceMatch: {
@@ -50,16 +57,16 @@ const JobApplicationSchema = new mongoose.Schema(
     matchContexts: {
       type: String,
     },
-    primaryMatchedSkills: {
+    requiredMatchedSkills: {
       type: [String],
     },
-    primaryUnmatchedSkills: {
+    requiredUnmatchedSkills: {
       type: [String],
     },
-    secondaryMatchedSkills: {
+    goodToHaveMatchedSkills: {
       type: [String],
     },
-    secondaryUnmatchedSkills: {
+    goodToHaveUnmatchedSkills: {
       type: [String],
     },
     matchExplanation: {
@@ -68,87 +75,135 @@ const JobApplicationSchema = new mongoose.Schema(
     resumeSummary: {
       type: String,
     },
-    resumeId: {
-      type: String,
+    skills: {
+      type: [
+        {
+          name: {
+            type: String,
+          },
+          proficiency: {
+            type: String,
+            enum: ["Beginner", "Intermediate", "Advanced"],
+          },
+        },
+      ],
     },
-    coverLetterId: {
-      type: String,
+    educationDetails: {
+      type: [
+        {
+          course: {
+            type: String,
+          },
+          universityOrBoard: {
+            type: String,
+          },
+          startDate: {
+            type: String,
+          },
+          endDate: {
+            type: String,
+          },
+          gradeOrPercentage: {
+            type: String,
+          },
+          description: {
+            type: String,
+          },
+        },
+      ],
     },
-    status: {
-      type: String,
-      enum: ["applied", "shortlisted", "interview", "rejected"],
-      default: "applied",
+    certificationDetails: {
+      type: [
+        {
+          name: {
+            type: String,
+          },
+          issuedBy: {
+            type: String,
+          },
+          issueDate: {
+            type: Date,
+          },
+          description: {
+            type: String,
+          },
+        },
+      ],
     },
-    appliedAt: {
-      type: Date,
-      default: Date.now,
+    workExperience: {
+      type: [
+        {
+          companyName: {
+            type: String,
+          },
+          companyLocation: {
+            type: String,
+          },
+          designation: {
+            type: String,
+          },
+          workType: {
+            type: String,
+            enum: [
+              "fullTime",
+              "internship",
+              "freelance",
+              "contract",
+              "partTime",
+              "volunteer",
+            ],
+          },
+          workStyle: {
+            type: String,
+            enum: ["remote", "onsite", "hybrid"],
+          },
+          startDate: {
+            type: String,
+          },
+          endDate: {
+            type: String,
+          },
+          description: {
+            type: String,
+          },
+          responsibilities: {
+            type: [String],
+          },
+        },
+      ],
     },
-    address: {
-      type: String,
+    projects: {
+      type: [
+        {
+          title: {
+            type: String,
+          },
+          description: {
+            type: String,
+          },
+          type: {
+            type: String,
+            enum: ["individual", "team", "openSource", "hackathon", "other"],
+          },
+          role: {
+            type: String,
+            enum: ["lead", "member", "other"],
+          },
+          responsibilities: {
+            type: [String],
+          },
+          startDate: {
+            type: String,
+          },
+          endDate: {
+            type: String,
+          },
+          technologiesUsed: {
+            type: [String],
+          },
+        },
+      ],
     },
-    github: {
-      type: String,
-    },
-    linkedin: {
-      type: String,
-    },
-    referralDetails: {
-      name: String,
-      email: String,
-      mobile: String,
-      code: String,
-    },
-    education: [
-      {
-        course: {
-          type: String,
-        },
-        institute: {
-          type: String,
-        },
-        passingYear: {
-          type: String,
-        },
-        percentage: {
-          type: String,
-        },
-        grade: {
-          type: String,
-        },
-      },
-    ],
-    certificates: [
-      {
-        name: {
-          type: String,
-        },
-        institute: {
-          type: String,
-        },
-        date: {
-          type: String,
-        },
-      },
-    ],
-    projects: [
-      {
-        name: {
-          type: String,
-        },
-        description: {
-          type: String,
-        },
-        role: {
-          type: String,
-        },
-        duration: {
-          type: String,
-        },
-        skills: {
-          type: [String],
-        },
-      },
-    ],
     languages: {
       type: [
         {
@@ -157,14 +212,53 @@ const JobApplicationSchema = new mongoose.Schema(
           },
           proficiency: {
             type: String,
-            enum: ["beginner", "intermediate", "advanced"],
           },
         },
       ],
     },
-    formFields: {
-      type: Array,
-      //   required: true,
+    socials: {
+      type: [String],
+    },
+    portfolio: {
+      type: String,
+    },
+    resumeFileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "File",
+    },
+    status: {
+      type: String,
+      enum: [
+        "Applied",
+        "Shortlisted",
+        "Interview Scheduled",
+        "Interview Completed",
+        "Offered",
+        "hired",
+        "Rejected",
+      ],
+      default: "Applied",
+    },
+    address: {
+      type: String,
+    },
+    city: {
+      type: String,
+    },
+    state: {
+      type: String,
+    },
+    country: {
+      type: String,
+    },
+    zipCode: {
+      type: String,
+    },
+    referralDetails: {
+      name: String,
+      email: String,
+      mobile: String,
+      code: String,
     },
   },
   {
@@ -174,5 +268,12 @@ const JobApplicationSchema = new mongoose.Schema(
 
 // ✅ Add an index to optimize queries that filter by jobId
 JobApplicationSchema.index({ jobId: 1 });
+JobApplicationSchema.index({ name: 1 });
+JobApplicationSchema.index({ email: 1 });
+JobApplicationSchema.index({ mobile: 1 });
+JobApplicationSchema.index({ status: 1 });
+JobApplicationSchema.index({ isComplete: 1 });
+JobApplicationSchema.index({ createdAt: 1 });
+JobApplicationSchema.index({ updatedAt: 1 });
 
 module.exports = mongoose.model("JobApplication", JobApplicationSchema);
