@@ -132,7 +132,9 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
      - **Match Explanation ("matchExplanation")** - A brief explanation of the candidate’s overall strengths and gaps in relation to the job description
      ### 5. Summary:
      - **wo-line Resume Summary ("resumeSummary")** - A concise summary of the candidate’s profile.
-    
+     ### 6. Experience:
+     - **Experience is the No of years & months mentioned in resume if only find years then add 0 months.
+
     ---
     
     ### JSON STRUCTURE
@@ -243,7 +245,6 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     ✅ Only include social URLs if mentioned (LinkedIn, GitHub, Twitter, etc.).  
     ✅ In portfolio, include GitHub/website/Linktree any other portfolio if applicable.  
     ✅ Match skills exactly or with approved synonyms. Do not match loosely.
-    ✅ Experience is the No of years & months mentioned in resume if only find years then add 0 months.  
     ---
     
     Return the entire output strictly in valid JSON format as specified above.
