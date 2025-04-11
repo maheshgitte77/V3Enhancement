@@ -81,6 +81,7 @@ const analyzeResumes = async (req, res) => {
         referralDetails,
         locationPreference,
         ctc,
+        createRecord,
       } = req.body;
       const requestId = `req-${Date.now()}`;
       let isLive;
@@ -119,6 +120,7 @@ const analyzeResumes = async (req, res) => {
             referralDetails,
             locationPreference,
             ctc,
+            createRecord,
           },
           "resume-screening",
           index

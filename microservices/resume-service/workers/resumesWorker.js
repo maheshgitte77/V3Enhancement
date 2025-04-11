@@ -82,6 +82,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       referralDetails,
       locationPreference,
       ctc,
+      createRecord
     } = data;
 
     const validFiles = files.filter((file) =>
@@ -194,7 +195,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "title": "<String>",
             "description": "<String>",
             "type": "<individual | team | openSource | hackathon | other>",
-            "role": "<lead | member | other>",
+            "role": "",
             "responsibilities": ["<String>", "..."],
             "startDate": "<Date>",
             "endDate": "<Date>",
@@ -210,7 +211,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
         "socials": [
           "<LinkedIn/Twitter/GitHub/etc. URL>"
         ],
-        "portfolio": "<Website or GitHub or Linktree link>",
+        "portfolio": "<Website or GitHub or other link>",
         "address": "<String>",
         "city": "<String>",
         "state": "<String>",
@@ -333,28 +334,77 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       throw new Error("Analysis data is missing or invalid.");
     }
 
-    const jobData = {
-      ...parsedAnalysis.analysis,
-      jobId,
-      noticePeriod,
-      referralDetails,
-      locationPreference,
-      ctc,
-    };
+    if (createRecord === "true") {
+      const jobData = {
+        ...parsedAnalysis.analysis,
+        jobId,
+        noticePeriod,
+        referralDetails,
+        locationPreference,
+        ctc,
+      };
 
-    const existingApplication = await JobApplication.findOne({
-      jobId: jobId,
-      email: jobData.email,
-    });
+      const existingApplication = await JobApplication.findOne({
+        jobId: jobId,
+        email: jobData.email,
+      });
 
-    if (existingApplication) {
+      if (existingApplication) {
+        producer.send({
+          topic: replyTopic,
+          messages: [
+            {
+              key: `req-${Date.now()}`,
+              value: JSON.stringify({
+                error: `Already exists for jobId: ${jobId} and email: ${jobData.email}.`,
+                fileName: file.originalname,
+                analysis: geminiResult.response.text(),
+                requestId: requestId,
+              }),
+            },
+          ],
+        });
+
+        await JobApplication.updateOne(
+          { _id: result._id },
+          { $set: { ...jobData, resumeFileId: fileId } }
+        );
+
+        return;
+      }
+
+      const result = await JobApplication.create(jobData);
+
+      // File upload
+      const { uploadUrl, fileId } = await fileService.generateUploadUrl({
+        userId: result._id,
+        name: file.originalname,
+        extension: ext,
+        module: "companyLogo",
+        size: file.size,
+      });
+
+      await JobApplication.updateOne(
+        { _id: result._id },
+        { $set: { ...jobData, resumeFileId: fileId } }
+      );
+
+      if (finalFilePath) {
+        fs.unlink(finalFilePath, (err) => {
+          if (err) {
+            console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
+          } else {
+            console.log(`🗑️ Successfully deleted file: ${finalFilePath}`);
+          }
+        });
+      }
+
       producer.send({
         topic: replyTopic,
         messages: [
           {
             key: `req-${Date.now()}`,
             value: JSON.stringify({
-              error: `Already exists for jobId: ${jobId} and email: ${jobData.email}.`,
               fileName: file.originalname,
               analysis: geminiResult.response.text(),
               requestId: requestId,
@@ -362,49 +412,21 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
           },
         ],
       });
-
-      return;
-    }
-
-    const result = await JobApplication.create(jobData);
-
-    // File upload
-    const { uploadUrl, fileId } = await fileService.generateUploadUrl({
-      userId: result._id,
-      name: file.originalname,
-      extension: ext,
-      module: "companyLogo",
-      size: file.size,
-    });
-
-    await JobApplication.updateOne(
-      { _id: result._id },
-      { $set: { ...jobData, resumeFileId: fileId } }
-    );
-
-    if (finalFilePath) {
-      fs.unlink(finalFilePath, (err) => {
-        if (err) {
-          console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-        } else {
-          console.log(`🗑️ Successfully deleted file: ${finalFilePath}`);
-        }
+    } else {
+      producer.send({
+        topic: replyTopic,
+        messages: [
+          {
+            key: `req-${Date.now()}`,
+            value: JSON.stringify({
+              fileName: file.originalname,
+              analysis: parsedAnalysis,
+              requestId: requestId,
+            }),
+          },
+        ],
       });
     }
-
-    producer.send({
-      topic: replyTopic,
-      messages: [
-        {
-          key: `req-${Date.now()}`,
-          value: JSON.stringify({
-            fileName: file.originalname,
-            analysis: geminiResult.response.text(),
-            requestId: requestId,
-          }),
-        },
-      ],
-    });
   } catch (error) {
     console.error(
       `❌ Error processing file ${data.files?.[0]?.originalname || "unknown"}:`,
