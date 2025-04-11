@@ -82,7 +82,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       referralDetails,
       locationPreference,
       ctc,
-      createRecord
+      createRecord = "true",
     } = data;
 
     const validFiles = files.filter((file) =>
@@ -110,14 +110,22 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     }
     const prompt = `
     You must return the response strictly in a structured JSON format as shown below.
+    You are a professional resume parser.
+
+    ### Objective:
+    Analyze the following resume and extract **only explicitly mentioned** candidate information.
     
-    Analyze the uploaded resume and extract relevant candidate data and match information. The final output must contain only the fields that are available in the resume — do not include null or undefined fields, except for enumerations where required.
-    
+    ### Rules:
+    - DO NOT infer or assume missing details.
+    - ONLY include fields that are clearly stated in the resume.
+    - DO NOT return null, "not found", or undefined values — just omit the field entirely if missing.
+        
     **Provided Required Skills:** \ ${primarySkills}  
     **Provided Good To Have Skills:** \ ${secondarySkills}  
     **Job Description:** \ ${jobDescription}
 
      ### 1. Skills Breakdown:
+     - **skills ("skills")** - List of All Technical Skills **only explicitly mentioned** in Resume.
      - **Required Matched Skills ("requiredMatchedSkills")** - List of Required skills from the provided list: ${primarySkills}, that are found exactly in the resume, including accepted synonyms/variations. Only skills from this provided list should be included.
      - **Required Unmatched Skills ("requiredUnmatchedSkills")** - List of missing Required skills from the provided list: ${primarySkills}.
      - **Good To Have Matched Skills ("goodToHaveMatchedSkills")** - List of Good To Have skills from the provided list: ${secondarySkills}, that are found exactly in the resume, including accepted synonyms/variations. Only skills from this provided list should be included.
@@ -134,7 +142,16 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
      ### 5. Summary:
      - **wo-line Resume Summary ("resumeSummary")** - A concise summary of the candidate’s profile.
      ### 6. Experience:
-     - **Experience is the No of years & months mentioned in resume if only find years then add 0 months.
+     - **Strictly extract total years and months of experience **as explicitly mentioned** in the resume.
+     - Return only values **explicitly written** in the resume. Do not infer based on job history or dates.
+     - If it says "5 years", return: **5 years & 0 months**
+     - If it says "1.6 years", return: **1 years & 6 months**
+     - If it says "8 months", return: **0 years & 8 months**
+     ### 7. Social & Portfolio Links:
+    ✅ Only include social links if they are **linked to actual URLs**, even if only the icon or name appears.
+    ✅ Common socials to include: LinkedIn, GitHub, Twitter, personal website/portfolio.
+    ❌ DO NOT include social names without the actual URL.
+    ❌ DO NOT guess or generate URLs — only use those present in the resume.
 
     ---
     
@@ -166,7 +183,6 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "startDate": "<Date>",
             "endDate": "<Date>",
             "gradeOrPercentage": "<String>",
-            "description": "<String>"
           }
         ],
         "certificationDetails": [
@@ -244,8 +260,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
        - Use context clues like “expert in”, “familiar with”, “basic knowledge” to assign:
          - Advanced, Intermediate, or Beginner  
     ✅ Only include social URLs if mentioned (LinkedIn, GitHub, Twitter, etc.).  
-    ✅ In portfolio, include GitHub/website/Linktree any other portfolio if applicable.  
-    ✅ Match skills exactly or with approved synonyms. Do not match loosely.
+    ✅ In portfolio, include GitHub/website any other portfolio if applicable.  
     ---
     
     Return the entire output strictly in valid JSON format as specified above.
