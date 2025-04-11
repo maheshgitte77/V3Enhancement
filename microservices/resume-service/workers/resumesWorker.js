@@ -265,61 +265,6 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     
     Return the entire output strictly in valid JSON format as specified above.
     `;
-
-    //     const prompt = `You must return the response strictly in a structured JSON format as shown below.
-
-    // Analyze the uploaded resumes based on the given job description and required skills. Evaluate their suitability for the job based on the following criteria:
-
-    // **Provided Primary Skills:** ${primarySkills}
-    // **Provided Secondary Skills:** ${secondarySkills}
-    // **Job Description:** ${jobDescription}
-
-    // ### 1. Skills Breakdown:
-    // - **Primary Matched Skills ("primaryMatchedSkills")** - List of primary skills from the provided list: ${primarySkills}, that are found exactly in the resume, including accepted synonyms/variations. Only skills from this provided list should be included.
-    // - **Primary Unmatched Skills ("primaryUnmatchedSkills")** - List of missing primary skills from the provided list: ${primarySkills}.
-    // - **Secondary Matched Skills ("secondaryMatchedSkills")** - List of secondary skills from the provided list: ${secondarySkills}, that are found exactly in the resume, including accepted synonyms/variations. Only skills from this provided list should be included.
-    // - **Secondary Unmatched Skills ("secondaryUnmatchedSkills")** - List of missing secondary skills from the provided list: ${secondarySkills}.
-
-    // ### 2. Match Percentages (0-100):
-    // - **Overall Match Percentage ("overallMatch")** - A score (0-100) indicating how well the resume aligns with the job description and required skills. Consider all factors, including skills, experience, education, and soft skills.
-    // - **Educational Qualification Match Percentage ("educationMatch")** - A score (0-100) indicating the relevance of the candidate’s education to the job requirements. Evaluate the degree, specialization, and any relevant coursework.
-    // - **Soft Skills Match Percentage ("softSkillsMatch")** - A score (0-100) assessing the presence and relevance of key soft skills mentioned or implied in the resume, such as communication, teamwork, problem-solving, etc., based on the job description.
-    // - **Work Experience Match Percentage ("experienceMatch")** - A score (0-100) indicating the relevance of the candidate’s work experience to the job requirements. Consider the duration, roles, responsibilities, and achievements.
-
-    // ### 3. Contextual Analysis:
-    // - **Contextual Match Score ("contextualMatch")** - A score (0-100) assessing how well the candidate’s experience and projects align with the job requirements beyond exact keyword matching. Evaluate the depth of understanding, application of skills, and relevance of projects.
-    // - **Match Contexts ("matchContexts")** - Provide a brief explanation of how the Contextual Match Score was calculated. Explain the relevance of specific projects or experiences to the job description.
-
-    // ### 4. Justification:
-    // - **Match Explanation ("matchExplanation")** - A brief explanation of the candidate’s overall strengths and gaps in relation to the job description.
-
-    // ### 5. Summary:
-    // - **Two-line Resume Summary ("resumeSummary")** - A concise summary of the candidate’s profile.
-
-    // ### 6. Experience:
-    // - **Experience is the no of years of experience mentioned in resume.
-
-    // ### 7. languages - If proficiency is missing or invalid, only add name.
-
-    // ---
-
-    // ### Important Notes:
-    // ✅ **Skill Matching:**
-    // - **Match exact skills** from the provided lists: ${primarySkills} & ${secondarySkills}.
-    // - Allow **common synonyms/variations** (e.g., "Git" should match "GitHub", "SQL" should match "MySQL", "Node" should match "Node.js", "React" should match "React.js").
-    // - **Do NOT match unrelated words** (e.g., "GIT" should not match "digital" or "digitization").
-    // - **PrimaryMatchedSkills & SecondaryMatchedSkills should list ONLY the skills from the provided lists that are found in the resume OR their approved synonyms. Do not add any skills that were not provided.**
-    // - **PrimaryUnmatchedSkills & SecondaryUnmatchedSkills should list ONLY the skills from the provided lists that are NOT found in the resume.**
-
-    // ✅ **Evaluation:**
-    // - **Provide scores (0-100) for all match percentages (overallMatch, educationMatch, softSkillsMatch, experienceMatch, contextualMatch).**
-    // - **Justify each score with a brief explanation in the relevant section (matchContexts, matchExplanation).**
-    // - **Contextual analysis should go beyond keyword matching and assess the relevance and depth of the candidate's experience and projects to the job description.**
-
-    // ✅ **Do not infer or assume skills based on context—match only exact words or defined synonyms.**
-
-    // JSON schema: {\"analysis\": {\"name\": \"<String>\", \"email\": \"<String>\", \"mobile\": \"<String>\", \"experience\": <int>, \"overallMatch\": <int>, \"educationMatch\": <int>, \"softSkillsMatch\": <int>, \"experienceMatch\": <int>, \"primaryMatchedSkills\": [\"<Skill1>\", \"<Skill2>\"], \"primaryUnmatchedSkills\": [\"<Skill3>\", \"<Skill4>\"], \"secondaryMatchedSkills\": [\"<Skill5>\", \"<Skill6>\"], \"secondaryUnmatchedSkills\": [\"<Skill7>\", \"<Skill8>\"], \"contextualMatch\": <int>, \"matchContexts\":  \"<String explanation>\", \"matchExplanation\": \"<String>\", \"resumeSummary\": \"<String>\", \"languages\": [{\"name\": \"<String>\"} {\"proficiency\": \"<String>\"}]}};`;
-
     const geminiPart = await remotePdfToPart(
       finalFilePath,
       file.originalname,
@@ -445,24 +390,53 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
   } catch (error) {
     console.error(
       `❌ Error processing file ${data.files?.[0]?.originalname || "unknown"}:`,
-      error
+      error.message
     );
 
+    // Retry logic
     if (retryCount < MAX_RETRIES) {
       console.log(
         `🔄 Retrying ${data.files?.[0]?.originalname} (${
           retryCount + 1
         }/${MAX_RETRIES}) in ${RETRY_DELAY / 1000} seconds...`
       );
-      setTimeout(
-        () => processResume(data, topic, reqId, partition, retryCount + 1),
-        RETRY_DELAY
-      );
+
+      setTimeout(() => {
+        processResume(data, topic, reqId, partition, retryCount + 1);
+      }, RETRY_DELAY);
     } else {
       console.error(
         `🚨 Max retries reached for ${data.files?.[0]?.originalname}. Saving for manual review.`
       );
+
+      // Optional: Clean up temp file
+      if (finalFilePath && fs.existsSync(finalFilePath)) {
+        fs.unlink(finalFilePath, (err) => {
+          if (err) {
+            console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
+          } else {
+            console.log(`🧹 Cleaned up failed file: ${finalFilePath}`);
+          }
+        });
+      }
+
+      // Save to failed queue/map
       failedResumes.set(reqId, data);
+
+      // Notify through Kafka
+      producer.send({
+        topic: replyTopic,
+        messages: [
+          {
+            key: `req-${Date.now()}`,
+            value: JSON.stringify({
+              error: `Max retries exceeded for file: ${data.files?.[0]?.originalname}`,
+              fileName: data.files?.[0]?.originalname,
+              requestId: reqId,
+            }),
+          },
+        ],
+      });
     }
   }
 };

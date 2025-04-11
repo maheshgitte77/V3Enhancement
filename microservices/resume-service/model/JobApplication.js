@@ -144,18 +144,22 @@ const JobApplicationSchema = new mongoose.Schema(
           },
           workType: {
             type: String,
-            enum: [
-              "fullTime",
-              "internship",
-              "freelance",
-              "contract",
-              "partTime",
-              "volunteer",
-            ],
+            // enum: [
+            //   "fullTime",
+            //   "internship",
+            //   "freelance",
+            //   "contract",
+            //   "partTime",
+            //   "volunteer",
+            // ],
+            required: false,
+            default: undefined,
           },
           workStyle: {
             type: String,
-            enum: ["remote", "onsite", "hybrid"],
+            // enum: ["remote", "onsite", "hybrid"],
+            required: false,
+            default: undefined,
           },
           startDate: {
             type: String,
@@ -183,11 +187,15 @@ const JobApplicationSchema = new mongoose.Schema(
           },
           type: {
             type: String,
-            enum: ["individual", "team", "openSource", "hackathon", "other"],
+            // enum: ["individual", "team", "openSource", "hackathon", "other"],
+            required: false,
+            default: undefined,
           },
           role: {
             type: String,
-            enum: ["lead", "member", "other"],
+            // enum: ["lead", "member", "other"],
+            required: false,
+            default: undefined,
           },
           responsibilities: {
             type: [String],
