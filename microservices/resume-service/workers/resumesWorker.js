@@ -81,7 +81,8 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       noticePeriod,
       referralDetails,
       locationPreference,
-      ctc,
+      expectedSalary,
+      currentSalary,
       createRecord = "true",
     } = data;
 
@@ -301,7 +302,8 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
         noticePeriod,
         referralDetails,
         locationPreference,
-        ctc,
+        expectedSalary,
+        currentSalary,
       };
 
       const existingApplication = await JobApplication.findOne({

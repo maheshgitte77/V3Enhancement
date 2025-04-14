@@ -62,14 +62,6 @@ const analyzeResumes = async (req, res) => {
         }
       }
 
-      if (typeof req.body.ctc === "string") {
-        try {
-          req.body.ctc = JSON.parse(req.body.ctc);
-        } catch (parseError) {
-          return res.status(400).json({ error: "Invalid JSON in ctc" });
-        }
-      }
-
       const {
         jobDescription,
         primarySkills,
@@ -80,8 +72,9 @@ const analyzeResumes = async (req, res) => {
         noticePeriod,
         referralDetails,
         locationPreference,
-        ctc,
         createRecord,
+        expectedSalary,
+        currentSalary,
       } = req.body;
       const requestId = `req-${Date.now()}`;
       let isLive;
@@ -119,8 +112,9 @@ const analyzeResumes = async (req, res) => {
             noticePeriod,
             referralDetails,
             locationPreference,
-            ctc,
             createRecord,
+            expectedSalary,
+            currentSalary,
           },
           "resume-screening",
           index

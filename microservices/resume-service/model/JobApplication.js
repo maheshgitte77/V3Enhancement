@@ -25,9 +25,11 @@ const JobApplicationSchema = new mongoose.Schema(
     noticePeriod: {
       type: String,
     },
-    ctc: {
-      currentCTC: Number,
-      expectedCTC: Number,
+    currentSalary: {
+      type: Number,
+    },
+    expectedSalary: {
+      type: Number,
     },
     preferredLocations: {
       type: [String],
