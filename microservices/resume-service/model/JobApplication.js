@@ -85,7 +85,7 @@ const JobApplicationSchema = new mongoose.Schema(
           },
           proficiency: {
             type: String,
-            enum: ["Beginner", "Intermediate", "Advanced"],
+            // enum: ["Beginner", "Intermediate", "Advanced"],
           },
         },
       ],
@@ -124,7 +124,7 @@ const JobApplicationSchema = new mongoose.Schema(
             type: String,
           },
           issueDate: {
-            type: Date,
+            type: String,
           },
           description: {
             type: String,
@@ -228,9 +228,6 @@ const JobApplicationSchema = new mongoose.Schema(
     },
     socials: {
       type: [String],
-    },
-    portfolio: {
-      type: String,
     },
     resumeFileId: {
       type: mongoose.Schema.Types.ObjectId,

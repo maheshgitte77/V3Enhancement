@@ -7,6 +7,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
 const fileService = require("../utils/fileService");
+
 dotenv.config();
 
 const kafka = new Kafka({
@@ -110,56 +111,31 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       mimetype = "application/pdf";
     }
     const prompt = `
-    You must return the response strictly in a structured JSON format as shown below.
-    You are a professional resume parser.
-
+    You are a professional resume parser. Return the response in strict JSON format as defined below, extracting only explicitly mentioned candidate information from the resume, with specific handling for experience.
+    
     ### Objective:
-    Analyze the following resume and extract **only explicitly mentioned** candidate information.
+    Parse the resume to extract candidate details, skills, experience and social links, matching them against the provided job description and skills lists.
+    
+    ### Inputs:
+    - **Required Skills**: ${primarySkills}
+    - **Good To Have Skills**: ${secondarySkills}
+    - **Job Description**: ${jobDescription}
     
     ### Rules:
-    - DO NOT infer or assume missing details.
-    - ONLY include fields that are clearly stated in the resume.
-    - DO NOT return null, "not found", or undefined values — just omit the field entirely if missing.
-        
-    **Provided Required Skills:** \ ${primarySkills}  
-    **Provided Good To Have Skills:** \ ${secondarySkills}  
-    **Job Description:** \ ${jobDescription}
-
-     ### 1. Skills Breakdown:
-     - **skills ("skills")** - List of All Technical Skills **only explicitly mentioned** in Resume.
-     - **Required Matched Skills ("requiredMatchedSkills")** - List of Required skills from the provided list: ${primarySkills}, that are found exactly in the resume, including accepted synonyms/variations. Only skills from this provided list should be included.
-     - **Required Unmatched Skills ("requiredUnmatchedSkills")** - List of missing Required skills from the provided list: ${primarySkills}.
-     - **Good To Have Matched Skills ("goodToHaveMatchedSkills")** - List of Good To Have skills from the provided list: ${secondarySkills}, that are found exactly in the resume, including accepted synonyms/variations. Only skills from this provided list should be included.
-     - **Good To Have Unmatched Skills ("goodToHaveUnmatchedSkills")** - List of missing Good To Have skills from the provided list: ${secondarySkills}
-     ### 2. Match Percentages (0-100):
-     - **Overall Match Percentage ("overallMatch")** - A score (0-100) indicating how well the resume aligns with the job description and required skills. Consider all factors, including skills, experience, education, and soft skills.
-     - **Educational Qualification Match Percentage ("educationMatch")** - A score (0-100) indicating the relevance of the candidate’s education to the job requirements. Evaluate the degree, specialization, and any relevant coursework.
-     - **Work Experience Match Percentage ("experienceMatch")** - A score (0-100) indicating the relevance of the candidate’s work experience to the job requirements. Consider the duration, roles, responsibilities, and achievements
-     ### 3. Contextual Analysis:
-     - **Contextual Match Score ("contextualMatch")** - A score (0-100) assessing how well the candidate’s experience and projects align with the job requirements beyond exact keyword matching. Evaluate the depth of understanding, application of skills, and relevance of projects.
-     - **Match Contexts ("matchContexts")** - Provide a brief explanation of how the Contextual Match Score was calculated. Explain the relevance of specific projects or experiences to the job description
-     ### 4. Justification:
-     - **Match Explanation ("matchExplanation")** - A brief explanation of the candidate’s overall strengths and gaps in relation to the job description
-     ### 5. Summary:
-     - **wo-line Resume Summary ("resumeSummary")** - A concise summary of the candidate’s profile.
-     ### 6. Experience:
-     - **Strictly extract total years and months of experience **as explicitly mentioned** in the resume.
-     - Return only values **explicitly written** in the resume. Do not infer based on job history or dates.
-     - If it says "5 years", return: **5 years & 0 months**
-     - If it says "1.6 years", return: **1 years & 6 months**
-     - If it says "8 months", return: **0 years & 8 months**
-     ### 7. Social & Portfolio Links:
-    ✅ Only include social links if they are **linked to actual URLs**, even if only the icon or name appears.
-    ✅ Common socials to include: LinkedIn, GitHub, Twitter, personal website/portfolio.
-    ❌ DO NOT include social names without the actual URL.
-    ❌ DO NOT guess or generate URLs — only use those present in the resume.
-
-    ---
+    - Extract only explicitly stated information unless specified otherwise. Do not infer or assume missing details except for experience calculation.
+    - Omit fields not present in the resume. Do not use null, "not found", or undefined.
+    - **Skills**: Extract only from the resume's skills section. Include all technical skills listed, with proficiency (Beginner, Intermediate, Advanced) inferred from context (e.g., "expert" → Advanced, "familiar" → Beginner).
+    - **Experience**:
+      - First, search for explicitly mentioned experience in the resume's "Resume Summary," "Profile Summary," "Professional Summary," "Objective," "Summary," or "ABOUT" sections (case-insensitive).
+      - Extract years and months as written (e.g., "5 years" → 5 years & 0 months; "1.6 years" → 1 years & 6 months; "8 months" → 0 years & 8 months).
+      - If no experience is explicitly mentioned in these sections, calculate total experience by summing durations from **workExperience** (using startDate and endDate) and, if insufficient, from **projects** (using startDate and endDate). Convert to years and months (e.g., 18 months → 1 year & 6 months). Use the most recent end date or current date (April 15, 2025) for ongoing roles/projects.
+   - **Socials**:
+      - Include URLs explicitly listed as text (e.g., "linkedin.com/in/username") or embedded as hidden links behind clickable icons, names, or text (e.g., LinkedIn icon or "GitHub" text linking to a URL).
+      - Detect hidden links by extracting the underlying URL (e.g., 'href in' HTML, hyperlink in PDF/Word) for common platforms: LinkedIn, GitHub, Twitter/X, personal websites, or portfolios.
+      - Only include valid URLs for socials (e.g., LinkedIn, GitHub, Twitter/X) or portfolio (e.g., personal website, Behance). Do not include non-social links (e.g., company websites) unless clearly portfolio-related.
+      - Do not include platform names without URLs or guess URLs.
     
-    ### JSON STRUCTURE
-    
-    Return the final result in the following schema format:
-    
+    ### JSON Structure:
     {
       "analysis": {
         "name": "<String>",
@@ -183,7 +159,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "universityOrBoard": "<String>",
             "startDate": "<Date>",
             "endDate": "<Date>",
-            "gradeOrPercentage": "<String>",
+            "gradeOrPercentage": "<String>"
           }
         ],
         "certificationDetails": [
@@ -212,7 +188,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "title": "<String>",
             "description": "<String>",
             "type": "<individual | team | openSource | hackathon | other>",
-            "role": "",
+            "role": "<String>",
             "responsibilities": ["<String>", "..."],
             "startDate": "<Date>",
             "endDate": "<Date>",
@@ -225,46 +201,63 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "proficiency": "<String>"
           }
         ],
-        "socials": [
-          "<LinkedIn/Twitter/GitHub/etc. URL>"
-        ],
-        "portfolio": "<Website or GitHub or other link>",
+        "socials": ["<URL>"],
         "address": "<String>",
         "city": "<String>",
         "state": "<String>",
         "country": "<String>",
         "zipCode": "<String>",
-    
+        "requiredMatchedSkills": ["<String>"],
+        "requiredUnmatchedSkills": ["<String>"],
+        "goodToHaveMatchedSkills": ["<String>"],
+        "goodToHaveUnmatchedSkills": ["<String>"],
         "overallMatch": <Number>,
         "educationMatch": <Number>,
         "experienceMatch": <Number>,
         "contextualMatch": <Number>,
-    
-        "requiredMatchedSkills": ["<Skill1>", "<Skill2>"],
-        "requiredUnmatchedSkills": ["<Skill3>"],
-        "goodToHaveMatchedSkills": ["<Skill4>"],
-        "goodToHaveUnmatchedSkills": ["<Skill5>"],
-    
-        "matchContexts": "<Brief context-based justification of the match>",
-        "matchExplanation": "<Overview of strengths and gaps in relation to the JD>",
-        "resumeSummary": "<Two-line summary of the resume>"
+        "matchContexts": "<Explanation of contextual match score>",
+        "matchExplanation": "<Strengths and gaps relative to job description>",
+        "resumeSummary": "<Two-line candidate summary>"
       }
     }
     
-    ---
+    ### Analysis Details:
+    1. **Skills**:
+       - **skills**: All technical skills from the resume's skills section.
+       - **requiredMatchedSkills**: Skills from ${primarySkills} explicitly listed in the skills section, including synonyms (e.g., "JavaScript" matches "JS").
+       - **requiredUnmatchedSkills**: Skills from ${primarySkills} not found in the skills section.
+       - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed in the skills section, including synonyms.
+       - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found in the skills section.
+    
+    2. **Match Percentages (0-100)**:
+       - **overallMatch**: Score reflecting alignment with job description (skills, experience, education, soft skills).
+       - **educationMatch**: Score based on degree, specialization, and coursework relevance to job requirements.
+       - **experienceMatch**: Score based on work experience relevance (roles, responsibilities, duration, achievements).
+    
+    3. **Contextual Analysis**:
+       - **contextualMatch**: Score (0-100) assessing experience and project alignment with job requirements beyond keyword matching.
+       - **matchContexts**: Brief explanation of contextual match score, highlighting relevant projects or experiences.
+    
+    4. **matchExplanation**: Summary of candidate’s strengths and gaps relative to the job description.
+    
+    5. **resumeSummary**: Two-line overview of candidate’s profile.
     
     ### Special Instructions:
+    - Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
+    - For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
+    - Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
+    - For experience handling:
+      - Prioritize explicit mentions in "Profile Summary," "Professional Summary," "Objective," "Summary," or "A B O U T" sections.
+      - If absent, calculate from workExperience durations (startDate to endDate or April 15, 2025 for ongoing).
+      - If workExperience is insufficient or absent, include project durations (startDate to endDate or April 15, 2025 for ongoing).
+      - Avoid double-counting overlapping periods; use non-overlapping durations for accuracy.
+    - For socials:
+      - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio" linking to a website).
+      - Parse digital resumes (PDF, Word, HTML) to detect hyperlinks behind icons or names.
+      - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
+    - Ensure valid JSON output with no trailing commas or invalid syntax.
     
-    ✅ Only include fields present in the resume. Skip fields with no values. Do not include nulls or empty arrays except enums (which should still be present if part of a data structure).  
-    ✅ certificationDetails, workExperience, projects, socials, portfolio, languages, address info should only appear if data is found.  
-    ✅ Enum values for skills.proficiency should be inferred from resume wording.  
-       - Use context clues like “expert in”, “familiar with”, “basic knowledge” to assign:
-         - Advanced, Intermediate, or Beginner  
-    ✅ Only include social URLs if mentioned (LinkedIn, GitHub, Twitter, etc.).  
-    ✅ In portfolio, include GitHub/website any other portfolio if applicable.  
-    ---
-    
-    Return the entire output strictly in valid JSON format as specified above.
+    Return the output in the specified JSON format.
     `;
     const geminiPart = await remotePdfToPart(
       finalFilePath,
@@ -327,8 +320,17 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
           ],
         });
 
+        // File upload
+        const { uploadUrl, fileId } = await fileService.generateUploadUrl({
+          userId: existingApplication._id,
+          name: file.originalname,
+          extension: ext,
+          module: "jobResume",
+          size: file.size,
+        });
+
         await JobApplication.updateOne(
-          { _id: result._id },
+          { _id: existingApplication._id },
           { $set: { ...jobData, resumeFileId: fileId } }
         );
 
@@ -342,7 +344,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
         userId: result._id,
         name: file.originalname,
         extension: ext,
-        module: "companyLogo",
+        module: "jobResume",
         size: file.size,
       });
 
