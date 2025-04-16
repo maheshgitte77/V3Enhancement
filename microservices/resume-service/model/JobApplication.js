@@ -14,7 +14,12 @@ const JobApplicationSchema = new mongoose.Schema(
       type: String,
     },
     mobile: {
-      type: String,
+      countryCode: {
+        type: String,
+      },
+      number: {
+        type: String,
+      },
     },
     gender: {
       type: String,
