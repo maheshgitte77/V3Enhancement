@@ -57,12 +57,12 @@ const createConsumer = async (id) => {
         `;
       }
 
-      if (questionsArray.length > 0) {
+      if (Array.isArray(questionsArray) && questionsArray.length > 0) {
         existingQuestionsArray = `
       ### Important Note:
       - I have already asked the following questions. Please provide questions other than these:
-       ${questionsArray.map((q) => `- ${q}`).join("\n")}
-        `;
+      ${questionsArray.map((q) => `- ${q}`).join("\n")}
+      `;
       }
 
       try {

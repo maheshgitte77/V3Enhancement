@@ -140,7 +140,10 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       "analysis": {
         "name": "<String>",
         "email": "<String>",
-        "mobile": "<String>",
+        "mobile": {
+          "countryCode": "<String>",
+          "number": "<String>",
+        },
         "gender": "<String>",
         "dateOfBirth": "<Date>",
         "experience": {
@@ -255,6 +258,10 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio" linking to a website).
       - Parse digital resumes (PDF, Word, HTML) to detect hyperlinks behind icons or names.
       - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
+    - Mobile:
+      - If a country code is explicitly written (e.g., '+91', '+1'), include it as the countryCode.
+      - If no country code is found, default to '+91'. Ensure the number is the phone number without the country code. For example, if the resume contains 'Mobile: +919876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
+      - If the resume contains 'Mobile: 9876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.".
     - Ensure valid JSON output with no trailing commas or invalid syntax.
     
     Return the output in the specified JSON format.
