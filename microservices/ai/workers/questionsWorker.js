@@ -12,6 +12,13 @@ console.log(`🔗 Connecting to Kafka Brokers:`, kafkaBrokers);
 const kafka = new Kafka({
   clientId: "questions-worker",
   brokers: kafkaBrokers,
+  retry: {
+    maxRetryTime: 30000, // 30 seconds
+    initialRetryTime: 300, // 300ms
+    retries: 10, // Increase retries
+  },
+  connectionTimeout: 10000, // 10 seconds
+  requestTimeout: 25000, // 25 seconds
 });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -168,10 +175,34 @@ const createConsumer = async (id) => {
   });
 };
 
-// ✅ Ensure the producer is connected before running consumers
+const ensureTopics = async () => {
+  const admin = kafka.admin();
+  await admin.connect();
+  try {
+    const topics = ["questions-request-topic", "questions-reply-topic"];
+    const existingTopics = await admin.listTopics();
+    for (const topic of topics) {
+      if (!existingTopics.includes(topic)) {
+        console.log(`Creating topic: ${topic}`);
+        await admin.createTopics({
+          topics: [{ topic, numPartitions: 6, replicationFactor: 3 }],
+        });
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error ensuring topics:", error);
+  } finally {
+    await admin.disconnect();
+  }
+};
+
 (async () => {
   try {
-    console.log("🚀 Connecting Kafka Producer for Questions Worker...");
+    console.log("🚀 Ensuring Kafka topics...");
+    await ensureTopics();
+    console.log("✅ Topics ensured!");
+
+    console.log("🚀 Connecting Kafka Producer...");
     await producer.connect();
     console.log("✅ Producer Connected!");
 
