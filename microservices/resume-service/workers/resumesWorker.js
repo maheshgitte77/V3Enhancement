@@ -129,11 +129,17 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       - First, search for explicitly mentioned experience in the resume's "Resume Summary," "Profile Summary," "Professional Summary," "Objective," "Summary," or "ABOUT" sections (case-insensitive).
       - Extract years and months as written (e.g., "5 years" → 5 years & 0 months; "1.6 years" → 1 years & 6 months; "8 months" → 0 years & 8 months).
       - If no experience is explicitly mentioned in these sections, calculate total experience by summing durations from **workExperience** (using startDate and endDate) and, if insufficient, from **projects** (using startDate and endDate). Convert to years and months (e.g., 18 months → 1 year & 6 months). Use the most recent end date or current date (April 15, 2025) for ongoing roles/projects.
-   - **Socials**:
-      - Include URLs explicitly listed as text (e.g., "linkedin.com/in/username") or embedded as hidden links behind clickable icons, names, or text (e.g., LinkedIn icon or "GitHub" text linking to a URL).
-      - Detect hidden links by extracting the underlying URL (e.g., 'href in' HTML, hyperlink in PDF/Word) for common platforms: LinkedIn, GitHub, Twitter/X, personal websites, or portfolios.
-      - Only include valid URLs for socials (e.g., LinkedIn, GitHub, Twitter/X) or portfolio (e.g., personal website, Behance). Do not include non-social links (e.g., company websites) unless clearly portfolio-related.
-      - Do not include platform names without URLs or guess URLs.
+    - **Socials**:
+      - Extract explicitly listed social URLs or embedded hyperlinks behind icons/text (e.g., LinkedIn, GitHub, Twitter/X).
+      - Each item must be an object in the form: { "name": "<Platform>", "url": "<URL>" }.
+      - Include only recognized platforms (LinkedIn, GitHub, Twitter/X, personal sites).
+      - Do not include just platform names or guessed URLs.
+    - **Portfolio**:
+      - Extract all explicitly mentioned or linked portfolio URLs (e.g., personal websites, GitHub Pages, Behance, Dribbble).
+      - Each entry must be an object with the platform name and URL: { "name": "<Platform or Site Name>", "url": "<URL>" }.
+      - Detect hidden links behind portfolio icons or text (e.g., "My Work", "Projects").
+      - Do not include unrelated or inferred links.
+
     
     ### JSON Structure:
     {
@@ -204,7 +210,26 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "proficiency": "<String>"
           }
         ],
-        "socials": ["<URL>"],
+        "portfolio": [
+         {
+           "name": "Behance",
+           "url": "https://www.behance.net/johndoe"
+         },
+         {
+           "name": "Personal Website",
+           "url": "https://johndoe.dev"
+         }
+        ],
+       "socials": [
+        {
+          "name": "<String>",
+          "url": "<URL>"
+        },
+        {
+          "name": "<String>",
+          "url": "<URL>"
+        }
+        ],
         "address": "<String>",
         "city": "<String>",
         "state": "<String>",
