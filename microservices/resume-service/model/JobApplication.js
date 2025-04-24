@@ -231,9 +231,27 @@ const JobApplicationSchema = new mongoose.Schema(
         },
       ],
     },
-    socials: {
-      type: [String],
-    },
+    socials: [
+      {
+        name: {
+          type: String,
+        },
+        url: {
+          type: String,
+        },
+      },
+    ],
+
+    portfolio: [
+      {
+        name: {
+          type: String,
+        },
+        url: {
+          type: String,
+        },
+      },
+    ],
     resumeFileId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "File",
