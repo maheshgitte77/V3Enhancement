@@ -131,12 +131,12 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       - If no experience is explicitly mentioned in these sections, calculate total experience by summing durations from **workExperience** (using startDate and endDate) and, if insufficient, from **projects** (using startDate and endDate). Convert to years and months (e.g., 18 months → 1 year & 6 months). Use the most recent end date or current date (April 15, 2025) for ongoing roles/projects.
     - **Socials**:
       - Extract explicitly listed social URLs or embedded hyperlinks behind icons/text (e.g., LinkedIn, GitHub, Twitter/X).
-      - Each item must be an object in the form: { "name": "<Platform>", "url": "<URL>" }.
+      - The result must be an object where each key is the platform name and each value is the URL: { "<Platform>": "<URL>" }.
       - Include only recognized platforms (LinkedIn, GitHub, Twitter/X, personal sites).
       - Do not include just platform names or guessed URLs.
     - **Portfolio**:
       - Extract all explicitly mentioned or linked portfolio URLs (e.g., personal websites, GitHub Pages, Behance, Dribbble).
-      - Each entry must be an object with the platform name and URL: { "name": "<Platform or Site Name>", "url": "<URL>" }.
+      - The result must be an object where each key is the platform or site name and each value is the URL: { "<Platform or Site Name>": "<URL>" }.
       - Detect hidden links behind portfolio icons or text (e.g., "My Work", "Projects").
       - Do not include unrelated or inferred links.
 
@@ -210,26 +210,14 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             "proficiency": "<String>"
           }
         ],
-        "portfolio": [
-         {
-           "name": "Behance",
-           "url": "https://www.behance.net/johndoe"
+        "portfolio": {
+        "Behance": "https://www.behance.net/johndoe",
+        "Personal Website": "https://johndoe.dev"
          },
-         {
-           "name": "Personal Website",
-           "url": "https://johndoe.dev"
-         }
-        ],
-       "socials": [
-        {
-          "name": "<String>",
-          "url": "<URL>"
+       "socials": {
+        "<String>": "<URL>",
+        "<String>": "<URL>"
         },
-        {
-          "name": "<String>",
-          "url": "<URL>"
-        }
-        ],
         "address": "<String>",
         "city": "<String>",
         "state": "<String>",
@@ -298,10 +286,8 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     );
     const geminiResult = await model.generateContent([geminiPart, prompt]);
 
-    // Extract JSON response
     const responseText = geminiResult.response.text();
 
-    console.log("responseText", responseText);
     const jsonStartIndex = responseText.indexOf("{");
     const jsonEndIndex = responseText.lastIndexOf("}");
     const cleanedJson = responseText.substring(
