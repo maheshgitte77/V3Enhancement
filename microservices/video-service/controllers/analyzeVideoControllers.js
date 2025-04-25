@@ -1,16 +1,18 @@
 // controllers/analyzeVideoControllers.js
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const { Kafka } = require("kafkajs");
+const { Kafka, Partitioners } = require("kafkajs");
 const dotenv = require("dotenv");
+const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 dotenv.config();
 
 const kafka = new Kafka({
   clientId: "video-service",
   brokers: process.env.KAFKA_BROKER.split(",").map((broker) => broker.trim()),
 });
-const producer = kafka.producer();
+
+const producer = kafka.producer({
+  createPartitioner: Partitioners.LegacyPartitioner,
+});
 producer.connect();
 
 const storage = multer.diskStorage({
@@ -21,7 +23,7 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage }).single("video");
+const upload = multer({ storage }).single("file");
 
 const analyzeVideo = async (req, res) => {
   console.log("📩 Received request at /api/videos/analyzeVideo");
@@ -29,23 +31,125 @@ const analyzeVideo = async (req, res) => {
     if (err) return res.status(400).json({ error: "File upload failed" });
     if (!req.file)
       return res.status(400).json({ error: "No video file uploaded." });
-    console.log(req.file, 31);
-    const videoData = {
-      videoPath: req.file.path,
-      fileName: req.file.filename,
-      mimetype: req.file.mimetype,
-      experience: req.body.experience,
-      jobRole: req.body.jobRole,
-      questionAnalyzed: req.body.QuestionAnalyzed,
-    };
+    const {
+      experience,
+      jobRole,
+      QuestionAnalyzed,
+      candidateScreeningId,
+      jobApplicationId,
+      questionId,
+      videoAnswerFileId,
+      skillName,
+      type,
+    } = req.body;
 
-    await producer.send({
-      topic: process.env.KAFKA_VIDEO_TOPIC,
-      messages: [{ value: JSON.stringify(videoData) }],
-    });
+    try {
+      const existingRecord = await CandidateAnswerAiResponse.findOne({
+        candidateScreeningId,
+        questionId,
+        status: "Analyzed",
+      });
 
-    res.json({ message: "Video uploaded and processing started" });
+      if (existingRecord) {
+        return res.json({
+          message: "Analysis already completed",
+          analysis: existingRecord,
+        });
+      }
+
+      const videoData = {
+        videoPath: req.file.path,
+        fileName: req.file.filename,
+        mimetype: req.file.mimetype,
+        experience,
+        jobRole,
+        QuestionAnalyzed,
+        candidateScreeningId,
+        jobApplicationId,
+        questionId,
+        videoAnswerFileId,
+        skill: skillName,
+        type,
+      };
+
+      try {
+        await producer.connect();
+        await producer.send({
+          topic: process.env.KAFKA_VIDEO_TOPIC,
+          messages: [{ value: JSON.stringify(videoData) }],
+        });
+        return res.json({ message: "Video uploaded and processing started" });
+      } catch (error) {
+        console.error("❌ Kafka producer error:", error);
+        return res
+          .status(500)
+          .json({ error: "Failed to send video for processing" });
+      }
+    } catch (error) {
+      console.error("Error in analyzeVideo:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
   });
 };
 
-module.exports = { analyzeVideo };
+const analyzeSubjective = async (req, res) => {
+  const {
+    experience,
+    jobRole,
+    QuestionAnalyzed,
+    candidateScreeningId,
+    jobApplicationId,
+    questionId,
+    videoAnswerFileId,
+    skillName,
+    type,
+    candidateAnswer,
+  } = req.body;
+
+  try {
+    const existingRecord = await CandidateAnswerAiResponse.findOne({
+      candidateScreeningId,
+      questionId,
+      status: "Analyzed",
+    });
+
+    if (existingRecord) {
+      return res.json({
+        message: "Analysis already completed",
+        analysis: existingRecord,
+      });
+    }
+
+    const videoData = {
+      experience,
+      jobRole,
+      QuestionAnalyzed,
+      candidateScreeningId,
+      jobApplicationId,
+      questionId,
+      videoAnswerFileId,
+      skill: skillName,
+      type,
+      textAnswer: candidateAnswer,
+    };
+
+    try {
+      await producer.connect();
+      await producer.send({
+        topic: process.env.KAFKA_VIDEO_TOPIC,
+        messages: [{ value: JSON.stringify(videoData) }],
+      });
+      return res.json({ message: "Video uploaded and processing started" });
+    } catch (error) {
+      console.error("❌ Kafka producer error:", error);
+      return res
+        .status(500)
+        .json({ error: "Failed to send video for processing" });
+    }
+  } catch (error) {
+    console.error("Error in analyzeVideo:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+module.exports = { analyzeVideo, analyzeSubjective };
