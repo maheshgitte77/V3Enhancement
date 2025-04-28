@@ -429,8 +429,6 @@ const processVideo = async (videoData) => {
           metrics,
         });
 
-        console.log("questionAiResponse", questionAiResponse);
-
         const answerSummary = Array.isArray(questionAiResponse.answerSummary)
           ? questionAiResponse.answerSummary
           : [questionAiResponse.answerSummary.toString()];
@@ -511,7 +509,6 @@ const processVideo = async (videoData) => {
 
 const processScreening = async (screeningData) => {
   const { candidateScreeningId, screeningAssessmentId } = screeningData;
-
   try {
     // Fetch CandidateScreeningResult and all related CandidateAnswerAiResponses
     const screeningResult = await CandidateScreeningResult.findOne({
@@ -522,8 +519,9 @@ const processScreening = async (screeningData) => {
     }
 
     const aiResponses = await CandidateAnswerAiResponse.find({
-      candidateScreeningId,
+      candidateScreeningId: screeningResult.candidateScreeningId,
     });
+
     if (!aiResponses.length) {
       throw new Error("No CandidateAnswerAiResponses found");
     }
@@ -608,20 +606,20 @@ const processScreening = async (screeningData) => {
       }
     );
 
+    const allCandidateScreening = await CandidateScreening.find({
+      screeningAssessmentId: screeningAssessmentId,
+      status: "Appeared",
+    });
+
     // Calculate candidateRank and betterThanPercentageOfOtherCandidates
     const allScreenings = await CandidateScreeningResult.find({
-      candidateScreeningId: {
-        $in: await CandidateScreening.find({ screeningAssessmentId }).distinct(
-          "candidateScreeningId"
-        ),
-      },
+      candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
     });
 
     // Sort by candidateFitScore (descending)
     const sortedScreenings = allScreenings.sort(
       (a, b) => b.candidateFitScore - a.candidateFitScore
     );
-
     // Update ranks and percentages
     for (let i = 0; i < sortedScreenings.length; i++) {
       const currentScreening = sortedScreenings[i];

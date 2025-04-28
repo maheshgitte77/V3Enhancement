@@ -155,12 +155,11 @@ const analyzeSubjective = async (req, res) => {
 };
 
 const analyzeScreening = async (req, res) => {
-  const { candidateScreeningId, screeningAssessmentId } = req.body;
-
+  const { candidateScreeningId, screeningAssessmentId } = req.query;
   try {
     const videoData = {
-      candidateScreeningId,
-      screeningAssessmentId,
+      candidateScreeningId: candidateScreeningId,
+      screeningAssessmentId: screeningAssessmentId,
       isScreening: true,
     };
 
@@ -183,4 +182,4 @@ const analyzeScreening = async (req, res) => {
   }
 };
 
-module.exports = { analyzeVideo, analyzeSubjective , analyzeScreening};
+module.exports = { analyzeVideo, analyzeSubjective, analyzeScreening };
