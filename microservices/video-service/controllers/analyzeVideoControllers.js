@@ -70,6 +70,7 @@ const analyzeVideo = async (req, res) => {
         videoAnswerFileId,
         skill: skillName,
         type,
+        isScreening: false,
       };
 
       try {
@@ -131,6 +132,7 @@ const analyzeSubjective = async (req, res) => {
       skill: skillName,
       type,
       textAnswer: candidateAnswer,
+      isScreening: false,
     };
 
     try {
@@ -152,4 +154,33 @@ const analyzeSubjective = async (req, res) => {
   }
 };
 
-module.exports = { analyzeVideo, analyzeSubjective };
+const analyzeScreening = async (req, res) => {
+  const { candidateScreeningId, screeningAssessmentId } = req.body;
+
+  try {
+    const videoData = {
+      candidateScreeningId,
+      screeningAssessmentId,
+      isScreening: true,
+    };
+
+    try {
+      await producer.connect();
+      await producer.send({
+        topic: process.env.KAFKA_VIDEO_TOPIC,
+        messages: [{ value: JSON.stringify(videoData) }],
+      });
+      return res.json({ message: "Screening summary update process started" });
+    } catch (error) {
+      console.error("❌ Kafka producer error:", error);
+      return res
+        .status(500)
+        .json({ error: "Failed to send Screening summary update" });
+    }
+  } catch (error) {
+    console.error("Error in Screening summary update:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+module.exports = { analyzeVideo, analyzeSubjective , analyzeScreening};

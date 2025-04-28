@@ -229,15 +229,9 @@ const JobApplicationSchema = new mongoose.Schema(
     },
     socials: {
       type: Object,
-      additionalProperties: {
-        type: String
-      }
     },
     portfolio: {
       type: Object,
-      additionalProperties: {
-        type: String
-      }
     },
     resumeFileId: {
       type: mongoose.Schema.Types.ObjectId,

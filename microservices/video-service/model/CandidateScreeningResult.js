@@ -224,6 +224,38 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    screeningSummary: {
+      type: [String],
+      default: [],
+    },
+    candidateFitScore: {
+      type: Number,
+      default: 0,
+    },
+    candidateRank: {
+      type: Number,
+      default: 0,
+    },
+    communicationClarity: {
+      type: Number,
+      default: 0,
+    },
+    analyticalThinking: {
+      type: Number,
+      default: 0,
+    },
+    problemSolvingAbility: {
+      type: Number,
+      default: 0,
+    },
+    betterThanOfCandidates: {
+      type: Number,
+      default: 0,
+    },
+    fitScorePointers: {
+      type: [String],
+      default: [],
+    },
   },
   {
     strict: false,

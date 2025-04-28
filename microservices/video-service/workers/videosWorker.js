@@ -9,6 +9,7 @@ const {
 } = require("@google/generative-ai/server");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
+const CandidateScreening = require("../model/CandidateScreening");
 
 dotenv.config();
 
@@ -177,14 +178,14 @@ const processVideo = async (videoData) => {
         - Unnatural pauses or odd body language suggesting consultation or external material.
         - cheatingIndicators must be an array of strings listing **ALL** detected cheating behaviors with specific details (e.g., "Candidate looked at a mobile device for 3 seconds"). If no cheating is detected, return an empty array ([]).
         - Each detected cheating behavior must be independently evaluated, and all applicable indicators must be included in cheatingIndicators to provide a comprehensive record of violations.
-
+        
         **Analysis Type**: Video response
         **Input**: Video file
+        **Question for Analyzed**: ${videoData.QuestionAnalyzed}
         **isOnlyOnePersonInVideo**: if two persons visible in the frame isCheatingDetected is true;
         
         **Response JSON Format:**
         {
-          "questionAnalyzed": "${videoData.QuestionAnalyzed}",
           "communication": "[Answer]",
           "isLipSync": [true/false],
           "isOnlyOnePersonInVideo": [true/false],
@@ -223,6 +224,7 @@ const processVideo = async (videoData) => {
         ${commonInstructions}
         **Analysis Type**: Audio response
         **Input**: Audio file
+        **Question for Analyzed**: ${videoData.QuestionAnalyzed}
         **isOnlyOneVoiceInAudio**: if two audio sources are detected within a frame isCheatingDetected is true;
 
         #### 🔊 Audio Cheating Indicators
@@ -239,7 +241,6 @@ const processVideo = async (videoData) => {
         
         **Response JSON Format:**
         {
-          "questionAnalyzed": "${videoData.QuestionAnalyzed}",
           "communication": "[Answer]",
           "isOnlyOneVoiceInAudio": [true/false],
           "voiceClarity": "[Answer]",
@@ -275,6 +276,7 @@ const processVideo = async (videoData) => {
       prompt = `
         ${commonInstructions}
         **Analysis Type**: Subjective text response
+        **Question for Analyzed**: ${videoData.QuestionAnalyzed}
         **Input**: Text answer: "${videoData.textAnswer}"
         ### Subjective Answer Evaluation Rules:
 
@@ -332,7 +334,6 @@ const processVideo = async (videoData) => {
 
         **Response JSON Format:**
         {
-          "questionAnalyzed": "${videoData.QuestionAnalyzed}",
           "communication": "[Answer]",
           "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
           "isCheatingDetected": [true/false],
@@ -400,7 +401,7 @@ const processVideo = async (videoData) => {
 
         const questionAiResponse = await CandidateAnswerAiResponse.create({
           type: normalizedType,
-          questionAnalyzed: transformedAnalysis.questionAnalyzed,
+          questionAnalyzed: videoData.QuestionAnalyzed,
           candidateScreeningId: videoData.candidateScreeningId,
           jobApplicationId: videoData.jobApplicationId,
           questionId: videoData.questionId,
@@ -508,6 +509,156 @@ const processVideo = async (videoData) => {
   }
 };
 
+const processScreening = async (screeningData) => {
+  const { candidateScreeningId, screeningAssessmentId } = screeningData;
+
+  try {
+    // Fetch CandidateScreeningResult and all related CandidateAnswerAiResponses
+    const screeningResult = await CandidateScreeningResult.findOne({
+      candidateScreeningId,
+    });
+    if (!screeningResult) {
+      throw new Error("CandidateScreeningResult not found");
+    }
+
+    const aiResponses = await CandidateAnswerAiResponse.find({
+      candidateScreeningId,
+    });
+    if (!aiResponses.length) {
+      throw new Error("No CandidateAnswerAiResponses found");
+    }
+
+    // Construct prompt with relevant data from aiResponses
+    const prompt = `
+    Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
+    
+    **Evaluation Criteria:**
+    - **communicationClarity**: Percentage out of 100 based on the provided Communication field, assessing clarity, coherence, and effectiveness of expression.
+    - **analyticalThinking**: Percentage out of 100 based on the provided Question Analyzed and Technical Depth, evaluating the candidate's ability to break down and analyze problems.
+    - **problemSolvingAbility**: Percentage out of 100 based on the provided Question Analyzed and Correct Percentage, assessing the candidate's effectiveness in deriving solutions.
+    - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill. Example: ["Demonstrated clear understanding of CRM workflows and customer handling processes", "Showed strong analytical skills in breaking down complex problems", "Displayed effective problem-solving in technical scenarios"].
+    - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance. Example: ["✅ Fit for Role Type: Fast-paced, troubleshooting-heavy environment", "⚡ Primary Strength: Quick problem-solving and high learning adaptability", "🛠️ Area to Watch: Needs slight improvement in technical communication"].
+    
+    **Candidate Screening Data:**
+    ${aiResponses
+      .map(
+        (response, index) => `
+    Question ${index + 1}:
+    - Question: ${response.questionAnalyzed}
+    - Answer Summary: ${response.answerSummary.join(", ")}
+    - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
+      ", "
+    )}
+    - Communication: ${response.communication}
+    - Correct Percentage: ${response.correctPercentage}
+    - Technical Depth: ${response.technicalDepth.rating} (${
+          response.technicalDepth.asPerExplanation
+        })
+    - Overall Rating: ${response.overallRating}
+    `
+      )
+      .join("\n")}
+    
+    **Response JSON Format:**
+    {
+      "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
+      "communicationClarity": Number,
+      "analyticalThinking": Number,
+      "problemSolvingAbility": Number,
+      "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
+    }
+    `;
+
+    // Generate AI response
+    const result = await model.generateContent([{ text: prompt }]);
+    const aiResponse = result.response.text();
+    const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
+      null,
+      aiResponse.slice(
+        aiResponse.indexOf("{"),
+        aiResponse.lastIndexOf("}") + 1
+      ),
+    ];
+    const parsedResponse = JSON.parse(jsonMatch[1]);
+
+    // Calculate candidateFitScore (average of correctPercentage)
+    const correctPercentages = aiResponses
+      .map((response) => parseFloat(response.correctPercentage) || 0)
+      .filter((percentage) => percentage > 0);
+    const candidateFitScore = correctPercentages.length
+      ? Math.round(
+          correctPercentages.reduce((sum, val) => sum + val, 0) /
+            correctPercentages.length
+        )
+      : 0;
+
+    // Update CandidateScreeningResult
+    await CandidateScreeningResult.updateOne(
+      { candidateScreeningId },
+      {
+        $set: {
+          screeningSummary: parsedResponse.screeningSummary,
+          communicationClarity: parsedResponse.communicationClarity,
+          analyticalThinking: parsedResponse.analyticalThinking,
+          problemSolvingAbility: parsedResponse.problemSolvingAbility,
+          fitScorePointers: parsedResponse.fitScorePointers,
+          candidateFitScore,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    // Calculate candidateRank and betterThanPercentageOfOtherCandidates
+    const allScreenings = await CandidateScreeningResult.find({
+      candidateScreeningId: {
+        $in: await CandidateScreening.find({ screeningAssessmentId }).distinct(
+          "candidateScreeningId"
+        ),
+      },
+    });
+
+    // Sort by candidateFitScore (descending)
+    const sortedScreenings = allScreenings.sort(
+      (a, b) => b.candidateFitScore - a.candidateFitScore
+    );
+
+    // Update ranks and percentages
+    for (let i = 0; i < sortedScreenings.length; i++) {
+      const currentScreening = sortedScreenings[i];
+      const rank = i + 1;
+      const betterThanPercentage =
+        sortedScreenings.length > 1
+          ? Math.round(
+              ((sortedScreenings.length - rank) /
+                (sortedScreenings.length - 1)) *
+                100
+            )
+          : 100;
+
+      await CandidateScreeningResult.updateOne(
+        { candidateScreeningId: currentScreening.candidateScreeningId },
+        {
+          $set: {
+            candidateRank: rank,
+            BetterThanOfCandidates: betterThanPercentage,
+            updatedAt: new Date(),
+          },
+        }
+      );
+    }
+
+    console.log(
+      `Successfully processed screening for candidateScreeningId: ${candidateScreeningId}`
+    );
+  } catch (error) {
+    console.error(
+      `Error processing screening for candidateScreeningId: ${candidateScreeningId}`,
+      error
+    );
+    throw error;
+  }
+};
+
 const runConsumer = async (consumerId) => {
   const consumer = kafka.consumer({
     groupId: process.env.GROUP_ID_VIDEO_ANALYZE,
@@ -521,7 +672,11 @@ const runConsumer = async (consumerId) => {
     eachMessage: async ({ message }) => {
       try {
         const videoData = JSON.parse(message.value.toString());
-        await processVideo(videoData);
+        if (videoData.isScreening) {
+          await processScreening(videoData);
+        } else {
+          await processVideo(videoData);
+        }
       } catch (error) {
         console.error(`Consumer ${consumerId} error: ${error.message}`);
       }
