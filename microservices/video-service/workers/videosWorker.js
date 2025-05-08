@@ -638,7 +638,7 @@ const processScreening = async (screeningData) => {
         {
           $set: {
             candidateRank: rank,
-            BetterThanOfCandidates: betterThanPercentage,
+            betterThanOfCandidates: betterThanPercentage,
             updatedAt: new Date(),
           },
         }
