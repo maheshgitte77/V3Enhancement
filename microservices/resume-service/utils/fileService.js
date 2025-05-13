@@ -1,6 +1,7 @@
 const AWS = require("aws-sdk");
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
+require("dotenv").config();
 const File = require("../model/File"); // Assuming File model is properly set up
 
 // AWS S3 Configuration

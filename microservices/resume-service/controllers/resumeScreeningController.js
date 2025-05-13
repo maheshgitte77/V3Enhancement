@@ -1,6 +1,10 @@
 const path = require("path");
+const fs = require("fs").promises;
 const multer = require("multer");
+const axios = require("axios");
 const { produceMessage } = require("../utils/producer");
+const fileService = require("../utils/fileService");
+
 const supportedExtensions = new Set([
   "pdf",
   "docx",
@@ -22,7 +26,7 @@ const allowedMimeTypes = new Set([
 ]);
 
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, "../uploads/"),
+  destination: path.join(__dirname, "../Uploads/"),
   filename: (req, file, cb) => {
     cb(
       null,
@@ -52,6 +56,7 @@ const analyzeResumes = async (req, res) => {
       const validFiles = validateFiles(req.files);
       if (!validFiles.length)
         return res.status(400).json({ error: "No valid files uploaded" });
+
       if (typeof req.body.referralDetails === "string") {
         try {
           req.body.referralDetails = JSON.parse(req.body.referralDetails);
@@ -77,12 +82,7 @@ const analyzeResumes = async (req, res) => {
         currentSalary,
       } = req.body;
       const requestId = `req-${Date.now()}`;
-      let isLive;
-      if (live) {
-        isLive = live;
-      } else {
-        isLive = false;
-      }
+      const isLive = live ? live : false;
 
       const primarySkillList = new Set(
         primarySkills.split(",").map((s) => s.trim())
@@ -91,8 +91,23 @@ const analyzeResumes = async (req, res) => {
         secondarySkills.split(",").map((s) => s.trim())
       );
 
-      for (let index = 0; index < validFiles.length; index++) {
-        const file = validFiles[index];
+      for (const file of validFiles) {
+        const ext = path.extname(file.originalname).slice(1).toLowerCase();
+
+        // Upload to S3
+        const { uploadUrl, fileId } = await fileService.generateUploadUrl({
+          userId: jobId,
+          name: file.originalname,
+          extension: ext,
+          module: "jobResume",
+          size: file.size,
+        });
+
+        const fileBuffer = await fs.readFile(file.path);
+        await axios.put(uploadUrl, fileBuffer, {
+          headers: { "Content-Type": file.mimetype },
+        });
+
         await produceMessage(
           {
             files: [
@@ -101,6 +116,7 @@ const analyzeResumes = async (req, res) => {
                 originalname: file.originalname,
                 mimetype: file.mimetype,
                 size: file.size,
+                fileId, // Include fileId
               },
             ],
             jobDescription,
@@ -117,11 +133,11 @@ const analyzeResumes = async (req, res) => {
             currentSalary,
           },
           "resume-screening",
-          index
+          validFiles.indexOf(file)
         );
       }
 
-      if (live) {
+      if (isLive) {
         req.pendingRequests.set(requestId, {
           res,
           expectedResponses: validFiles.length,
@@ -131,7 +147,7 @@ const analyzeResumes = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Unexpected error:", error);
+    console.error("Unexpected error:", error.message, error.stack);
     res.status(500).json({ error: "An error occurred during processing" });
   }
 };

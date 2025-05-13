@@ -152,17 +152,17 @@ const JobApplicationSchema = new mongoose.Schema(
           workType: {
             type: String,
             enum: [
-              "fullTime",
-              "internship",
-              "freelance",
-              "contract",
-              "partTime",
-              "volunteer",
+              "Full Time",
+              "Internship",
+              "Freelance",
+              "Contract",
+              "Part Time",
+              "Volunteer",
             ],
           },
           workStyle: {
             type: String,
-            enum: ["remote", "onsite", "hybrid"],
+            enum: ["Remote", "On-site", "hybrid"],
           },
           startDate: {
             type: String,
@@ -245,7 +245,7 @@ const JobApplicationSchema = new mongoose.Schema(
         "Interview Scheduled",
         "Interview Completed",
         "Offered",
-        "hired",
+        "Hired",
         "Rejected",
       ],
       default: "Applied",

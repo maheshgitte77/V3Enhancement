@@ -1,12 +1,12 @@
 const { Kafka } = require("kafkajs");
 const dotenv = require("dotenv");
-const fs = require("fs");
+const fs = require("fs").promises;
 const path = require("path");
+const axios = require("axios");
 const convertDocxToPdf = require("../utils/convertDocxToPdf");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
-const fileService = require("../utils/fileService");
 
 dotenv.config();
 
@@ -18,7 +18,6 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const replyTopic = "resume-screening-reply-topic";
 const NUM_CONSUMERS = parseInt(process.env.NUM_CONSUMERS, 10) || 6;
-
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 5000;
 
@@ -39,6 +38,16 @@ const supportedExtensions = new Set([
   "tiff",
 ]);
 
+const allowedMimeTypes = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/rtf",
+  "text/plain",
+  "image/jpeg",
+  "image/png",
+  "image/tiff",
+]);
+
 const createConsumer = async (consumerId) => {
   const consumer = kafka.consumer({
     groupId: process.env.GROUP_ID_RESUME_SCREENING,
@@ -55,7 +64,7 @@ const createConsumer = async (consumerId) => {
       try {
         const reqId = message.key.toString();
         const parsedMessage = JSON.parse(message.value.toString());
-        processResume(parsedMessage, topic, reqId, partition);
+        await processResume(parsedMessage, topic, reqId, partition);
       } catch (error) {
         console.error(`❌ Error in consumer ${consumerId}:`, error);
       }
@@ -65,12 +74,13 @@ const createConsumer = async (consumerId) => {
 
 const startConsumers = async () => {
   for (let i = 1; i <= NUM_CONSUMERS; i++) {
-    createConsumer(i);
+    await createConsumer(i);
   }
 };
 
 const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
   let finalFilePath;
+  let originalFilePath;
   try {
     const {
       jobDescription,
@@ -88,7 +98,9 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     } = data;
 
     const validFiles = files.filter((file) =>
-      supportedExtensions.has(file.originalname.split(".").pop().toLowerCase())
+      supportedExtensions.has(
+        path.extname(file.originalname).slice(1).toLowerCase()
+      )
     );
 
     if (!validFiles.length) {
@@ -97,19 +109,39 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
 
     const file = validFiles[0];
     finalFilePath = file.path;
+    originalFilePath = file.path;
     let mimetype = file.mimetype;
-    const ext = file.originalname.split(".").pop().toLowerCase();
+    const ext = path.extname(file.originalname).slice(1).toLowerCase();
+    const fileId = file.fileId;
 
-    if (ext === "docx") {
+    if (!fileId) {
+      throw new Error("Missing fileId");
+    }
+    // Validate file type
+    if (!supportedExtensions.has(ext) || !allowedMimeTypes.has(mimetype)) {
+      throw new Error(
+        `Unsupported file: extension=${ext}, mimetype=${mimetype}`
+      );
+    }
+    // Convert DOCX to PDF if necessary
+    if (
+      ext === "docx" &&
+      mimetype ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ) {
       const pdfPath = path.join(
         __dirname,
         "converted",
-        file.originalname.replace(".docx", ".pdf")
+        file.originalname.replace(/\.docx$/i, ".pdf")
       );
       await convertDocxToPdf(file.path, pdfPath);
       finalFilePath = pdfPath;
       mimetype = "application/pdf";
+      console.log(`Converted DOCX to PDF: ${pdfPath}`);
+    } else {
+      console.log(`Processing ${ext} file directly`);
     }
+
     const prompt = `
     You are a professional resume parser. Return the response in strict JSON format as defined below, extracting only explicitly mentioned candidate information from the resume, with specific handling for experience.
     
@@ -124,22 +156,24 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     ### Rules:
     - Extract only explicitly stated information unless specified otherwise. Do not infer or assume missing details except for experience calculation.
     - Omit fields not present in the resume. Do not use null, "not found", or undefined.
-    - **Skills**: Extract only from the resume's skills section. Include all technical skills listed, with proficiency (Beginner, Intermediate, Advanced) inferred from context (e.g., "expert" → Advanced, "familiar" → Beginner).
+    - **Skills**: Extract only from the resume's skills section (if present). For images, infer skills from visible text or captions. Include all technical skills listed, with proficiency (Beginner, Intermediate, Advanced) inferred from context (e.g., "expert" → Advanced, "familiar" → Beginner).
     - **Experience**:
       - First, search for explicitly mentioned experience in the resume's "Resume Summary," "Profile Summary," "Professional Summary," "Objective," "Summary," or "ABOUT" sections (case-insensitive).
       - Extract years and months as written (e.g., "5 years" → 5 years & 0 months; "1.6 years" → 1 years & 6 months; "8 months" → 0 years & 8 months).
-      - If no experience is explicitly mentioned in these sections, calculate total experience by summing durations from **workExperience** (using startDate and endDate) and, if insufficient, from **projects** (using startDate and endDate). Convert to years and months (e.g., 18 months → 1 year & 6 months). Use the most recent end date or current date (April 15, 2025) for ongoing roles/projects.
+      - If no experience is explicitly mentioned in these sections, calculate total experience by summing durations from **workExperience** (using startDate and endDate) and, if insufficient, from **projects** (using startDate and endDate). Convert to years and months (e.g., 18 months → 1 year & 6 months). Use the most recent end date or current date (May 13, 2025) for ongoing roles/projects.
+      - For images, extract experience from visible text if structured (e.g., work history).
     - **Socials**:
       - Extract explicitly listed social URLs or embedded hyperlinks behind icons/text (e.g., LinkedIn, GitHub, Twitter/X).
       - The result must be an object where each key is the platform name and each value is the URL: { "<Platform>": "<URL>" }.
       - Include only recognized platforms (LinkedIn, GitHub, Twitter/X, personal sites).
       - Do not include just platform names or guessed URLs.
+      - For images, extract URLs from visible text if present.
     - **Portfolio**:
       - Extract all explicitly mentioned or linked portfolio URLs (e.g., personal websites, GitHub Pages, Behance, Dribbble).
       - The result must be an object where each key is the platform or site name and each value is the URL: { "<Platform or Site Name>": "<URL>" }.
       - Detect hidden links behind portfolio icons or text (e.g., "My Work", "Projects").
       - Do not include unrelated or inferred links.
-
+      - For images, extract URLs from visible text if present.
     
     ### JSON Structure:
     {
@@ -211,12 +245,12 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
           }
         ],
         "portfolio": {
-        "Behance": "https://www.behance.net/johndoe",
-        "Personal Website": "https://johndoe.dev"
-         },
-       "socials": {
-        "<String>": "<URL>",
-        "<String>": "<URL>"
+          "Behance": "https://www.behance.net/johndoe",
+          "Personal Website": "https://johndoe.dev"
+        },
+        "socials": {
+          "<String>": "<URL>",
+          "<String>": "<URL>"
         },
         "address": "<String>",
         "city": "<String>",
@@ -239,11 +273,11 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     
     ### Analysis Details:
     1. **Skills**:
-       - **skills**: All technical skills from the resume's skills section.
-       - **requiredMatchedSkills**: Skills from ${primarySkills} explicitly listed in the skills section, including synonyms (e.g., "JavaScript" matches "JS").
-       - **requiredUnmatchedSkills**: Skills from ${primarySkills} not found in the skills section.
-       - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed in the skills section, including synonyms.
-       - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found in the skills section.
+       - **skills**: All technical skills from the resume's skills section (or visible text in images).
+       - **requiredMatchedSkills**: Skills from ${primarySkills} explicitly listed, including synonyms (e.g., "JavaScript" matches "JS").
+       - **requiredUnmatchedSkills**: Skills from ${primarySkills} not found.
+       - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed, including synonyms.
+       - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found.
     
     2. **Match Percentages (0-100)**:
        - **overallMatch**: Score reflecting alignment with job description (skills, experience, education, soft skills).
@@ -264,30 +298,38 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     - Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
     - For experience handling:
       - Prioritize explicit mentions in "Profile Summary," "Professional Summary," "Objective," "Summary," or "A B O U T" sections.
-      - If absent, calculate from workExperience durations (startDate to endDate or April 15, 2025 for ongoing).
-      - If workExperience is insufficient or absent, include project durations (startDate to endDate or April 15, 2025 for ongoing).
+      - If absent, calculate from workExperience durations (startDate to endDate or May 13, 2025 for ongoing).
+      - If workExperience is insufficient or absent, include project durations (startDate to endDate or May 13, 2025 for ongoing).
       - Avoid double-counting overlapping periods; use non-overlapping durations for accuracy.
-    - For socials:
-      - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio" linking to a website).
-      - Parse digital resumes (PDF, Word, HTML) to detect hyperlinks behind icons or names.
+    - For socials and portfolio:
+      - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio").
+      - Parse digital resumes (PDF, Word, HTML) or images to detect hyperlinks or visible URLs.
       - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
     - Mobile:
       - If a country code is explicitly written (e.g., '+91', '+1'), include it as the countryCode.
       - If no country code is found, default to '+91'. Ensure the number is the phone number without the country code. For example, if the resume contains 'Mobile: +919876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
-      - If the resume contains 'Mobile: 9876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.".
+      - If the resume contains 'Mobile: 9876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
+    - For images (jpg, jpeg, png, tiff):
+      - Extract text using OCR capabilities of the Gemini API.
+      - Parse structured data (e.g., name, email, skills) from visible text.
+      - Handle cases where images contain resume content (e.g., scanned documents).
     - Ensure valid JSON output with no trailing commas or invalid syntax.
     
     Return the output in the specified JSON format.
     `;
+
     const geminiPart = await remotePdfToPart(
       finalFilePath,
       file.originalname,
       mimetype
     );
+    if (geminiPart.error) {
+      throw new Error(geminiPart.error);
+    }
+
     const geminiResult = await model.generateContent([geminiPart, prompt]);
 
     const responseText = geminiResult.response.text();
-
     const jsonStartIndex = responseText.indexOf("{");
     const jsonEndIndex = responseText.lastIndexOf("}");
     const cleanedJson = responseText.substring(
@@ -315,6 +357,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
         locationPreference,
         expectedSalary,
         currentSalary,
+        resumeFileId: fileId,
       };
 
       const existingApplication = await JobApplication.findOne({
@@ -323,6 +366,23 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       });
 
       if (existingApplication) {
+        await JobApplication.updateOne(
+          { _id: existingApplication._id },
+          { $set: { ...jobData } }
+        );
+
+        await fs.unlink(finalFilePath).catch((err) => {
+          console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
+        });
+        if (finalFilePath !== originalFilePath) {
+          await fs.unlink(originalFilePath).catch((err) => {
+            console.warn(
+              `⚠️ Failed to delete original file: ${originalFilePath}`,
+              err
+            );
+          });
+        }
+
         producer.send({
           topic: replyTopic,
           messages: [
@@ -337,47 +397,20 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
             },
           ],
         });
-
-        // File upload
-        const { uploadUrl, fileId } = await fileService.generateUploadUrl({
-          userId: existingApplication._id,
-          name: file.originalname,
-          extension: ext,
-          module: "jobResume",
-          size: file.size,
-        });
-
-        await JobApplication.updateOne(
-          { _id: existingApplication._id },
-          { $set: { ...jobData, resumeFileId: fileId } }
-        );
-
         return;
       }
 
-      const result = await JobApplication.create(jobData);
+      await JobApplication.create(jobData);
 
-      // File upload
-      const { uploadUrl, fileId } = await fileService.generateUploadUrl({
-        userId: result._id,
-        name: file.originalname,
-        extension: ext,
-        module: "jobResume",
-        size: file.size,
+      await fs.unlink(finalFilePath).catch((err) => {
+        console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
       });
-
-      await JobApplication.updateOne(
-        { _id: result._id },
-        { $set: { ...jobData, resumeFileId: fileId } }
-      );
-
-      if (finalFilePath) {
-        fs.unlink(finalFilePath, (err) => {
-          if (err) {
-            console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-          } else {
-            console.log(`🗑️ Successfully deleted file: ${finalFilePath}`);
-          }
+      if (finalFilePath !== originalFilePath) {
+        await fs.unlink(originalFilePath).catch((err) => {
+          console.warn(
+            `⚠️ Failed to delete original file: ${originalFilePath}`,
+            err
+          );
         });
       }
 
@@ -395,6 +428,18 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
         ],
       });
     } else {
+      await fs.unlink(finalFilePath).catch((err) => {
+        console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
+      });
+      if (finalFilePath !== originalFilePath) {
+        await fs.unlink(originalFilePath).catch((err) => {
+          console.warn(
+            `⚠️ Failed to delete original file: ${originalFilePath}`,
+            err
+          );
+        });
+      }
+
       producer.send({
         topic: replyTopic,
         messages: [
@@ -412,17 +457,16 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
   } catch (error) {
     console.error(
       `❌ Error processing file ${data.files?.[0]?.originalname || "unknown"}:`,
-      error.message
+      error.message,
+      error.stack
     );
 
-    // Retry logic
     if (retryCount < MAX_RETRIES) {
       console.log(
         `🔄 Retrying ${data.files?.[0]?.originalname} (${
           retryCount + 1
         }/${MAX_RETRIES}) in ${RETRY_DELAY / 1000} seconds...`
       );
-
       setTimeout(() => {
         processResume(data, topic, reqId, partition, retryCount + 1);
       }, RETRY_DELAY);
@@ -431,21 +475,22 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
         `🚨 Max retries reached for ${data.files?.[0]?.originalname}. Saving for manual review.`
       );
 
-      // Optional: Clean up temp file
-      if (finalFilePath && fs.existsSync(finalFilePath)) {
-        fs.unlink(finalFilePath, (err) => {
-          if (err) {
-            console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-          } else {
-            console.log(`🧹 Cleaned up failed file: ${finalFilePath}`);
-          }
+      if (finalFilePath) {
+        await fs.unlink(finalFilePath).catch((err) => {
+          console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
+        });
+      }
+      if (originalFilePath && originalFilePath !== finalFilePath) {
+        await fs.unlink(originalFilePath).catch((err) => {
+          console.warn(
+            `⚠️ Failed to delete original file: ${originalFilePath}`,
+            err
+          );
         });
       }
 
-      // Save to failed queue/map
       failedResumes.set(reqId, data);
 
-      // Notify through Kafka
       producer.send({
         topic: replyTopic,
         messages: [
@@ -464,26 +509,31 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
 };
 
 async function remotePdfToPart(path, displayName, mimetype) {
-  if (!fs.existsSync(path)) {
-    return { fileName: displayName, error: "File not found" };
+  try {
+    await fs.access(path); // Check if file exists (promise-based)
+    const uploadResult = await fileManager.uploadFile(path, {
+      mimeType: mimetype,
+      displayName,
+    });
+    return {
+      fileData: {
+        fileUri: uploadResult.file.uri,
+        mimeType: uploadResult.file.mimeType,
+      },
+    };
+  } catch (error) {
+    return {
+      fileName: displayName,
+      error: `File processing failed: ${error.message}`,
+    };
   }
-  const uploadResult = await fileManager.uploadFile(path, {
-    mimeType: mimetype || "application/pdf",
-    displayName,
-  });
-  return {
-    fileData: {
-      fileUri: uploadResult.file.uri,
-      mimeType: uploadResult.file.mimeType,
-    },
-  };
 }
 
 (async () => {
   try {
     await producer.connect();
     console.log("✅ Producer Connected!");
-    startConsumers();
+    await startConsumers();
   } catch (error) {
     console.error("❌ Error initializing Kafka Producer:", error);
   }
