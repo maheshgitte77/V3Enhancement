@@ -224,6 +224,15 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    cheatingFlags: {
+      type: [
+        {
+          type: Map,
+          of: Boolean,
+        },
+      ],
+      default: [],
+    },
     screeningSummary: {
       type: [String],
       default: [],

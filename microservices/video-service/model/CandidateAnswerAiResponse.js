@@ -105,6 +105,28 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       type: [String],
       required: true,
     },
+    // Added missing fields
+    answerTime: {
+      totalDurationSeconds: { type: Number, required: true },
+      effectiveAnswerTimeSeconds: { type: Number, required: true },
+      effectiveAnswerTimePercentage: { type: String, required: true },
+    },
+    answerEffectiveness: {
+      rating: { type: String, required: true },
+      relevanceBreakdown: {
+        relevantTimeSeconds: { type: Number, required: true },
+        irrelevantTimeSeconds: { type: Number, required: true },
+        relevanceExplanation: { type: String, required: true },
+      },
+    },
+    backgroundNoise: {
+      level: { type: String, enum: ["Low", "Medium", "High"], required: true },
+      description: { type: String, required: true },
+    },
+    confidenceLevel: { type: String, required: true },
+    responseCoherence: { type: String, required: true },
+    environmentalSuitability: { type: String, required: true },
+    // Metrics field (already included, kept for completeness)
     metrics: {
       video: {
         isLipSync: { type: Boolean },
@@ -145,6 +167,12 @@ CandidateAnswerAiResponseSchema.pre("validate", function (next) {
   }
   if (type === "audio" && !metrics.audio) {
     return next(new Error("Audio metrics required for audio type"));
+  }
+  if (type === "subjective" && !metrics.subjective) {
+    return next(new Error("Subjective metrics required for subjective type"));
+  }
+  if (type === "mcq" && !metrics.mcq) {
+    return next(new Error("MCQ metrics required for mcq type"));
   }
   next();
 });

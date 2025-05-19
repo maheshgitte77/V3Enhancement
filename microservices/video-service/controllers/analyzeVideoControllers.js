@@ -16,7 +16,7 @@ const producer = kafka.producer({
 producer.connect();
 
 const storage = multer.diskStorage({
-  destination: "uploads/",
+  destination: "Uploads/",
   filename: (req, file, cb) => {
     const ext = file.originalname.split(".").pop();
     cb(null, `${file.fieldname}-${Date.now()}.${ext}`);
@@ -41,6 +41,7 @@ const analyzeVideo = async (req, res) => {
       videoAnswerFileId,
       skillName,
       type,
+      maxTime,
     } = req.body;
 
     try {
@@ -70,6 +71,7 @@ const analyzeVideo = async (req, res) => {
         videoAnswerFileId,
         skill: skillName,
         type,
+        questionDuration: maxTime,
         isScreening: false,
       };
 
