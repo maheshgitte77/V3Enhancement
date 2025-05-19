@@ -16,7 +16,8 @@
         "kafkajs": "^2.2.4",
         "mongoose": "^8.13.2",
         "multer": "^1.4.5-lts.1",
-        "path": "^0.12.7"
+        "path": "^0.12.7",
+        "winston": "^3.17.0"
     },
     "devDependencies": {
         "nodemon": "^3.0.1"
