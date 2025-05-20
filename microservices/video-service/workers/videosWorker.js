@@ -219,12 +219,13 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use advanced speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
       - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (out of 5) and a detailed relevance breakdown.
       - **Background Noise Detection**: Assess background noise levels (Low, Medium, High) specific to the question context. Flag excessive or irrelevant noise (e.g., unrelated conversations, music) as a potential issue in \`environmentalSuitability\`. Provide a detailed description of noise impact.
-      - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`MultipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
+      - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
       - **Cheating Detection**:
         - Detect multiple voices, whispers, or coaching cues. Set appropriate flags and \`isCheatingDetected = true\` if violations occur.
         - List all cheating behaviors in \`cheatingIndicators\` with precise details (e.g., "Multiple voices detected at 1:23").
       - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on candidate experience. Senior candidates require deeper, more accurate answers.
       - **Additional Metrics**:
+        - **Communication Rating**: Rate the candidate's communication clarity and articulation (out of 5) based on speech quality, grammar, and delivery.
         - **Confidence Level**: Rate the candidate's confidence (out of 5) based on tone, pacing, and body language (for video).
         - **Response Coherence**: Rate the logical flow and structure of the answer (out of 5).
         - **Environmental Suitability**: Rate the suitability of the recording environment (out of 5), considering noise, lighting, and distractions.
@@ -266,7 +267,8 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Input**: Video file
       **Response JSON Format:**
       {
-        "communication": "[Clarity and articulation quality]",
+        "communication": "[Clarity and articulation quality description]",
+        "communicationRating": "[X.X out of 5]",
         "isLipSync": true,
         "lipSyncDescription": "[Description, e.g., 'Audio matches lip movements accurately']",
         "isOnlyOnePersonInVideo": true,
@@ -329,7 +331,8 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Input**: Audio file
       **Response JSON Format:**
       {
-        "communication": "[Clarity and articulation quality]",
+        "communication": "[Clarity and articulation quality description]",
+        "communicationRating": "[X.X out of 5]",
         "isOnlyOneVoiceInAudio": [true/false],
         "voiceClarity": "[Clarity of voice]",
         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
@@ -371,7 +374,7 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
     `,
     subjective: `
       ### Subjective Answer Evaluation Rules:
-      - **Communication**: Analyze grammar, clarity, structure, and coherence.
+      - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide a qualitative description and a numerical rating (out of 5).
       - **Cheating Detection**: Set \`isCheatingDetected = true\` if:
         - Text is copied from online sources (e.g., GeeksforGeeks, StackOverflow).
         - Content is AI-generated with minimal edits.
@@ -382,7 +385,8 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Input**: Text answer: "${videoData.textAnswer || ""}"
       **Response JSON Format:**
       {
-        "communication": "[Clarity and articulation quality]",
+        "communication": "[Clarity and articulation quality description]",
+        "communicationRating": "[X.X out of 5]",
         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
         "isCheatingDetected": [true/false],
         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
@@ -717,6 +721,7 @@ const processVideo = async (videoData) => {
           environmentalSuitability:
             transformedAnalysis.environmentalSuitability,
           multipleVoicesDetected: transformedAnalysis.multipleVoicesDetected,
+          communicationRating: transformedAnalysis.communicationRating,
           metrics,
         });
 
@@ -753,7 +758,7 @@ const processVideo = async (videoData) => {
             ]),
           ];
         }
-        
+
         doc.cheatingFlags = finalCheatingFlags;
         await doc.save();
         logger.info(

@@ -42,40 +42,34 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     },
     communication: {
       type: String,
-      required: true,
     },
     isCheatingDetected: {
       type: Boolean,
-      required: true,
     },
     cheatingIndicators: {
       type: [String],
-      required: true,
       default: [],
     },
     isCopiedFromAITool: {
       type: Boolean,
-      required: true,
     },
     isCopiedFromAnyWebsite: {
       type: Boolean,
-      required: true,
     },
     percentOfAnswerMatchWithAiModel: {
       type: String,
-      required: true,
     },
     technicalDepth: {
-      rating: { type: String, required: true },
-      asPerExplanation: { type: String, required: true },
+      rating: { type: String },
+      asPerExplanation: { type: String },
     },
     technicalDepthAsPerExperience: {
-      rating: { type: String, required: true },
-      asPerExperience: { type: String, required: true },
+      rating: { type: String },
+      asPerExperience: { type: String },
     },
     languageDetection: {
-      languages: { type: [String], required: true },
-      percentageWise: { type: [String], required: true },
+      languages: { type: [String] },
+      percentageWise: { type: [String] },
     },
     overallContentQuality: {
       type: String,
@@ -83,49 +77,48 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     },
     detailedSummary: {
       type: String,
-      required: true,
     },
     overallRating: {
       type: String,
-      required: true,
+    },
+    communicationRating: {
+      type: Number,
     },
     correctPercentage: {
       type: String,
       default: "0%",
     },
     answerRating: {
-      rating: { type: String, required: true },
-      reasonForDeduction: { type: [String], required: true },
+      rating: { type: String },
+      reasonForDeduction: { type: [String] },
     },
     answerSummary: {
       type: [String],
-      required: true,
     },
     answerImprovementSuggestions: {
       type: [String],
-      required: true,
     },
     // Added missing fields
     answerTime: {
-      totalDurationSeconds: { type: Number, required: true },
-      effectiveAnswerTimeSeconds: { type: Number, required: true },
-      effectiveAnswerTimePercentage: { type: String, required: true },
+      totalDurationSeconds: { type: Number },
+      effectiveAnswerTimeSeconds: { type: Number },
+      effectiveAnswerTimePercentage: { type: String },
     },
     answerEffectiveness: {
-      rating: { type: String, required: true },
+      rating: { type: String },
       relevanceBreakdown: {
-        relevantTimeSeconds: { type: Number, required: true },
-        irrelevantTimeSeconds: { type: Number, required: true },
-        relevanceExplanation: { type: String, required: true },
+        relevantTimeSeconds: { type: Number },
+        irrelevantTimeSeconds: { type: Number },
+        relevanceExplanation: { type: String },
       },
     },
     backgroundNoise: {
-      level: { type: String, enum: ["Low", "Medium", "High"], required: true },
-      description: { type: String, required: true },
+      level: { type: String, enum: ["Low", "Medium", "High"] },
+      description: { type: String },
     },
-    confidenceLevel: { type: String, required: true },
-    responseCoherence: { type: String, required: true },
-    environmentalSuitability: { type: String, required: true },
+    confidenceLevel: { type: String },
+    responseCoherence: { type: String },
+    environmentalSuitability: { type: String },
     multipleVoicesDetected: { type: Boolean },
     // Metrics field (already included, kept for completeness)
     metrics: {
