@@ -216,15 +216,16 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       } (e.g., Basic, Moderate, Advanced)
 
       ### Analysis Responsibilities:
-      - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
-      - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (out of 5) and a relevance breakdown.
-      - **Background Noise Detection**: Assess background noise levels (Low, Medium, High). Flag excessive noise as a potential issue in \`environmentalSuitability\`.
+      - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use advanced speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
+      - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (out of 5) and a detailed relevance breakdown.
+      - **Background Noise Detection**: Assess background noise levels (Low, Medium, High) specific to the question context. Flag excessive or irrelevant noise (e.g., unrelated conversations, music) as a potential issue in \`environmentalSuitability\`. Provide a detailed description of noise impact.
+      - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`MultipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
       - **Cheating Detection**:
         - Detect multiple voices, whispers, or coaching cues. Set appropriate flags and \`isCheatingDetected = true\` if violations occur.
-        - List all cheating behaviors in \`cheatingIndicators\`.
-      - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on experience. Senior candidates require deeper, more accurate answers.
+        - List all cheating behaviors in \`cheatingIndicators\` with precise details (e.g., "Multiple voices detected at 1:23").
+      - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on candidate experience. Senior candidates require deeper, more accurate answers.
       - **Additional Metrics**:
-        - **Confidence Level**: Rate the candidate's confidence (out of 5) based on tone, pacing, and (for video) body language.
+        - **Confidence Level**: Rate the candidate's confidence (out of 5) based on tone, pacing, and body language (for video).
         - **Response Coherence**: Rate the logical flow and structure of the answer (out of 5).
         - **Environmental Suitability**: Rate the suitability of the recording environment (out of 5), considering noise, lighting, and distractions.
     `,
@@ -232,32 +233,55 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       ### Cheating Detection Rules:
       #### 🔍 Visual Cheating Indicators
       Set **isCheatingDetected = true** if any of the following are observed:
-      - Candidate looks downward continuously for more than 5 seconds.
+      - Candidate looks downward continuously for more than 5 seconds (indicative of reading notes).
       - Candidate looks away from the camera (incorrect eye contact) for more than **2%** of the total video duration.
       - Candidate appears to be **reading** from unauthorized materials (e.g., notes, screen, book).
-      - A mobile phone or tablet is **visible in the frame**, or the candidate interacts with it.
-        - Include "Mobile device visible in the frame" in \`cheatingIndicators\`.
+      - A mobile phone or tablet is **visible in the frame** or the candidate interacts with it within **1 second** of detection:
+        - Set \`mobileDetected = true\`.
+        - Include "Mobile device detected in frame or interacted with" in \`cheatingIndicators\`.
       - More than one person is detected in the video:
         - Set \`isOnlyOnePersonInVideo = false\` and \`isCheatingDetected = true\`.
+        - Include "Multiple persons detected in video" in \`cheatingIndicators\`.
+      - Multiple voices or whispers are detected in the audio:
+        - Set \`multipleVoicesDetected = true\`.
+        - Include "Multiple voices detected" in \`cheatingIndicators\`.
       - External help, cues, or signs of coaching (e.g., candidate responds to off-camera gestures).
       - Unnatural pauses or odd body language suggesting consultation or external material.
-      - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Candidate looked at a mobile device for 3 seconds"). If no cheating, return [].
-      
+      - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Candidate looked at a mobile device for 3 seconds at 1:45"). If no cheating, return [].
+
+      #### 🔍 Eye Movement Tracking
+      - Track eye movement behavior (e.g., frequency, direction, duration of gaze shifts).
+      - Set \`eyeMovement = true\` if unnatural eye movements are detected (e.g., frequent downward glances or looking away for >2% of video duration).
+      - Flag unnatural eye movements in \`cheatingIndicators\` (e.g., "Frequent downward glances for 2-3 seconds").
+      - Provide a detailed description in \`eyeMovementDescription\` (e.g., "Candidate frequently looked downward for 2-3 seconds, suggesting possible note consultation").
+
+      #### 🔍 Content Copying Detection
+      - **isCopiedFromAITool**: Set to \`true\` if the response content matches AI-generated text by **>90%** (using similarity metrics like cosine similarity or plagiarism detection).
+      - **isCopiedFromAnyWebsite**: Set to \`true\` if the response content matches web sources by **>90%** (using precise plagiarism detection tools).
+      - Report the similarity percentage in \`percentOfAnswerMatchWithAiModel\` for AI tool matches.
+
+      #### 🔍 Lip Syncing
+      - Verify if audio matches lip movements. Set \`isLipSync = true\` if synchronized, otherwise \`false\`. Provide a one-line description in \`lipSyncDescription\` (e.g., "Audio matches lip movements accurately").
+
       **Input**: Video file
       **Response JSON Format:**
       {
         "communication": "[Clarity and articulation quality]",
-        "isLipSync": [true/false],
-        "isOnlyOnePersonInVideo": [true/false],
+        "isLipSync": true,
+        "lipSyncDescription": "[Description, e.g., 'Audio matches lip movements accurately']",
+        "isOnlyOnePersonInVideo": true,
         "facialExpressions": "[Description of facial expressions]",
-        "eyeMovement": "[Description of eye movement behavior]",
-        "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
-        "isCheatingDetected": [true/false],
+        "eyeMovement": false,
+        "eyeMovementDescription": "[Detailed description of eye movement behavior, e.g., 'Frequent downward glances for 2-3 seconds']",
+        "mobileDetected": false,
+        "multipleVoicesDetected": false,
+        "cheatingIndicators": ["[Reason 1, e.g., 'Mobile device detected in frame at 1:45']", "[Reason 2, e.g., 'Multiple voices detected at 1:23']"],
+        "isCheatingDetected": false,
         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
         "technicalDepth": { "rating": "[X.X out of 5]", "asPerExplanation": "[Explanation]" },
         "technicalDepthAsPerExperience": { "rating": "[X.X out of 5]", "asPerExperience": "[Explanation relative to experience]" },
-        "isCopiedFromAITool": [true/false],
-        "isCopiedFromAnyWebsite": [true/false],
+        "isCopiedFromAITool": false,
+        "isCopiedFromAnyWebsite": false,
         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
         "overallContentQuality": "[Quality description]",
         "detailedSummary": "[Detailed summary of the response]",
@@ -281,7 +305,7 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
         },
         "backgroundNoise": {
           "level": "[Low/Medium/High]",
-          "description": "[Description of noise impact]"
+          "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
         },
         "confidenceLevel": "[X.X out of 5]",
         "responseCoherence": "[X.X out of 5]",
@@ -338,7 +362,7 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
         },
         "backgroundNoise": {
           "level": "[Low/Medium/High]",
-          "description": "[Description of noise impact]"
+          "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
         },
         "confidenceLevel": "[X.X out of 5]",
         "responseCoherence": "[X.X out of 5]",
@@ -467,6 +491,8 @@ const processVideo = async (videoData) => {
         ]);
         const aiResponse = result.response.text();
 
+        console.log("aiResponse", aiResponse);
+
         const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
           null,
           aiResponse.slice(
@@ -481,77 +507,128 @@ const processVideo = async (videoData) => {
         const parsedAnalysis = JSON.parse(jsonMatch[1].trim());
         const transformedAnalysis = transformAiResponse(parsedAnalysis);
 
+        // Retrieve existing data from the database
+        const doc = await CandidateScreeningResult.findOne({
+          candidateScreeningId: videoData.candidateScreeningId,
+        });
+        if (!doc) {
+          throw new ProcessingError(
+            `Candidate screening result not found for ID: ${videoData.candidateScreeningId}`
+          );
+        }
+
+        const skill = doc.skills.find((s) => s.skill === videoData.skill);
+        if (!skill) {
+          throw new ProcessingError(`Skill not found: ${videoData.skill}`);
+        }
+
+        const questionArray = {
+          video: "video",
+          audio: "audio",
+          subjective: "subjective",
+        }[normalizedType];
+        const question = skill[questionArray]?.find(
+          (q) => q._id.toString() === videoData.questionId.toString()
+        );
+        if (!question) {
+          throw new ProcessingError(
+            `Question not found: ${videoData.questionId}`
+          );
+        }
+
+        // Initialize cheatingFlags as an array of Map objects
         const cheatingFlags = [];
 
-        // For video type, check relevant cheating flags
+        // Helper function to create a Map for a cheating flag
+        const createCheatingFlagMap = (key, value) => {
+          const map = new Map();
+          map.set(key, value);
+          return { type: map };
+        };
+
+        // Populate new cheating flags based on analysis type
         if (normalizedType === "video") {
-          // Add flags only if they indicate cheating
-          if (!transformedAnalysis.isLipSync) {
-            cheatingFlags.push({ isLipSync: false });
+          if (!transformedAnalysis?.isLipSync) {
+            cheatingFlags.push(createCheatingFlagMap("isLipSync", false));
           }
-          if (!transformedAnalysis.isOnlyOnePersonInVideo) {
-            cheatingFlags.push({ isOnlyOnePersonInVideo: false });
+          if (!transformedAnalysis?.isOnlyOnePersonInVideo) {
+            cheatingFlags.push(
+              createCheatingFlagMap("isOnlyOnePersonInVideo", false)
+            );
           }
-
-          // Map cheatingIndicators to cheatingFlags for specific behaviors
-          transformedAnalysis.cheatingIndicators.forEach((indicator) => {
-            if (indicator.includes("Mobile device visible")) {
-              cheatingFlags.push({ mobileDeviceVisible: true });
-            } else if (indicator.includes("Candidate looked away")) {
-              cheatingFlags.push({ incorrectEyeContact: true });
-            } else if (
-              indicator.includes("reading from unauthorized materials")
-            ) {
-              cheatingFlags.push({ readingUnauthorizedMaterials: true });
-            } else if (indicator.includes("external help")) {
-              cheatingFlags.push({ externalHelp: true });
-            }
-            // Add more mappings as needed for other cheating indicators
-          });
+          if (transformedAnalysis?.isCopiedFromAnyWebsite) {
+            cheatingFlags.push(
+              createCheatingFlagMap("copiedFromWebsite", true)
+            );
+          }
+          if (transformedAnalysis?.isCopiedFromAITool) {
+            cheatingFlags.push(createCheatingFlagMap("copiedFromAITool", true));
+          }
+          if (transformedAnalysis?.multipleVoicesDetected) {
+            cheatingFlags.push(createCheatingFlagMap("multipleVoice", true));
+          }
+          if (transformedAnalysis?.mobileDetected) {
+            cheatingFlags.push(createCheatingFlagMap("mobileDetected", true));
+          }
+          if (transformedAnalysis?.eyeMovement) {
+            cheatingFlags.push(createCheatingFlagMap("eyeMovement", true));
+          }
+          if (transformedAnalysis?.backgroundNoise?.level === "High") {
+            cheatingFlags.push(createCheatingFlagMap("backgroundNoise", true));
+          }
         }
 
-        // For audio type, check relevant cheating flags
         if (normalizedType === "audio") {
-          if (!transformedAnalysis.isOnlyOneVoiceInAudio) {
-            cheatingFlags.push({ isOnlyOneVoiceInAudio: false });
+          if (!transformedAnalysis?.isOnlyOneVoiceInAudio) {
+            cheatingFlags.push(
+              createCheatingFlagMap("isOnlyOneVoiceInAudio", false)
+            );
           }
-          // Map cheatingIndicators to cheatingFlags
-          transformedAnalysis.cheatingIndicators.forEach((indicator) => {
-            if (indicator.includes("Second voice detected")) {
-              cheatingFlags.push({ multipleVoicesDetected: true });
-            } else if (indicator.includes("reading out loud")) {
-              cheatingFlags.push({ readingOutLoud: true });
-            } else if (indicator.includes("whispers")) {
-              cheatingFlags.push({ whispersDetected: true });
-            }
-            // Add more mappings as needed
-          });
+          if (transformedAnalysis?.isCopiedFromAnyWebsite) {
+            cheatingFlags.push(
+              createCheatingFlagMap("copiedFromWebsite", true)
+            );
+          }
+          if (transformedAnalysis?.isCopiedFromAITool) {
+            cheatingFlags.push(createCheatingFlagMap("copiedFromAITool", true));
+          }
+          if (transformedAnalysis?.backgroundNoise?.level === "High") {
+            cheatingFlags.push(createCheatingFlagMap("backgroundNoise", true));
+          }
         }
 
-        // For subjective type, map cheatingIndicators
         if (normalizedType === "subjective") {
-          transformedAnalysis.cheatingIndicators.forEach((indicator) => {
-            if (indicator.includes("copied from online sources")) {
-              cheatingFlags.push({ copiedFromWebsite: true });
-            } else if (indicator.includes("AI-generated")) {
-              cheatingFlags.push({ copiedFromAITool: true });
-            }
-            // Add more mappings as needed
+          if (transformedAnalysis?.isCopiedFromAnyWebsite) {
+            cheatingFlags.push(
+              createCheatingFlagMap("copiedFromWebsite", true)
+            );
+          }
+          if (transformedAnalysis?.isCopiedFromAITool) {
+            cheatingFlags.push(createCheatingFlagMap("copiedFromAITool", true));
+          }
+        }
+
+        // Preserve previous cheatingFlags if no new flags are detected
+        const previousCheatingFlags = question.cheatingFlags || [];
+        let finalCheatingFlags = previousCheatingFlags;
+
+        if (cheatingFlags.length > 0) {
+          // Merge new flags with previous ones, avoiding duplicates
+          const existingKeys = new Set(
+            previousCheatingFlags.flatMap((flag) =>
+              Array.from(flag.type.keys())
+            )
+          );
+          const newFlags = cheatingFlags.filter((flag) => {
+            const key = Array.from(flag.type.keys())[0];
+            return !existingKeys.has(key);
           });
+          finalCheatingFlags = [...previousCheatingFlags, ...newFlags];
         }
 
-        // Validate JSON structure
-        if (
-          !transformedAnalysis.communication ||
-          !transformedAnalysis.overallRating
-        ) {
-          throw new ProcessingError("Incomplete AI response structure");
-        }
-
-        // Inside processVideo, after parsing transformedAnalysis
+        // Metrics construction (unchanged)
         const metrics = {};
 
-        // Construct metrics based on type
         if (normalizedType === "video") {
           metrics.video = {
             isLipSync:
@@ -567,8 +644,8 @@ const processVideo = async (videoData) => {
                 ? transformedAnalysis.facialExpressions
                 : "Not evaluated: Missing data",
             eyeMovement:
-              typeof transformedAnalysis.eyeMovement === "string"
-                ? transformedAnalysis.eyeMovement
+              typeof transformedAnalysis.eyeMovementDescription === "string"
+                ? transformedAnalysis.eyeMovementDescription
                 : "Not evaluated: Missing data",
           };
         } else if (normalizedType === "audio") {
@@ -598,13 +675,13 @@ const processVideo = async (videoData) => {
           };
         }
 
-        // Validate metrics structure
         if (!metrics[normalizedType]) {
           throw new ProcessingError(
             `Invalid metrics structure for type: ${normalizedType}`
           );
         }
 
+        // Create CandidateAnswerAiResponse
         const questionAiResponse = await CandidateAnswerAiResponse.create({
           type: normalizedType,
           questionAnalyzed: videoData.QuestionAnalyzed,
@@ -639,6 +716,7 @@ const processVideo = async (videoData) => {
           responseCoherence: transformedAnalysis.responseCoherence,
           environmentalSuitability:
             transformedAnalysis.environmentalSuitability,
+          multipleVoicesDetected: transformedAnalysis.multipleVoicesDetected,
           metrics,
         });
 
@@ -648,39 +726,12 @@ const processVideo = async (videoData) => {
               questionAiResponse.answerSummary?.toString() ||
                 "No summary provided",
             ];
-
-        const doc = await CandidateScreeningResult.findOne({
-          candidateScreeningId: videoData.candidateScreeningId,
-        });
-        if (!doc) {
-          throw new ProcessingError(
-            `Candidate screening result not found for ID: ${videoData.candidateScreeningId}`
-          );
-        }
-
-        const skill = doc.skills.find((s) => s.skill === videoData.skill);
-        if (!skill) {
-          throw new ProcessingError(`Skill not found: ${videoData.skill}`);
-        }
-
-        const questionArray = {
-          video: "video",
-          audio: "audio",
-          subjective: "subjective",
-        }[normalizedType];
-        const question = skill[questionArray]?.find(
-          (q) => q._id.toString() === videoData.questionId.toString()
-        );
-        if (!question) {
-          throw new ProcessingError(
-            `Question not found: ${videoData.questionId}`
-          );
-        }
-
+        console.log(finalCheatingFlags, 72999);
+        // Update question fields
         question.videoAnswerFileId = videoData.videoAnswerFileId;
         question.candidateAnswerAiResponseId = questionAiResponse._id;
         question.answerSummary = answerSummary;
-        question.cheatingFlags = cheatingFlags;
+        // question.cheatingFlags = finalCheatingFlags;
         question.correctPercentage =
           questionAiResponse.correctPercentage || "0%";
         question.isCheatingDetected =
@@ -688,16 +739,22 @@ const processVideo = async (videoData) => {
         question.detectedCheatings =
           questionAiResponse.cheatingIndicators || [];
 
-        if (questionAiResponse.isCheatingDetected) {
+        // Update doc cheating fields
+        if (questionAiResponse.isCheatingDetected && !doc.isCheatingDetected) {
           doc.isCheatingDetected = true;
+        }
+
+        // Always append new cheating indicators to doc.detectedCheatings
+        if (transformedAnalysis.cheatingIndicators?.length > 0) {
           doc.detectedCheatings = [
             ...new Set([
-              ...doc.detectedCheatings,
+              ...(doc.detectedCheatings || []),
               ...transformedAnalysis.cheatingIndicators,
             ]),
           ];
         }
-
+        
+        doc.cheatingFlags = finalCheatingFlags;
         await doc.save();
         logger.info(
           `Successfully processed ${normalizedType} response for question ID: ${videoData.questionId}`
@@ -878,7 +935,7 @@ const processScreening = async (screeningData) => {
     for (let i = 0; i < sortedScreenings.length; i++) {
       const currentScreening = sortedScreenings[i];
       const rank = i + 1;
-      const betterThanPercentageOfCandidates =
+      const betterThanOfCandidates =
         sortedScreenings.length > 1
           ? Math.round(
               ((sortedScreenings.length - rank) /
@@ -892,7 +949,7 @@ const processScreening = async (screeningData) => {
         {
           $set: {
             candidateRank: rank,
-            betterThanPercentageOfCandidates,
+            betterThanOfCandidates,
             updatedAt: new Date(),
           },
         }

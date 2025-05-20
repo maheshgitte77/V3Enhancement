@@ -126,6 +126,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     confidenceLevel: { type: String, required: true },
     responseCoherence: { type: String, required: true },
     environmentalSuitability: { type: String, required: true },
+    multipleVoicesDetected: { type: Boolean },
     // Metrics field (already included, kept for completeness)
     metrics: {
       video: {

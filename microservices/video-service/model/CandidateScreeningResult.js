@@ -272,7 +272,7 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
   }
 );
 
-CandidateScreeningResultSchema.index({ candidateScreeningId: 1 });
+// CandidateScreeningResultSchema.index({ candidateScreeningId: 1 });
 
 module.exports = mongoose.model(
   "CandidateScreeningResult",
