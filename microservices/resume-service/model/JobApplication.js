@@ -176,6 +176,9 @@ const JobApplicationSchema = new mongoose.Schema(
           endDate: {
             type: String,
           },
+          domain: {
+            type: String,
+          },
           technologiesUsed: {
             type: [String],
           },

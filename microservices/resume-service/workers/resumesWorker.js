@@ -179,6 +179,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
   - For images, extract URLs from visible text if present.
 - **Projects**:
   - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities for each project, derived only from the provided \`responsibilities\` string.
+  - Additionally, extract and summarize the domain of the project (e.g., healthcare, fintech, e-commerce) based on the context of the project and the nature of the responsibilities if possible.
 - **Work Experience and Projects Date Handling**:
   - For \`endDate\` in \`workExperience\` and \`projects\`, if the resume specifies "present" or "current", retain it as "current" in the JSON output (e.g., "20-02-2022 - current"). Do not replace with a specific date.
 
@@ -235,6 +236,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
         "teamSize": <Number>,
         "startDate": "<Date>",
         "endDate": "<Date | current>",
+        "domain": "<String>",
         "technologiesUsed": ["<String>", "..."],
         "responsibilities": ["<String>", "..."]
       }
