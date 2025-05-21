@@ -107,6 +107,7 @@ const analyzeSubjective = async (req, res) => {
     skillName,
     type,
     candidateAnswer,
+    maxTime,
   } = req.body;
 
   try {
@@ -133,6 +134,7 @@ const analyzeSubjective = async (req, res) => {
       videoAnswerFileId,
       skill: skillName,
       type,
+      questionDuration: maxTime,
       textAnswer: candidateAnswer,
       isScreening: false,
     };

@@ -95,6 +95,9 @@ const JobApplicationSchema = new mongoose.Schema(
         },
       ],
     },
+    additionalSkills: {
+      type: [String],
+    },
     educationDetails: {
       type: [
         {
@@ -143,38 +146,14 @@ const JobApplicationSchema = new mongoose.Schema(
           companyName: {
             type: String,
           },
-          companyLocation: {
-            type: String,
-          },
           designation: {
             type: String,
-          },
-          workType: {
-            type: String,
-            enum: [
-              "Full Time",
-              "Internship",
-              "Freelance",
-              "Contract",
-              "Part Time",
-              "Volunteer",
-            ],
-          },
-          workStyle: {
-            type: String,
-            enum: ["Remote", "On-site", "hybrid"],
           },
           startDate: {
             type: String,
           },
           endDate: {
             type: String,
-          },
-          description: {
-            type: String,
-          },
-          responsibilities: {
-            type: [String],
           },
         },
       ],
@@ -185,20 +164,8 @@ const JobApplicationSchema = new mongoose.Schema(
           title: {
             type: String,
           },
-          description: {
+          teamSize: {
             type: String,
-          },
-          type: {
-            type: String,
-            // enum: ["individual", "team", "openSource", "hackathon", "other"],
-            required: false,
-            default: undefined,
-          },
-          role: {
-            type: String,
-            // enum: ["lead", "member", "other"],
-            required: false,
-            default: undefined,
           },
           responsibilities: {
             type: [String],

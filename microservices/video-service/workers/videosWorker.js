@@ -211,13 +211,10 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Candidate Experience**: ${videoData.experience}
       **Job Role**: ${videoData.jobRole}
       **Question Duration**: ${videoData.questionDuration} (e.g., 5 minutes)
-      **Question Complexity**: ${
-        videoData.questionComplexity || "Moderate"
-      } (e.g., Basic, Moderate, Advanced)
 
       ### Analysis Responsibilities:
       - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use advanced speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
-      - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (out of 5) and a detailed relevance breakdown.
+      - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (as a string, e.g., "3.2") and a detailed relevance breakdown.
       - **Background Noise Detection**: Assess background noise levels (Low, Medium, High) specific to the question context. Flag excessive or irrelevant noise (e.g., unrelated conversations, music) as a potential issue in \`environmentalSuitability\`. Provide a detailed description of noise impact.
       - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
       - **Cheating Detection**:
@@ -225,10 +222,10 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
         - List all cheating behaviors in \`cheatingIndicators\` with precise details (e.g., "Multiple voices detected at 1:23").
       - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on candidate experience. Senior candidates require deeper, more accurate answers.
       - **Additional Metrics**:
-        - **Communication Rating**: Rate the candidate's communication clarity and articulation (out of 5) based on speech quality, grammar, and delivery.
-        - **Confidence Level**: Rate the candidate's confidence (out of 5) based on tone, pacing, and body language (for video).
-        - **Response Coherence**: Rate the logical flow and structure of the answer (out of 5).
-        - **Environmental Suitability**: Rate the suitability of the recording environment (out of 5), considering noise, lighting, and distractions.
+        - **Communication Rating**: Rate the candidate's communication clarity and articulation (as a string, e.g., "3.2") based on speech quality, grammar, and delivery.
+        - **Confidence Level**: Rate the candidate's confidence (as a string, e.g., "3.2") based on tone, pacing, and body language (for video).
+        - **Response Coherence**: Rate the logical flow and structure of the answer (as a string, e.g., "3.2").
+        - **Environmental Suitability**: Rate the suitability of the recording environment (as a string, e.g., "3.2"), considering noise, lighting, and distractions.
     `,
     video: `
       ### Cheating Detection Rules:
@@ -268,7 +265,7 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Response JSON Format:**
       {
         "communication": "[Clarity and articulation quality description]",
-        "communicationRating": "[X.X out of 5]",
+        "communicationRating": "<String>",
         "isLipSync": true,
         "lipSyncDescription": "[Description, e.g., 'Audio matches lip movements accurately']",
         "isOnlyOnePersonInVideo": true,
@@ -280,16 +277,16 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
         "cheatingIndicators": ["[Reason 1, e.g., 'Mobile device detected in frame at 1:45']", "[Reason 2, e.g., 'Multiple voices detected at 1:23']"],
         "isCheatingDetected": false,
         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-        "technicalDepth": { "rating": "[X.X out of 5]", "asPerExplanation": "[Explanation]" },
-        "technicalDepthAsPerExperience": { "rating": "[X.X out of 5]", "asPerExperience": "[Explanation relative to experience]" },
+        "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
+        "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
         "isCopiedFromAITool": false,
         "isCopiedFromAnyWebsite": false,
         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
         "overallContentQuality": "[Quality description]",
         "detailedSummary": "[Detailed summary of the response]",
-        "overallRating": "[X.X out of 5]",
+        "overallRating": "<String>",
         "correctPercentage": "[Percentage (0-100%)]",
-        "answerRating": { "rating": "[X.X out of 5]", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+        "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
         "answerTime": {
@@ -298,7 +295,7 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
           "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
         },
         "answerEffectiveness": {
-          "rating": "[X.X out of 5]",
+          "rating": "<String>",
           "relevanceBreakdown": {
             "relevantTimeSeconds": [Number],
             "irrelevantTimeSeconds": [Number],
@@ -309,9 +306,9 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
           "level": "[Low/Medium/High]",
           "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
         },
-        "confidenceLevel": "[X.X out of 5]",
-        "responseCoherence": "[X.X out of 5]",
-        "environmentalSuitability": "[X.X out of 5]"
+        "confidenceLevel": "<String>",
+        "responseCoherence": "<String>",
+        "environmentalSuitability": "<String>"
       }
     `,
     audio: `
@@ -332,22 +329,22 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Response JSON Format:**
       {
         "communication": "[Clarity and articulation quality description]",
-        "communicationRating": "[X.X out of 5]",
+        "communicationRating": "<String>",
         "isOnlyOneVoiceInAudio": [true/false],
         "voiceClarity": "[Clarity of voice]",
         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
         "isCheatingDetected": [true/false],
         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-        "technicalDepth": { "rating": "[X.X out of 5]", "asPerExplanation": "[Explanation]" },
-        "technicalDepthAsPerExperience": { "rating": "[X.X out of 5]", "asPerExperience": "[Explanation relative to experience]" },
+        "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
+        "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
         "isCopiedFromAITool": [true/false],
         "isCopiedFromAnyWebsite": [true/false],
         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
         "overallContentQuality": "[Quality description]",
         "detailedSummary": "[Detailed summary of the response]",
-        "overallRating": "[X.X out of 5]",
+        "overallRating": "<String>",
         "correctPercentage": "[Percentage (0-100%)]",
-        "answerRating": { "rating": "[X.X out of 5]", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+        "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
         "answerTime": {
@@ -356,7 +353,7 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
           "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
         },
         "answerEffectiveness": {
-          "rating": "[X.X out of 5]",
+          "rating": "<String>",
           "relevanceBreakdown": {
             "relevantTimeSeconds": [Number],
             "irrelevantTimeSeconds": [Number],
@@ -367,14 +364,14 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
           "level": "[Low/Medium/High]",
           "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
         },
-        "confidenceLevel": "[X.X out of 5]",
-        "responseCoherence": "[X.X out of 5]",
-        "environmentalSuitability": "[X.X out of 5]"
+        "confidenceLevel": "<String>",
+        "responseCoherence": "<String>",
+        "environmentalSuitability": "<String>"
       }
     `,
     subjective: `
       ### Subjective Answer Evaluation Rules:
-      - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide a qualitative description and a numerical rating (out of 5).
+      - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide a qualitative description and a numerical rating (as a string, e.g., "3.2").
       - **Cheating Detection**: Set \`isCheatingDetected = true\` if:
         - Text is copied from online sources (e.g., GeeksforGeeks, StackOverflow).
         - Content is AI-generated with minimal edits.
@@ -386,20 +383,20 @@ const generatePrompt = (videoData, normalizedType, commonInstructions) => {
       **Response JSON Format:**
       {
         "communication": "[Clarity and articulation quality description]",
-        "communicationRating": "[X.X out of 5]",
+        "communicationRating": "<String>",
         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
         "isCheatingDetected": [true/false],
         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-        "technicalDepth": { "rating": "[X.X out of 5]", "asPerExplanation": "[Explanation]" },
-        "technicalDepthAsPerExperience": { "rating": "[X.X out of 5]", "asPerExperience": "[Explanation relative to experience]" },
+        "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
+        "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
         "isCopiedFromAITool": [true/false],
         "isCopiedFromAnyWebsite": [true/false],
         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
         "overallContentQuality": "[Quality description]",
         "detailedSummary": "[Detailed summary of the response]",
-        "overallRating": "[X.X out of 5]",
+        "overallRating": "<String>",
         "correctPercentage": "[Percentage (0-100%)]",
-        "answerRating": { "rating": "[X.X out of 5]", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+        "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"]
       }

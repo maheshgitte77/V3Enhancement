@@ -6,7 +6,6 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       type: String,
       enum: ["video", "audio", "subjective", "mcq"],
       required: true,
-      index: true,
     },
     questionAnalyzed: {
       type: String,
@@ -38,7 +37,6 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       enum: ["Pending", "Analyzed", "Error"],
       required: true,
       default: "Pending",
-      index: true,
     },
     communication: {
       type: String,
@@ -82,7 +80,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       type: String,
     },
     communicationRating: {
-      type: Number,
+      type: String,
     },
     correctPercentage: {
       type: String,
@@ -113,7 +111,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       },
     },
     backgroundNoise: {
-      level: { type: String, enum: ["Low", "Medium", "High"] },
+      level: { type: String },
       description: { type: String },
     },
     confidenceLevel: { type: String },
@@ -147,12 +145,8 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
 );
 
 CandidateAnswerAiResponseSchema.index({
-  candidateScreeningId: 1,
   questionId: 1,
 });
-CandidateAnswerAiResponseSchema.index({ status: 1 });
-CandidateAnswerAiResponseSchema.index({ type: 1 });
-
 CandidateAnswerAiResponseSchema.pre("validate", function (next) {
   const type = this.type;
   const metrics = this.metrics || {};
