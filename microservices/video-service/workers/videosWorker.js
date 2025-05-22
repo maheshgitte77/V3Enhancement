@@ -815,93 +815,143 @@ const processScreening = async (screeningData) => {
       throw new ProcessingError("CandidateScreeningResult not found");
     }
 
-    const aiResponses = await CandidateAnswerAiResponse.find({
-      candidateScreeningId: screeningResult.candidateScreeningId,
-    });
-
-    if (!aiResponses.length) {
-      throw new ProcessingError("No CandidateAnswerAiResponses found");
+    // Extract correctPercentage from all question types in screeningResult.skills
+    let correctPercentages = [];
+    if (screeningResult.skills && screeningResult.skills.length) {
+      screeningResult.skills.forEach((skill) => {
+        // MCQ questions
+        if (skill.mcq && skill.mcq.length) {
+          correctPercentages.push(
+            ...skill.mcq
+              .map((mcq) => parseFloat(mcq.correctPercentage) || 0)
+              .filter((percentage) => percentage >= 0)
+          );
+        }
+        // Audio questions
+        if (skill.audio && skill.audio.length) {
+          correctPercentages.push(
+            ...skill.audio
+              .map((audio) => parseFloat(audio.correctPercentage) || 0)
+              .filter((percentage) => percentage >= 0)
+          );
+        }
+        // Video questions
+        if (skill.video && skill.video.length) {
+          correctPercentages.push(
+            ...skill.video
+              .map((video) => parseFloat(video.correctPercentage) || 0)
+              .filter((percentage) => percentage >= 0)
+          );
+        }
+        // Subjective questions
+        if (skill.subjective && skill.subjective.length) {
+          correctPercentages.push(
+            ...skill.subjective
+              .map(
+                (subjective) => parseFloat(subjective.correctPercentage) || 0
+              )
+              .filter((percentage) => percentage >= 0)
+          );
+        }
+      });
     }
 
-    // Construct prompt with relevant data from aiResponses
-    const prompt = `
-    Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
-    
-    **Evaluation Criteria:**
-    - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
-    - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
-    - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
-    - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill. Example: ["Demonstrated clear understanding of CRM workflows", "Showed strong analytical skills in breaking down complex problems", "Displayed effective problem-solving in technical scenarios"].
-    - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance. Example: ["✅ Fit for Role Type: Fast-paced, troubleshooting-heavy environment", "⚡ Primary Strength: Quick problem-solving", "🛠️ Area to Watch: Needs improvement in technical communication"].
-    
-    **Candidate Screening Data:**
-    ${aiResponses
-      .map(
-        (response, index) => `
-    Question ${index + 1}:
-    - Question: ${response.questionAnalyzed}
-    - Answer Summary: ${response.answerSummary.join(", ")}
-    - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
-      ", "
-    )}
-    - Communication: ${response.communication}
-    - Correct Percentage: ${response.correctPercentage}
-    - Technical Depth: ${response.technicalDepth.rating} (${
-          response.technicalDepth.asPerExplanation
-        })
-    - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
-          response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
-        })
-    - Overall Rating: ${response.overallRating}
-    - Confidence Level: ${response.confidenceLevel}
-    - Response Coherence: ${response.responseCoherence}
-    `
-      )
-      .join("\n")}
-    
-    **Response JSON Format:**
-    {
-      "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
-      "communicationClarity": Number,
-      "analyticalThinking": Number,
-      "problemSolvingAbility": Number,
-      "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
-    }
-    `;
-
-    // Generate AI response
-    const result = await model.generateContent([{ text: prompt }]);
-    const aiResponse = result.response.text();
-    const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
-      null,
-      aiResponse.slice(
-        aiResponse.indexOf("{"),
-        aiResponse.lastIndexOf("}") + 1
-      ),
-    ];
-    if (!jsonMatch[1]) {
-      throw new ProcessingError("Invalid JSON format in screening AI response");
-    }
-    const parsedResponse = JSON.parse(jsonMatch[1].trim());
-
-    // Validate JSON structure
-    if (
-      !parsedResponse.screeningSummary ||
-      !parsedResponse.communicationClarity
-    ) {
-      throw new ProcessingError("Incomplete screening AI response structure");
-    }
-
-    // Calculate candidateFitScore (average of correctPercentage)
-    const correctPercentages = aiResponses
-      .map((response) => parseFloat(response.correctPercentage) || 0)
-      .filter((percentage) => percentage > 0);
+    // Calculate candidateFitScore
     const candidateFitScore = correctPercentages.length
       ? Math.round(
           correctPercentages.reduce((sum, val) => sum + val, 0) /
             correctPercentages.length
         )
       : 0;
+
+    // Fetch aiResponses for non-MCQ evaluation
+    const aiResponses = await CandidateAnswerAiResponse.find({
+      candidateScreeningId: screeningResult.candidateScreeningId,
+    });
+
+    // Default AI response values
+    let parsedResponse = {
+      screeningSummary: ["No non-MCQ responses available"],
+      communicationClarity: 0,
+      analyticalThinking: 0,
+      problemSolvingAbility: 0,
+      fitScorePointers: [
+        "No fit analysis available due to MCQ-only assessment",
+      ],
+    };
+
+    // Generate AI response if aiResponses exist
+    if (aiResponses.length) {
+      const prompt = `
+      Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
+      
+      **Evaluation Criteria:**
+      - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
+      - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
+      - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
+      - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill.
+      - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance.
+      
+      **Candidate Screening Data:**
+      ${aiResponses
+        .map(
+          (response, index) => `
+      Question ${index + 1}:
+      - Question: ${response.questionAnalyzed}
+      - Answer Summary: ${response.answerSummary.join(", ")}
+      - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
+        ", "
+      )}
+      - Communication: ${response.communication}
+      - Correct Percentage: ${response.correctPercentage}
+      - Technical Depth: ${response.technicalDepth.rating} (${
+            response.technicalDepth.asPerExplanation
+          })
+      - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
+            response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
+          })
+      - Overall Rating: ${response.overallRating}
+      - Confidence Level: ${response.confidenceLevel}
+      - Response Coherence: ${response.responseCoherence}
+      `
+        )
+        .join("\n")}
+      
+      **Response JSON Format:**
+      {
+        "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
+        "communicationClarity": Number,
+        "analyticalThinking": Number,
+        "problemSolvingAbility": Number,
+        "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
+      }
+      `;
+
+      // Generate AI response
+      const result = await model.generateContent([{ text: prompt }]);
+      const aiResponse = result.response.text();
+      const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
+        null,
+        aiResponse.slice(
+          aiResponse.indexOf("{"),
+          aiResponse.lastIndexOf("}") + 1
+        ),
+      ];
+      if (!jsonMatch[1]) {
+        throw new ProcessingError(
+          "Invalid JSON format in screening AI response"
+        );
+      }
+      parsedResponse = JSON.parse(jsonMatch[1].trim());
+
+      // Validate JSON structure
+      if (
+        !parsedResponse.screeningSummary ||
+        !parsedResponse.communicationClarity
+      ) {
+        throw new ProcessingError("Incomplete screening AI response structure");
+      }
+    }
 
     // Update CandidateScreeningResult
     await CandidateScreeningResult.updateOne(
@@ -919,12 +969,12 @@ const processScreening = async (screeningData) => {
       }
     );
 
+    // Calculate candidateRank and betterThanOfCandidates
     const allCandidateScreening = await CandidateScreening.find({
       screeningAssessmentId: screeningAssessmentId,
       status: "Appeared",
     });
 
-    // Calculate candidateRank and betterThanPercentageOfCandidates
     const allScreenings = await CandidateScreeningResult.find({
       candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
     });
@@ -933,6 +983,7 @@ const processScreening = async (screeningData) => {
     const sortedScreenings = allScreenings.sort(
       (a, b) => b.candidateFitScore - a.candidateFitScore
     );
+
     // Update ranks and percentages
     for (let i = 0; i < sortedScreenings.length; i++) {
       const currentScreening = sortedScreenings[i];
@@ -968,6 +1019,170 @@ const processScreening = async (screeningData) => {
     throw error;
   }
 };
+
+// const processScreening = async (screeningData) => {
+//   const { candidateScreeningId, screeningAssessmentId } = screeningData;
+//   try {
+//     const screeningResult = await CandidateScreeningResult.findOne({
+//       candidateScreeningId,
+//     });
+//     if (!screeningResult) {
+//       throw new ProcessingError("CandidateScreeningResult not found");
+//     }
+
+//     const aiResponses = await CandidateAnswerAiResponse.find({
+//       candidateScreeningId: screeningResult.candidateScreeningId,
+//     });
+
+//     if (!aiResponses.length) {
+//       throw new ProcessingError("No CandidateAnswerAiResponses found");
+//     }
+
+//     // Construct prompt with relevant data from aiResponses
+//     const prompt = `
+//     Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
+
+//     **Evaluation Criteria:**
+//     - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
+//     - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
+//     - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
+//     - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill. Example: ["Demonstrated clear understanding of CRM workflows", "Showed strong analytical skills in breaking down complex problems", "Displayed effective problem-solving in technical scenarios"].
+//     - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance. Example: ["✅ Fit for Role Type: Fast-paced, troubleshooting-heavy environment", "⚡ Primary Strength: Quick problem-solving", "🛠️ Area to Watch: Needs improvement in technical communication"].
+
+//     **Candidate Screening Data:**
+//     ${aiResponses
+//       .map(
+//         (response, index) => `
+//     Question ${index + 1}:
+//     - Question: ${response.questionAnalyzed}
+//     - Answer Summary: ${response.answerSummary.join(", ")}
+//     - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
+//       ", "
+//     )}
+//     - Communication: ${response.communication}
+//     - Correct Percentage: ${response.correctPercentage}
+//     - Technical Depth: ${response.technicalDepth.rating} (${
+//           response.technicalDepth.asPerExplanation
+//         })
+//     - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
+//           response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
+//         })
+//     - Overall Rating: ${response.overallRating}
+//     - Confidence Level: ${response.confidenceLevel}
+//     - Response Coherence: ${response.responseCoherence}
+//     `
+//       )
+//       .join("\n")}
+
+//     **Response JSON Format:**
+//     {
+//       "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
+//       "communicationClarity": Number,
+//       "analyticalThinking": Number,
+//       "problemSolvingAbility": Number,
+//       "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
+//     }
+//     `;
+
+//     // Generate AI response
+//     const result = await model.generateContent([{ text: prompt }]);
+//     const aiResponse = result.response.text();
+//     const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
+//       null,
+//       aiResponse.slice(
+//         aiResponse.indexOf("{"),
+//         aiResponse.lastIndexOf("}") + 1
+//       ),
+//     ];
+//     if (!jsonMatch[1]) {
+//       throw new ProcessingError("Invalid JSON format in screening AI response");
+//     }
+//     const parsedResponse = JSON.parse(jsonMatch[1].trim());
+
+//     // Validate JSON structure
+//     if (
+//       !parsedResponse.screeningSummary ||
+//       !parsedResponse.communicationClarity
+//     ) {
+//       throw new ProcessingError("Incomplete screening AI response structure");
+//     }
+
+//     // Calculate candidateFitScore (average of correctPercentage)
+//     const correctPercentages = aiResponses
+//       .map((response) => parseFloat(response.correctPercentage) || 0)
+//       .filter((percentage) => percentage > 0);
+//     const candidateFitScore = correctPercentages.length
+//       ? Math.round(
+//           correctPercentages.reduce((sum, val) => sum + val, 0) /
+//             correctPercentages.length
+//         )
+//       : 0;
+
+//     // Update CandidateScreeningResult
+//     await CandidateScreeningResult.updateOne(
+//       { candidateScreeningId },
+//       {
+//         $set: {
+//           screeningSummary: parsedResponse.screeningSummary,
+//           communicationClarity: parsedResponse.communicationClarity,
+//           analyticalThinking: parsedResponse.analyticalThinking,
+//           problemSolvingAbility: parsedResponse.problemSolvingAbility,
+//           fitScorePointers: parsedResponse.fitScorePointers,
+//           candidateFitScore,
+//           updatedAt: new Date(),
+//         },
+//       }
+//     );
+
+//     const allCandidateScreening = await CandidateScreening.find({
+//       screeningAssessmentId: screeningAssessmentId,
+//       status: "Appeared",
+//     });
+
+//     // Calculate candidateRank and betterThanPercentageOfCandidates
+//     const allScreenings = await CandidateScreeningResult.find({
+//       candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
+//     });
+
+//     // Sort by candidateFitScore (descending)
+//     const sortedScreenings = allScreenings.sort(
+//       (a, b) => b.candidateFitScore - a.candidateFitScore
+//     );
+//     // Update ranks and percentages
+//     for (let i = 0; i < sortedScreenings.length; i++) {
+//       const currentScreening = sortedScreenings[i];
+//       const rank = i + 1;
+//       const betterThanOfCandidates =
+//         sortedScreenings.length > 1
+//           ? Math.round(
+//               ((sortedScreenings.length - rank) /
+//                 (sortedScreenings.length - 1)) *
+//                 100
+//             )
+//           : 100;
+
+//       await CandidateScreeningResult.updateOne(
+//         { candidateScreeningId: currentScreening.candidateScreeningId },
+//         {
+//           $set: {
+//             candidateRank: rank,
+//             betterThanOfCandidates,
+//             updatedAt: new Date(),
+//           },
+//         }
+//       );
+//     }
+
+//     logger.info(
+//       `Successfully processed screening for candidateScreeningId: ${candidateScreeningId}`
+//     );
+//   } catch (error) {
+//     logger.error(
+//       `Error processing screening for candidateScreeningId: ${candidateScreeningId}: ${error.message}`
+//     );
+//     throw error;
+//   }
+// };
 
 const runConsumer = async (consumerId) => {
   const consumer = kafka.consumer({

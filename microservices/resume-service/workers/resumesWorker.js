@@ -153,6 +153,52 @@ Parse the resume to extract candidate details, skills, experience, and social li
 - **Good To Have Skills**: ${secondarySkills}
 - **Job Description**: ${jobDescription}
 
+### Analysis Details:
+1. **Skills**:
+   - **skills**: Include only skills from the resume's skills section (or visible text in images) that match ${primarySkills} or ${secondarySkills}, including synonyms (e.g., "JavaScript" matches "JS"), with inferred proficiency.
+   - **additionalSkills**: Include all other technical skills explicitly listed in the resume's skills section (or visible text in images) that do not match ${primarySkills} or ${secondarySkills} as a list of strings.
+   - **requiredMatchedSkills**: Skills from ${primarySkills} explicitly listed in the resume, including synonyms.
+   - **requiredUnmatchedSkills**: Skills from ${primarySkills} not found in the resume.
+   - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed in the resume, including synonyms.
+   - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found in the resume.
+
+2. **Match Percentages (0-100)**:
+   - **overallMatch**: Score reflecting alignment with job description (skills, experience, education, soft skills).
+   - **educationMatch**: Score based on degree, specialization, and coursework relevance to job requirements.
+   - **experienceMatch**: Score based on work experience relevance (roles, duration) and project relevance (technologies, responsibilities).
+
+3. **Contextual Analysis**:
+   - **contextualMatch**: Score (0-100) assessing experience and project alignment with job requirements beyond keyword matching.
+   - **matchContexts**: Brief explanation of contextual match score, highlighting relevant projects or experiences.
+
+4. **matchExplanation**: Summary of candidate’s strengths and gaps relative to the job description.
+
+5. **resumeSummary**: Two-line overview of candidate’s profile.
+
+### Special Instructions:
+- Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
+- For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
+- Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
+- For experience handling:
+  - Prioritize explicit mentions in "Profile Summary," "Professional Summary," "Objective," "Summary," or "A B O U T" sections.
+  - If absent, calculate from workExperience durations (startDate to endDate or "current" for ongoing roles). For "current" endDate, use the startDate to the date of parsing for calculation purposes only, but retain "current" in the JSON output.
+  - If workExperience is insufficient or absent, include project durations (startDate to endDate or "current" for ongoing projects). For "current" endDate, use the startDate to the date of parsing for calculation purposes only, but retain "current" in the JSON output.
+  - Avoid double-counting overlapping periods; use non-overlapping durations for accuracy.
+- For projects:
+  - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities, derived only from the provided \`responsibilities\` string.
+- For socials and portfolio:
+  - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio").
+  - Parse digital resumes (PDF, Word, HTML) or images to detect hyperlinks or visible URLs.
+  - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
+- Mobile:
+  - If a country code is explicitly written (e.g., '+91', '+1'), include it as the countryCode.
+  - If no country code is found, default to '+91'. Ensure the number is the phone number without the country code. For example, if the resume contains 'Mobile: +919876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
+  - If the resume contains 'Mobile: 9876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
+- For images (jpg, jpeg, png, tiff):
+  - Extract text using OCR capabilities of the Gemini API.
+  - Parse structured data (e.g., name, email, skills) from visible text.
+  - Handle cases where images contain resume content (e.g., scanned documents).
+
 ### Rules:
 - Extract only explicitly stated information unless specified otherwise. Do not infer or assume missing details except for experience calculation.
 - Omit fields not present in the resume. Do not use null, "not found", or undefined.
@@ -182,6 +228,8 @@ Parse the resume to extract candidate details, skills, experience, and social li
   - Additionally, extract and summarize the domain of the project (e.g., healthcare, fintech, e-commerce) based on the context of the project and the nature of the responsibilities if possible.
 - **Work Experience and Projects Date Handling**:
   - For \`endDate\` in \`workExperience\` and \`projects\`, if the resume specifies "present" or "current", retain it as "current" in the JSON output (e.g., "20-02-2022 - current"). Do not replace with a specific date.
+
+- Ensure valid JSON output with no trailing commas or invalid syntax.
 
 ### JSON Structure:
 {
@@ -273,53 +321,6 @@ Parse the resume to extract candidate details, skills, experience, and social li
     "resumeSummary": "<Two-line candidate summary>"
   }
 }
-
-### Analysis Details:
-1. **Skills**:
-   - **skills**: Include only skills from the resume's skills section (or visible text in images) that match ${primarySkills} or ${secondarySkills}, including synonyms (e.g., "JavaScript" matches "JS"), with inferred proficiency.
-   - **additionalSkills**: Include all other technical skills explicitly listed in the resume's skills section (or visible text in images) that do not match ${primarySkills} or ${secondarySkills} as a list of strings.
-   - **requiredMatchedSkills**: Skills from ${primarySkills} explicitly listed in the resume, including synonyms.
-   - **requiredUnmatchedSkills**: Skills from ${primarySkills} not found in the resume.
-   - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed in the resume, including synonyms.
-   - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found in the resume.
-
-2. **Match Percentages (0-100)**:
-   - **overallMatch**: Score reflecting alignment with job description (skills, experience, education, soft skills).
-   - **educationMatch**: Score based on degree, specialization, and coursework relevance to job requirements.
-   - **experienceMatch**: Score based on work experience relevance (roles, duration) and project relevance (technologies, responsibilities).
-
-3. **Contextual Analysis**:
-   - **contextualMatch**: Score (0-100) assessing experience and project alignment with job requirements beyond keyword matching.
-   - **matchContexts**: Brief explanation of contextual match score, highlighting relevant projects or experiences.
-
-4. **matchExplanation**: Summary of candidate’s strengths and gaps relative to the job description.
-
-5. **resumeSummary**: Two-line overview of candidate’s profile.
-
-### Special Instructions:
-- Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
-- For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
-- Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
-- For experience handling:
-  - Prioritize explicit mentions in "Profile Summary," "Professional Summary," "Objective," "Summary," or "A B O U T" sections.
-  - If absent, calculate from workExperience durations (startDate to endDate or "current" for ongoing roles). For "current" endDate, use the startDate to the date of parsing for calculation purposes only, but retain "current" in the JSON output.
-  - If workExperience is insufficient or absent, include project durations (startDate to endDate or "current" for ongoing projects). For "current" endDate, use the startDate to the date of parsing for calculation purposes only, but retain "current" in the JSON output.
-  - Avoid double-counting overlapping periods; use non-overlapping durations for accuracy.
-- For projects:
-  - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities, derived only from the provided \`responsibilities\` string.
-- For socials and portfolio:
-  - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio").
-  - Parse digital resumes (PDF, Word, HTML) or images to detect hyperlinks or visible URLs.
-  - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
-- Mobile:
-  - If a country code is explicitly written (e.g., '+91', '+1'), include it as the countryCode.
-  - If no country code is found, default to '+91'. Ensure the number is the phone number without the country code. For example, if the resume contains 'Mobile: +919876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
-  - If the resume contains 'Mobile: 9876543210', output { mobile: { countryCode: '+91', number: '9876543210' } }.
-- For images (jpg, jpeg, png, tiff):
-  - Extract text using OCR capabilities of the Gemini API.
-  - Parse structured data (e.g., name, email, skills) from visible text.
-  - Handle cases where images contain resume content (e.g., scanned documents).
-- Ensure valid JSON output with no trailing commas or invalid syntax.
 
 Return the output in the specified JSON format.
 `;

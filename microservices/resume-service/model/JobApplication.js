@@ -90,13 +90,12 @@ const JobApplicationSchema = new mongoose.Schema(
           },
           proficiency: {
             type: String,
-            // enum: ["Beginner", "Intermediate", "Advanced"],
           },
         },
       ],
     },
     additionalSkills: {
-      type: [String],
+      type: [],
     },
     educationDetails: {
       type: [
