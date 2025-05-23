@@ -805,6 +805,221 @@ const processVideo = async (videoData) => {
   }
 };
 
+// const processScreening = async (screeningData) => {
+//   const { candidateScreeningId, screeningAssessmentId } = screeningData;
+//   try {
+//     const screeningResult = await CandidateScreeningResult.findOne({
+//       candidateScreeningId,
+//     });
+//     if (!screeningResult) {
+//       throw new ProcessingError("CandidateScreeningResult not found");
+//     }
+
+//     // Extract correctPercentage from all question types in screeningResult.skills
+//     let correctPercentages = [];
+//     if (screeningResult.skills && screeningResult.skills.length) {
+//       screeningResult.skills.forEach((skill) => {
+//         // MCQ questions
+//         if (skill.mcq && skill.mcq.length) {
+//           correctPercentages.push(
+//             ...skill.mcq
+//               .map((mcq) => parseFloat(mcq.correctPercentage) || 0)
+//               .filter((percentage) => percentage >= 0)
+//           );
+//         }
+//         // Audio questions
+//         if (skill.audio && skill.audio.length) {
+//           correctPercentages.push(
+//             ...skill.audio
+//               .map((audio) => parseFloat(audio.correctPercentage) || 0)
+//               .filter((percentage) => percentage >= 0)
+//           );
+//         }
+//         // Video questions
+//         if (skill.video && skill.video.length) {
+//           correctPercentages.push(
+//             ...skill.video
+//               .map((video) => parseFloat(video.correctPercentage) || 0)
+//               .filter((percentage) => percentage >= 0)
+//           );
+//         }
+//         // Subjective questions
+//         if (skill.subjective && skill.subjective.length) {
+//           correctPercentages.push(
+//             ...skill.subjective
+//               .map(
+//                 (subjective) => parseFloat(subjective.correctPercentage) || 0
+//               )
+//               .filter((percentage) => percentage >= 0)
+//           );
+//         }
+//       });
+//     }
+
+//     // Calculate candidateFitScore
+//     const candidateFitScore = correctPercentages.length
+//       ? Math.round(
+//           correctPercentages.reduce((sum, val) => sum + val, 0) /
+//             correctPercentages.length
+//         )
+//       : 0;
+
+//     // Fetch aiResponses for non-MCQ evaluation
+//     const aiResponses = await CandidateAnswerAiResponse.find({
+//       candidateScreeningId: screeningResult.candidateScreeningId,
+//     });
+
+//     // Default AI response values
+//     let parsedResponse = {
+//       screeningSummary: ["No non-MCQ responses available"],
+//       communicationClarity: 0,
+//       analyticalThinking: 0,
+//       problemSolvingAbility: 0,
+//       fitScorePointers: [
+//         "No fit analysis available due to MCQ-only assessment",
+//       ],
+//     };
+
+//     // Generate AI response if aiResponses exist
+//     if (aiResponses.length) {
+//       const prompt = `
+//       Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
+
+//       **Evaluation Criteria:**
+//       - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
+//       - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
+//       - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
+//       - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill.
+//       - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance.
+
+//       **Candidate Screening Data:**
+//       ${aiResponses
+//         .map(
+//           (response, index) => `
+//       Question ${index + 1}:
+//       - Question: ${response.questionAnalyzed}
+//       - Answer Summary: ${response.answerSummary.join(", ")}
+//       - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
+//         ", "
+//       )}
+//       - Communication: ${response.communication}
+//       - Correct Percentage: ${response.correctPercentage}
+//       - Technical Depth: ${response.technicalDepth.rating} (${
+//             response.technicalDepth.asPerExplanation
+//           })
+//       - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
+//             response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
+//           })
+//       - Overall Rating: ${response.overallRating}
+//       - Confidence Level: ${response.confidenceLevel}
+//       - Response Coherence: ${response.responseCoherence}
+//       `
+//         )
+//         .join("\n")}
+
+//       **Response JSON Format:**
+//       {
+//         "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
+//         "communicationClarity": Number,
+//         "analyticalThinking": Number,
+//         "problemSolvingAbility": Number,
+//         "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
+//       }
+//       `;
+
+//       // Generate AI response
+//       const result = await model.generateContent([{ text: prompt }]);
+//       const aiResponse = result.response.text();
+//       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
+//         null,
+//         aiResponse.slice(
+//           aiResponse.indexOf("{"),
+//           aiResponse.lastIndexOf("}") + 1
+//         ),
+//       ];
+//       if (!jsonMatch[1]) {
+//         throw new ProcessingError(
+//           "Invalid JSON format in screening AI response"
+//         );
+//       }
+//       parsedResponse = JSON.parse(jsonMatch[1].trim());
+
+//       // Validate JSON structure
+//       if (
+//         !parsedResponse.screeningSummary ||
+//         !parsedResponse.communicationClarity
+//       ) {
+//         throw new ProcessingError("Incomplete screening AI response structure");
+//       }
+//     }
+
+//     // Update CandidateScreeningResult
+//     await CandidateScreeningResult.updateOne(
+//       { candidateScreeningId },
+//       {
+//         $set: {
+//           screeningSummary: parsedResponse.screeningSummary,
+//           communicationClarity: parsedResponse.communicationClarity,
+//           analyticalThinking: parsedResponse.analyticalThinking,
+//           problemSolvingAbility: parsedResponse.problemSolvingAbility,
+//           fitScorePointers: parsedResponse.fitScorePointers,
+//           candidateFitScore,
+//           updatedAt: new Date(),
+//         },
+//       }
+//     );
+
+//     // Calculate candidateRank and betterThanOfCandidates
+//     const allCandidateScreening = await CandidateScreening.find({
+//       screeningAssessmentId: screeningAssessmentId,
+//       status: "Appeared",
+//     });
+
+//     const allScreenings = await CandidateScreeningResult.find({
+//       candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
+//     });
+
+//     // Sort by candidateFitScore (descending)
+//     const sortedScreenings = allScreenings.sort(
+//       (a, b) => b.candidateFitScore - a.candidateFitScore
+//     );
+
+//     // Update ranks and percentages
+//     for (let i = 0; i < sortedScreenings.length; i++) {
+//       const currentScreening = sortedScreenings[i];
+//       const rank = i + 1;
+//       const betterThanOfCandidates =
+//         sortedScreenings.length > 1
+//           ? Math.round(
+//               ((sortedScreenings.length - rank) /
+//                 (sortedScreenings.length - 1)) *
+//                 100
+//             )
+//           : 100;
+
+//       await CandidateScreeningResult.updateOne(
+//         { candidateScreeningId: currentScreening.candidateScreeningId },
+//         {
+//           $set: {
+//             candidateRank: rank,
+//             betterThanOfCandidates,
+//             updatedAt: new Date(),
+//           },
+//         }
+//       );
+//     }
+
+//     logger.info(
+//       `Successfully processed screening for candidateScreeningId: ${candidateScreeningId}`
+//     );
+//   } catch (error) {
+//     logger.error(
+//       `Error processing screening for candidateScreeningId: ${candidateScreeningId}: ${error.message}`
+//     );
+//     throw error;
+//   }
+// };
+
 const processScreening = async (screeningData) => {
   const { candidateScreeningId, screeningAssessmentId } = screeningData;
   try {
@@ -819,7 +1034,6 @@ const processScreening = async (screeningData) => {
     let correctPercentages = [];
     if (screeningResult.skills && screeningResult.skills.length) {
       screeningResult.skills.forEach((skill) => {
-        // MCQ questions
         if (skill.mcq && skill.mcq.length) {
           correctPercentages.push(
             ...skill.mcq
@@ -827,7 +1041,6 @@ const processScreening = async (screeningData) => {
               .filter((percentage) => percentage >= 0)
           );
         }
-        // Audio questions
         if (skill.audio && skill.audio.length) {
           correctPercentages.push(
             ...skill.audio
@@ -835,7 +1048,6 @@ const processScreening = async (screeningData) => {
               .filter((percentage) => percentage >= 0)
           );
         }
-        // Video questions
         if (skill.video && skill.video.length) {
           correctPercentages.push(
             ...skill.video
@@ -843,7 +1055,6 @@ const processScreening = async (screeningData) => {
               .filter((percentage) => percentage >= 0)
           );
         }
-        // Subjective questions
         if (skill.subjective && skill.subjective.length) {
           correctPercentages.push(
             ...skill.subjective
@@ -869,65 +1080,155 @@ const processScreening = async (screeningData) => {
       candidateScreeningId: screeningResult.candidateScreeningId,
     });
 
-    // Default AI response values
-    let parsedResponse = {
-      screeningSummary: ["No non-MCQ responses available"],
-      communicationClarity: 0,
-      analyticalThinking: 0,
-      problemSolvingAbility: 0,
-      fitScorePointers: [
-        "No fit analysis available due to MCQ-only assessment",
-      ],
-    };
+    // Construct prompt including skill and maxTime, using questionId to avoid repetition
+    let prompt = `
+    Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
+    
+    **Evaluation Criteria:**
+    - **communicationClarity**: Percentage out of 100 based on the Communication field for non-MCQ questions (set to 0 if only MCQ questions are present), assessing clarity, coherence, and effectiveness of expression.
+    - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, Answer Effectiveness, and MCQ performance (considering Correct Percentage, Time Spent, Max Time, and associated Skill), evaluating the candidate's ability to break down and analyze problems efficiently, with emphasis on skill-specific strengths and weaknesses.
+    - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, Answer Effectiveness, and MCQ performance (considering Correct Percentage, Time Spent, Max Time, and associated Skill), assessing the candidate's effectiveness and efficiency in deriving solutions, with emphasis on skill-specific performance.
+    - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill, including MCQ performance, efficiency (Time Spent vs. Max Time), and associated Skill (e.g., strengths or weaknesses in specific topics like React components).
+    - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements, screening performance, efficiency (Time Spent vs. Max Time for MCQs), and associated Skill, identifying specific skills to improve and related topics (e.g., "Needs improvement in React component understanding").
+    
+    **Candidate Screening Data:**
+    `;
 
-    // Generate AI response if aiResponses exist
+    // Add MCQ data from screeningResult.skills with skill and maxTime
+    let questionIndex = 1;
+    if (screeningResult.skills && screeningResult.skills.length) {
+      screeningResult.skills.forEach((skill) => {
+        if (skill.mcq && skill.mcq.length) {
+          prompt += skill.mcq
+            .map(
+              (mcq) => `
+    Question ${questionIndex++}:
+    - Type: MCQ
+    - Skill: ${skill.skill}
+    - Question: ${mcq.question}
+    - Options: ${JSON.stringify(mcq.options)}
+    - Candidate Answer: ${mcq.candidateAnswer.join(", ")}
+    - Correct Percentage: ${mcq.correctPercentage}
+    - Time Spent: ${mcq.timeSpent} seconds
+    - Max Time: ${mcq.maxTime} minutes
+    `
+            )
+            .join("\n");
+        }
+      });
+    }
+
+    // Add non-MCQ data from aiResponses, fetching skill from screeningResult using questionId
     if (aiResponses.length) {
-      const prompt = `
-      Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
-      
-      **Evaluation Criteria:**
-      - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
-      - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
-      - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
-      - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill.
-      - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance.
-      
-      **Candidate Screening Data:**
-      ${aiResponses
-        .map(
-          (response, index) => `
-      Question ${index + 1}:
-      - Question: ${response.questionAnalyzed}
-      - Answer Summary: ${response.answerSummary.join(", ")}
-      - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
-        ", "
-      )}
-      - Communication: ${response.communication}
-      - Correct Percentage: ${response.correctPercentage}
-      - Technical Depth: ${response.technicalDepth.rating} (${
-            response.technicalDepth.asPerExplanation
-          })
-      - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
-            response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
-          })
-      - Overall Rating: ${response.overallRating}
-      - Confidence Level: ${response.confidenceLevel}
-      - Response Coherence: ${response.responseCoherence}
-      `
-        )
-        .join("\n")}
-      
-      **Response JSON Format:**
-      {
-        "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
-        "communicationClarity": Number,
-        "analyticalThinking": Number,
-        "problemSolvingAbility": Number,
-        "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
-      }
-      `;
+      for (const response of aiResponses) {
+        let questionDetails = null;
+        let skillName = "Unknown";
+        let questionType = "Non-MCQ";
+        let extraFields = "";
 
-      // Generate AI response
+        // Find the question in screeningResult.skills using questionId
+        for (const skill of screeningResult.skills || []) {
+          if (skill.audio && skill.audio.length) {
+            const audio = skill.audio.find(
+              (q) => q._id.toString() === response.questionId?.toString()
+            );
+            if (audio) {
+              questionDetails = audio;
+              skillName = skill.skill;
+              questionType = "Audio";
+              extraFields = `
+    - Time Spent: ${audio.timeSpent} seconds
+    - Max Time: ${audio.maxTime} seconds`;
+              break;
+            }
+          }
+          if (skill.video && skill.video.length) {
+            const video = skill.video.find(
+              (q) => q._id.toString() === response.questionId?.toString()
+            );
+            if (video) {
+              questionDetails = video;
+              skillName = skill.skill;
+              questionType = "Video";
+              extraFields = `
+    - Time Spent: ${video.timeSpent} seconds
+    - Max Time: ${video.maxTime} seconds`;
+              break;
+            }
+          }
+          if (skill.subjective && skill.subjective.length) {
+            const subjective = skill.subjective.find(
+              (q) => q._id.toString() === response.questionId?.toString()
+            );
+            if (subjective) {
+              questionDetails = subjective;
+              skillName = skill.skill;
+              questionType = "Subjective";
+              extraFields = `
+    - Time Spent: ${subjective.timeSpent} seconds
+    - Max Time: ${subjective.maxTime} minutes`;
+              break;
+            }
+          }
+        }
+
+        // Use questionAnalyzed from aiResponse if questionDetails not found
+        const questionText = questionDetails
+          ? questionDetails.question
+          : response.questionAnalyzed;
+
+        prompt += `
+    Question ${questionIndex++}:
+    - Type: ${questionType}
+    - Skill: ${skillName}
+    - Question: ${questionText}
+    - Answer Summary: ${response.answerSummary.join(", ")}
+    - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
+      ", "
+    )}
+    - Communication: ${response.communication}
+    - Correct Percentage: ${response.correctPercentage}
+    - Technical Depth: ${response.technicalDepth.rating} (${
+          response.technicalDepth.asPerExplanation
+        })
+    - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
+          response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
+        })
+    - Overall Rating: ${response.overallRating}
+    - Confidence Level: ${response.confidenceLevel}
+    - Response Coherence: ${response.responseCoherence}${extraFields}
+    `;
+      }
+    }
+
+    prompt += `
+    **Response JSON Format:**
+    {
+      "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
+      "communicationClarity": Number,
+      "analyticalThinking": Number,
+      "problemSolvingAbility": Number,
+      "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
+    }
+    `;
+
+    // Generate AI response
+    let parsedResponse;
+    if (
+      !aiResponses.length &&
+      (!screeningResult.skills || !correctPercentages.length)
+    ) {
+      // No data available (neither MCQ nor non-MCQ)
+      parsedResponse = {
+        screeningSummary: ["No responses available for analysis"],
+        communicationClarity: 0,
+        analyticalThinking: 0,
+        problemSolvingAbility: 0,
+        fitScorePointers: [
+          "No fit analysis available due to lack of responses",
+        ],
+      };
+    } else {
       const result = await model.generateContent([{ text: prompt }]);
       const aiResponse = result.response.text();
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
@@ -944,10 +1245,15 @@ const processScreening = async (screeningData) => {
       }
       parsedResponse = JSON.parse(jsonMatch[1].trim());
 
+      // Override communicationClarity to 0 if no non-MCQ responses
+      if (!aiResponses.length) {
+        parsedResponse.communicationClarity = 0;
+      }
+
       // Validate JSON structure
       if (
         !parsedResponse.screeningSummary ||
-        !parsedResponse.communicationClarity
+        parsedResponse.communicationClarity === undefined
       ) {
         throw new ProcessingError("Incomplete screening AI response structure");
       }
