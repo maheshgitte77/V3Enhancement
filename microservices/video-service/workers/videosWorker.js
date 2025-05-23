@@ -40,7 +40,9 @@ const kafka = new Kafka({
 
 // Initialize Google Gemini API (replace with xAI API for migration)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const model = genAI.getGenerativeModel({
+  model: "gemini-2.5-pro-preview-03-25",
+});
 const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 
 // Custom error classes
@@ -200,203 +202,448 @@ const transformAiResponse = (parsedAnalysis) => {
   return transformed;
 };
 
-const generatePrompt = (videoData, normalizedType, commonInstructions) => {
+// const generatePrompt = (videoData, normalizedType, commonInstructions) => {
+//   const basePrompt = {
+//     common: `
+//             You are a professional analyzer. Return the response in strict JSON format.
+//       Analyze the candidate's response considering their experience (${videoData.experience}) and job role (${videoData.jobRole}).
+
+//       **Responsibilities:**
+//       - Specify if metrics cannot be evaluated (e.g., "Not evaluated: [reason]").
+//       - Evaluate relative to experience and job role.
+//       - Boolean fields (is*) must be true/false.
+//       - Ratings format: "[number].[number] out of 5".
+//       - For answerRating < 5, detail deductions in reasonForDeduction as an array of strings.
+//       - Limit answerSummary and answerImprovementSuggestions to 2–3 concise bullets.
+//       - Cross-reference experience with technical depth.
+//       - Use job role context for relevance.
+//       - Language detection percentages must sum to 100%.
+
+//       **overallRating**: Rate the answer on a scale from 1.0 to 5.0 (allow decimals, e.g., 4.1, 3.8) based on accuracy, relevance, and completeness.
+//       **correctPercentage**: Estimate how correct the answer is as a percentage (0 to 100%).
+//       ### Analysis Type: ${
+//         normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
+//       } response
+//       **Question for Analyzed**: ${videoData.QuestionAnalyzed}
+//       **Candidate Experience**: ${videoData.experience}
+//       **Job Role**: ${videoData.jobRole}
+//       **Question Duration**: ${videoData.questionDuration} (e.g., 5 minutes)
+
+//       ### Analysis Responsibilities:
+//       - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use advanced speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
+//       - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (as a string, e.g., "3.2") and a detailed relevance breakdown.
+//       - **Background Noise Detection**: Assess background noise levels (Low, Medium, High) specific to the question context. Flag excessive or irrelevant noise (e.g., unrelated conversations, music) as a potential issue in \`environmentalSuitability\`. Provide a detailed description of noise impact.
+//       - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
+//       - **Cheating Detection**:
+//         - Detect multiple voices, whispers, or coaching cues. Set appropriate flags and \`isCheatingDetected = true\` if violations occur.
+//         - List all cheating behaviors in \`cheatingIndicators\` with precise details (e.g., "Multiple voices detected at 1:23").
+//       - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on candidate experience. Senior candidates require deeper, more accurate answers.
+//       - **Additional Metrics**:
+//         - **Communication Rating**: Rate the candidate's communication clarity and articulation (as a string, e.g., "3.2") based on speech quality, grammar, and delivery.
+//         - **Confidence Level**: Rate the candidate's confidence (as a string, e.g., "3.2") based on tone, pacing, and body language (for video).
+//         - **Response Coherence**: Rate the logical flow and structure of the answer (as a string, e.g., "3.2").
+//         - **Environmental Suitability**: Rate the suitability of the recording environment (as a string, e.g., "3.2"), considering noise, lighting, and distractions.
+//     `,
+//     video: `
+//       ### Cheating Detection Rules:
+//       #### 🔍 Visual Cheating Indicators
+//       Set **isCheatingDetected = true** if any of the following are observed:
+//       - Candidate looks downward continuously for more than 5 seconds (indicative of reading notes).
+//       - Candidate looks away from the camera (incorrect eye contact) for more than **2%** of the total video duration.
+//       - Candidate appears to be **reading** from unauthorized materials (e.g., notes, screen, book).
+//       - A mobile phone or tablet is **visible in the frame** or the candidate interacts with it within **1 second** of detection:
+//         - Set \`mobileDetected = true\`.
+//         - Include "Mobile device detected in frame or interacted with" in \`cheatingIndicators\`.
+//       - More than one person is detected in the video:
+//         - Set \`isOnlyOnePersonInVideo = false\` and \`isCheatingDetected = true\`.
+//         - Include "Multiple persons detected in video" in \`cheatingIndicators\`.
+//       - Multiple voices or whispers are detected in the audio:
+//         - Set \`multipleVoicesDetected = true\`.
+//         - Include "Multiple voices detected" in \`cheatingIndicators\`.
+//       - External help, cues, or signs of coaching (e.g., candidate responds to off-camera gestures).
+//       - Unnatural pauses or odd body language suggesting consultation or external material.
+//       - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Candidate looked at a mobile device for 3 seconds at 1:45"). If no cheating, return [].
+
+//       #### 🔍 Eye Movement Tracking
+//       - Track eye movement behavior (e.g., frequency, direction, duration of gaze shifts).
+//       - Set \`eyeMovement = true\` if unnatural eye movements are detected (e.g., frequent downward glances or looking away for >2% of video duration).
+//       - Flag unnatural eye movements in \`cheatingIndicators\` (e.g., "Frequent downward glances for 2-3 seconds").
+//       - Provide a detailed description in \`eyeMovementDescription\` (e.g., "Candidate frequently looked downward for 2-3 seconds, suggesting possible note consultation").
+
+//       #### 🔍 Content Copying Detection
+//       - **isCopiedFromAITool**: Set to \`true\` if the response content matches AI-generated text by **>90%** (using similarity metrics like cosine similarity or plagiarism detection).
+//       - **isCopiedFromAnyWebsite**: Set to \`true\` if the response content matches web sources by **>90%** (using precise plagiarism detection tools).
+//       - Report the similarity percentage in \`percentOfAnswerMatchWithAiModel\` for AI tool matches.
+
+//       #### 🔍 Lip Syncing
+//       - Verify if audio matches lip movements. Set \`isLipSync = true\` if synchronized, otherwise \`false\`. Provide a one-line description in \`lipSyncDescription\` (e.g., "Audio matches lip movements accurately").
+
+//       **Input**: Video file
+//       **Response JSON Format:**
+//       {
+//         "communication": "[Clarity and articulation quality description]",
+//         "communicationRating": "<String>",
+//         "isLipSync": true,
+//         "lipSyncDescription": "[Description, e.g., 'Audio matches lip movements accurately']",
+//         "isOnlyOnePersonInVideo": true,
+//         "facialExpressions": "[Description of facial expressions]",
+//         "eyeMovement": false,
+//         "eyeMovementDescription": "[Detailed description of eye movement behavior, e.g., 'Frequent downward glances for 2-3 seconds']",
+//         "mobileDetected": false,
+//         "multipleVoicesDetected": false,
+//         "cheatingIndicators": ["[Reason 1, e.g., 'Mobile device detected in frame at 1:45']", "[Reason 2, e.g., 'Multiple voices detected at 1:23']"],
+//         "isCheatingDetected": false,
+//         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
+//         "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
+//         "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
+//         "isCopiedFromAITool": false,
+//         "isCopiedFromAnyWebsite": false,
+//         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
+//         "overallContentQuality": "[Quality description]",
+//         "detailedSummary": "[Detailed summary of the response]",
+//         "overallRating": "<String>",
+//         "correctPercentage": "[Percentage (0-100%)]",
+//         "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+//         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
+//         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
+//         "answerTime": {
+//           "totalDurationSeconds": [Number],
+//           "effectiveAnswerTimeSeconds": [Number],
+//           "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
+//         },
+//         "answerEffectiveness": {
+//           "rating": "<String>",
+//           "relevanceBreakdown": {
+//             "relevantTimeSeconds": [Number],
+//             "irrelevantTimeSeconds": [Number],
+//             "relevanceExplanation": "[Explanation of relevance]"
+//           }
+//         },
+//         "backgroundNoise": {
+//           "level": "[Low/Medium/High]",
+//           "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
+//         },
+//         "confidenceLevel": "<String>",
+//         "responseCoherence": "<String>",
+//         "environmentalSuitability": "<String>"
+//       }
+//     `,
+//     audio: `
+//       ### Cheating Detection Rules:
+//       #### 🔊 Audio Cheating Indicators
+//       Set **isCheatingDetected = true** if any of the following are observed:
+//       - More than one distinct voice is detected:
+//         - Set \`isOnlyOneVoiceInAudio = false\`.
+//       - Background voices reading, giving hints, or responding to questions.
+//       - Candidate is reading out loud from material, indicated by:
+//         - Monotone pacing
+//         - Reading tone
+//         - Vocalized punctuation (e.g., “comma”, “period”)
+//       - Whispers, low-volume coaching, or verbal cues not from the candidate.
+//       - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Second voice detected at 1:30"). If no cheating, return [].
+
+//       **Input**: Audio file
+//       **Response JSON Format:**
+//       {
+//         "communication": "[Clarity and articulation quality description]",
+//         "communicationRating": "<String>",
+//         "isOnlyOneVoiceInAudio": [true/false],
+//         "voiceClarity": "[Clarity of voice]",
+//         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
+//         "isCheatingDetected": [true/false],
+//         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
+//         "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
+//         "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
+//         "isCopiedFromAITool": [true/false],
+//         "isCopiedFromAnyWebsite": [true/false],
+//         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
+//         "overallContentQuality": "[Quality description]",
+//         "detailedSummary": "[Detailed summary of the response]",
+//         "overallRating": "<String>",
+//         "correctPercentage": "[Percentage (0-100%)]",
+//         "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+//         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
+//         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
+//         "answerTime": {
+//           "totalDurationSeconds": [Number],
+//           "effectiveAnswerTimeSeconds": [Number],
+//           "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
+//         },
+//         "answerEffectiveness": {
+//           "rating": "<String>",
+//           "relevanceBreakdown": {
+//             "relevantTimeSeconds": [Number],
+//             "irrelevantTimeSeconds": [Number],
+//             "relevanceExplanation": "[Explanation of relevance]"
+//           }
+//         },
+//         "backgroundNoise": {
+//           "level": "[Low/Medium/High]",
+//           "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
+//         },
+//         "confidenceLevel": "<String>",
+//         "responseCoherence": "<String>",
+//         "environmentalSuitability": "<String>"
+//       }
+//     `,
+//     subjective: `
+//       ### Subjective Answer Evaluation Rules:
+//       - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide a qualitative description and a numerical rating (as a string, e.g., "3.2").
+//       - **Cheating Detection**: Set \`isCheatingDetected = true\` if:
+//         - Text is copied from online sources (e.g., GeeksforGeeks, StackOverflow).
+//         - Content is AI-generated with minimal edits.
+//         - Copy-paste formatting or inconsistent languages detected.
+//         - Overuse of generic phrases or high similarity (>80%) with reference answers.
+//       - cheatingIndicators must list specific reasons (e.g., "High similarity with web content").
+
+//       **Input**: Text answer: "${videoData.textAnswer || ""}"
+//       **Response JSON Format:**
+//       {
+//         "communication": "[Clarity and articulation quality description]",
+//         "communicationRating": "<String>",
+//         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
+//         "isCheatingDetected": [true/false],
+//         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
+//         "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
+//         "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
+//         "isCopiedFromAITool": [true/false],
+//         "isCopiedFromAnyWebsite": [true/false],
+//         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
+//         "overallContentQuality": "[Quality description]",
+//         "detailedSummary": "[Detailed summary of the response]",
+//         "overallRating": "<String>",
+//         "correctPercentage": "[Percentage (0-100%)]",
+//         "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+//         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
+//         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"]
+//       }
+//     `,
+//   };
+
+//   return `${basePrompt.common}${basePrompt[normalizedType]}`;
+// };
+
+const generatePrompt = (videoData, normalizedType) => {
   const basePrompt = {
     common: `
-      ${commonInstructions}
+      You are a professional analyzer tasked with evaluating candidate responses with maximum precision, strict adherence to provided data, and no hallucinations (incorrect or misleading results). Return the response in strict JSON format, deriving all metrics solely from the input (video, audio, or text). Do not fabricate, assume, or generate content beyond what is explicitly detected.
+
+      **Strict Mode Responsibilities:**
+      - **No Hallucinations**: Ensure all outputs are grounded in the input data. If a metric cannot be evaluated (e.g., no speech, irrelevant response, or insufficient data), set it to "Not evaluated: [specific reason]" and assign numerical values of 0 (e.g., \`correctPercentage = 0\`, \`overallRating = "0.0"\`). Avoid any misleading or incorrect results.
+      - **Relevance-Based Evaluation**: 
+        - \`correctPercentage\` (0–100%) and \`overallRating\` (0.0–5.0, as string) must strictly reflect the response’s relevance and accuracy to the question (${
+          videoData.QuestionAnalyzed
+        }). If the response is irrelevant (e.g., discussing unrelated topics or not addressing the question), set \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and all other ratings (e.g., \`communicationRating\`, \`answerRating.rating\`) to "0.0". Provide a clear explanation in \`answerEffectiveness.relevanceBreakdown.relevanceExplanation\`.
+        - Example: If the question is about Java Polymorphism and the candidate discusses Python or unrelated topics, set \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and explain "Response is irrelevant to the question".
+      - **Multiple Voice Detection**: 
+        - Strictly detect multiple voices, whispers, or coaching cues in video/audio. If detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and list details with timestamps in \`cheatingIndicators\` (e.g., "Second voice detected at 01:30").
+        - Analyze all audio tracks for distinct voices, even if subtle (e.g., background whispers).
+      - **Boolean Fields**: All \`is*\` fields (e.g., \`isCheatingDetected\`, \`isLipSync\`) must be \`true\` or \`false\` based on explicit evidence.
+      - **Ratings and Percentages**: 
+        - Ratings (e.g., \`overallRating\`, \`communicationRating\`) range from "0.0" to "5.0" (as strings, one decimal place, e.g., "3.2").
+        - Percentages (e.g., \`correctPercentage\`, \`effectiveAnswerTimePercentage\`) range from "0%" to "100%".
+        - Set to "0.0" or "0%" if response is irrelevant, cheating is detected, or no substantive response is provided.
+      - **Cheating Detection**: 
+        - List all cheating behaviors in \`cheatingIndicators\` with precise timestamps (e.g., "Candidate looked downward for 6 seconds at 01:05"). If no cheating, return \`[]\`.
+        - If cheating is detected, set \`isCheatingDetected = true\`, \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and all other ratings to "0.0".
+      - **Transcription**: Use exact transcription of the candidate’s response in the detected language(s). Do not paraphrase, summarize, or add content. If no relevant speech, note "No relevant speech detected".
+      - **Language Detection**: Percentages in \`languageDetection.percentageWise\` must sum to 100% and be based solely on detected languages.
+      - **Experience and Job Role**: Evaluate \`technicalDepthAsPerExperience\` relative to candidate experience (${
+        videoData.experience
+      }) and job role (${
+      videoData.jobRole
+    }). If irrelevant or cheating detected, set to "0.0".
+
+      **Key Metrics**:
+      - **correctPercentage**: 0–100%, set to 0 if response is irrelevant, cheating is detected, or no substantive response is provided.
+      - **overallRating**: "0.0"–"5.0", set to "0.0" for irrelevant responses, cheating, or no response.
+      - **cheatingIndicators**: Array of strings with timestamps (e.g., "Second voice detected at 01:30"). Empty (\`[]\`) if no cheating.
+
       ### Analysis Type: ${
         normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
       } response
-      **Question for Analyzed**: ${videoData.QuestionAnalyzed}
+      **Question for Analysis**: ${videoData.QuestionAnalyzed}
       **Candidate Experience**: ${videoData.experience}
       **Job Role**: ${videoData.jobRole}
       **Question Duration**: ${videoData.questionDuration} (e.g., 5 minutes)
 
       ### Analysis Responsibilities:
-      - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use advanced speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
-      - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (as a string, e.g., "3.2") and a detailed relevance breakdown.
-      - **Background Noise Detection**: Assess background noise levels (Low, Medium, High) specific to the question context. Flag excessive or irrelevant noise (e.g., unrelated conversations, music) as a potential issue in \`environmentalSuitability\`. Provide a detailed description of noise impact.
-      - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
-      - **Cheating Detection**:
-        - Detect multiple voices, whispers, or coaching cues. Set appropriate flags and \`isCheatingDetected = true\` if violations occur.
-        - List all cheating behaviors in \`cheatingIndicators\` with precise details (e.g., "Multiple voices detected at 1:23").
-      - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on candidate experience. Senior candidates require deeper, more accurate answers.
+      - **Comprehensive Analysis**: Analyze every detail of the input (e.g., eye movement, lip syncing, voices, noise, text content) to ensure no aspect is overlooked.
+      - **Exact Answer Time**: Calculate time spent answering the question (excluding silence, pauses, or irrelevant content) using advanced speech detection. Report in \`answerTime.effectiveAnswerTimeSeconds\` (seconds) and \`answerTime.effectiveAnswerTimePercentage\` (0–100%). If no relevant content, set both to 0 and "0%".
+      - **Answer Effectiveness**: Quantify relevant vs. irrelevant content in \`answerEffectiveness.relevanceBreakdown\`. If entirely irrelevant, set \`relevantTimeSeconds = 0\`, \`irrelevantTimeSeconds = [total speaking time]\`, and \`answerEffectiveness.rating = "0.0"\`.
+      - **Background Noise Detection**: Assess noise levels (Low, Medium, High) and describe impact in \`backgroundNoise.description\`. Flag irrelevant noise (e.g., conversations, music) in \`environmentalSuitability\`.
+      - **Multiple Voice Detection**: Analyze all audio for multiple voices, whispers, or coaching cues. If detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and include details with timestamps in \`cheatingIndicators\`.
+      - **Experience-Based Evaluation**: Adjust metrics based on experience. If irrelevant or cheating detected, set all ratings to "0.0".
       - **Additional Metrics**:
-        - **Communication Rating**: Rate the candidate's communication clarity and articulation (as a string, e.g., "3.2") based on speech quality, grammar, and delivery.
-        - **Confidence Level**: Rate the candidate's confidence (as a string, e.g., "3.2") based on tone, pacing, and body language (for video).
-        - **Response Coherence**: Rate the logical flow and structure of the answer (as a string, e.g., "3.2").
-        - **Environmental Suitability**: Rate the suitability of the recording environment (as a string, e.g., "3.2"), considering noise, lighting, and distractions.
+        - **Communication Rating**: Rate clarity and articulation (0.0–5.0) based on speech quality, grammar, and delivery. Set to "0.0" if irrelevant or cheating detected.
+        - **Confidence Level**: Rate confidence (0.0–5.0) based on tone, pacing, and body language (video). Set to "0.0" if irrelevant or cheating detected.
+        - **Response Coherence**: Rate logical flow (0.0–5.0). Set to "0.0" if irrelevant or cheating detected.
+        - **Environmental Suitability**: Rate recording environment (0.0–5.0). Set to "0.0" if unsuitable due to noise or distractions.
     `,
     video: `
-      ### Cheating Detection Rules:
+      ### Strict Cheating Detection Rules:
+      #### 🔍 Comprehensive Video Analysis
+      - Analyze every frame for visual and audio details (e.g., eye movement, lip syncing, multiple voices, background noise, objects in frame).
+      - Set **isCheatingDetected = true**, **correctPercentage = 0**, **overallRating = "0.0"**, and all other ratings to "0.0" if any cheating is detected.
+
       #### 🔍 Visual Cheating Indicators
-      Set **isCheatingDetected = true** if any of the following are observed:
-      - Candidate looks downward continuously for more than 5 seconds (indicative of reading notes).
-      - Candidate looks away from the camera (incorrect eye contact) for more than **2%** of the total video duration.
-      - Candidate appears to be **reading** from unauthorized materials (e.g., notes, screen, book).
-      - A mobile phone or tablet is **visible in the frame** or the candidate interacts with it within **1 second** of detection:
-        - Set \`mobileDetected = true\`.
-        - Include "Mobile device detected in frame or interacted with" in \`cheatingIndicators\`.
-      - More than one person is detected in the video:
-        - Set \`isOnlyOnePersonInVideo = false\` and \`isCheatingDetected = true\`.
-        - Include "Multiple persons detected in video" in \`cheatingIndicators\`.
-      - Multiple voices or whispers are detected in the audio:
-        - Set \`multipleVoicesDetected = true\`.
-        - Include "Multiple voices detected" in \`cheatingIndicators\`.
-      - External help, cues, or signs of coaching (e.g., candidate responds to off-camera gestures).
-      - Unnatural pauses or odd body language suggesting consultation or external material.
-      - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Candidate looked at a mobile device for 3 seconds at 1:45"). If no cheating, return [].
+      - **Looking Downward**: If candidate looks downward for >5 seconds (e.g., reading notes), include in \`cheatingIndicators\` (e.g., "Looked downward for 6 seconds at 01:05").
+      - **Looking Away**: If candidate looks away from camera (left, right, or elsewhere) for >2% of video duration, include in \`cheatingIndicators\` (e.g., "Looked away for 10 seconds at 02:15").
+      - **Reading Materials**: If candidate appears to read from unauthorized materials, include in \`cheatingIndicators\` (e.g., "Reading from notes at 01:45").
+      - **Mobile Device**: If a mobile phone or tablet is visible or interacted with within 1 second, set \`mobileDetected = true\` and include in \`cheatingIndicators\` (e.g., "Mobile device detected at 01:50").
+      - **Multiple Persons**: If more than one person is detected, set \`isOnlyOnePersonInVideo = false\` and include in \`cheatingIndicators\` (e.g., "Second person detected at 01:20").
+      - **Multiple Voices**: If multiple voices or whispers are detected, set \`multipleVoicesDetected = true\` and include in \`cheatingIndicators\` (e.g., "Second voice detected at 01:30").
+      - **Coaching Cues**: If external help or cues are detected, include in \`cheatingIndicators\` (e.g., "Coaching cues at 02:00").
+      - **Unnatural Behavior**: If unnatural pauses or body language suggest consultation, include in \`cheatingIndicators\` (e.g., "Unnatural pause at 01:10").
 
       #### 🔍 Eye Movement Tracking
-      - Track eye movement behavior (e.g., frequency, direction, duration of gaze shifts).
-      - Set \`eyeMovement = true\` if unnatural eye movements are detected (e.g., frequent downward glances or looking away for >2% of video duration).
-      - Flag unnatural eye movements in \`cheatingIndicators\` (e.g., "Frequent downward glances for 2-3 seconds").
-      - Provide a detailed description in \`eyeMovementDescription\` (e.g., "Candidate frequently looked downward for 2-3 seconds, suggesting possible note consultation").
+      - Track eye movement (frequency, direction, duration). Set \`eyeMovement = true\` if unnatural (e.g., frequent downward glances or looking away for >2% of duration). Include in \`cheatingIndicators\` (e.g., "Frequent downward glances for 3 seconds at 01:05") and describe in \`eyeMovementDescription\`.
+
+      #### 🔍 Multiple Voice Detection
+      - Analyze all audio tracks for distinct voices, whispers, or coaching cues. If detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and include details with timestamps in \`cheatingIndicators\` (e.g., "Second voice detected at 01:30").
 
       #### 🔍 Content Copying Detection
-      - **isCopiedFromAITool**: Set to \`true\` if the response content matches AI-generated text by **>90%** (using similarity metrics like cosine similarity or plagiarism detection).
-      - **isCopiedFromAnyWebsite**: Set to \`true\` if the response content matches web sources by **>90%** (using precise plagiarism detection tools).
-      - Report the similarity percentage in \`percentOfAnswerMatchWithAiModel\` for AI tool matches.
+      - Set \`isCopiedFromAITool = true\` if response matches AI-generated text by >90%. Report in \`percentOfAnswerMatchWithAiModel\`.
+      - Set \`isCopiedFromAnyWebsite = true\` if response matches web content by >90%. Include in \`cheatingIndicators\` (e.g., "90% similarity with web content").
+      - If cheating detected, set \`correctPercentage = 0\` and \`overallRating = "0.0"\`.
 
       #### 🔍 Lip Syncing
-      - Verify if audio matches lip movements. Set \`isLipSync = true\` if synchronized, otherwise \`false\`. Provide a one-line description in \`lipSyncDescription\` (e.g., "Audio matches lip movements accurately").
+      - Verify audio-lip synchronization. Set \`isLipSync = true\` if synchronized, otherwise \`false\`. Provide one-line \`lipSyncDescription\` (e.g., "Audio does not match lip movements at 01:25").
 
       **Input**: Video file
       **Response JSON Format:**
       {
-        "communication": "[Clarity and articulation quality description]",
-        "communicationRating": "<String>",
-        "isLipSync": true,
-        "lipSyncDescription": "[Description, e.g., 'Audio matches lip movements accurately']",
-        "isOnlyOnePersonInVideo": true,
-        "facialExpressions": "[Description of facial expressions]",
-        "eyeMovement": false,
-        "eyeMovementDescription": "[Detailed description of eye movement behavior, e.g., 'Frequent downward glances for 2-3 seconds']",
-        "mobileDetected": false,
-        "multipleVoicesDetected": false,
-        "cheatingIndicators": ["[Reason 1, e.g., 'Mobile device detected in frame at 1:45']", "[Reason 2, e.g., 'Multiple voices detected at 1:23']"],
-        "isCheatingDetected": false,
-        "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-        "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
-        "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
-        "isCopiedFromAITool": false,
-        "isCopiedFromAnyWebsite": false,
-        "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
-        "overallContentQuality": "[Quality description]",
-        "detailedSummary": "[Detailed summary of the response]",
-        "overallRating": "<String>",
-        "correctPercentage": "[Percentage (0-100%)]",
-        "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+        "communication": "[Exact description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "communicationRating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
+        "isLipSync": [true/false],
+        "lipSyncDescription": "[e.g., 'Audio matches lip movements' or 'Audio does not match at 01:25']",
+        "isOnlyOnePersonInVideo": [true/false],
+        "facialExpressions": "[Description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "eyeMovement": [true/false],
+        "eyeMovementDescription": "[e.g., 'Frequent downward glances for 3 seconds at 01:05' or 'No unnatural eye movement']",
+        "mobileDetected": [true/false],
+        "multipleVoicesDetected": [true/false],
+        "cheatingIndicators": ["[e.g., 'Second voice detected at 01:30']", "[e.g., 'Looked downward for 6 seconds at 01:05']"],
+        "isCheatingDetected": [true/false],
+        "percentOfAnswerMatchWithAiModel": "[0–100%, e.g., '83%']",
+        "technicalDepth": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "asPerExplanation": "[Explanation or 'Not evaluated: Irrelevant response']" },
+        "technicalDepthAsPerExperience": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "asPerExperience": "[Explanation or 'Not evaluated: Irrelevant response']" },
+        "isCopiedFromAITool": [true/false],
+        "isCopiedFromAnyWebsite": [true/false],
+        "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[0–100%]"] },
+        "overallContentQuality": "[Description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "detailedSummary": "[Exact summary or 'No relevant content provided'/'Cheating detected']",
+        "overallRating": "<String, 0.0–5.0, e.g., '4.1' or '0.0'>",
+        "correctPercentage": "[0–100%, e.g., '85%' or '0%']",
+        "answerRating": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "reasonForDeduction": ["[e.g., 'Response is irrelevant to the question']"] },
         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
         "answerTime": {
           "totalDurationSeconds": [Number],
           "effectiveAnswerTimeSeconds": [Number],
-          "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
+          "effectiveAnswerTimePercentage": "[0–100%, e.g., '40%' or '0%']"
         },
         "answerEffectiveness": {
-          "rating": "<String>",
+          "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
           "relevanceBreakdown": {
             "relevantTimeSeconds": [Number],
             "irrelevantTimeSeconds": [Number],
-            "relevanceExplanation": "[Explanation of relevance]"
+            "relevanceExplanation": "[e.g., 'Response discussed unrelated topics']"
           }
         },
         "backgroundNoise": {
           "level": "[Low/Medium/High]",
-          "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
+          "description": "[e.g., 'High noise from conversations at 01:10']"
         },
-        "confidenceLevel": "<String>",
-        "responseCoherence": "<String>",
-        "environmentalSuitability": "<String>"
+        "confidenceLevel": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
+        "responseCoherence": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
+        "environmentalSuitability": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>"
       }
     `,
     audio: `
-      ### Cheating Detection Rules:
+      ### Strict Cheating Detection Rules:
+      #### 🔊 Comprehensive Audio Analysis
+      - Analyze all audio tracks for multiple voices, whispers, coaching cues, reading tones, and background noise.
+      - Set **isCheatingDetected = true**, **correctPercentage = 0**, **overallRating = "0.0"**, and all other ratings to "0.0" if any cheating is detected.
+
       #### 🔊 Audio Cheating Indicators
-      Set **isCheatingDetected = true** if any of the following are observed:
-      - More than one distinct voice is detected:
-        - Set \`isOnlyOneVoiceInAudio = false\`.
-      - Background voices reading, giving hints, or responding to questions.
-      - Candidate is reading out loud from material, indicated by:
-        - Monotone pacing
-        - Reading tone
-        - Vocalized punctuation (e.g., “comma”, “period”)
-      - Whispers, low-volume coaching, or verbal cues not from the candidate.
-      - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Second voice detected at 1:30"). If no cheating, return [].
-      
+      - **Multiple Voices**: If more than one distinct voice is detected, set \`isOnlyOneVoiceInAudio = false\`, \`multipleVoicesDetected = true\`, and include in \`cheatingIndicators\` (e.g., "Second voice detected at 01:30").
+      - **Background Voices**: If background voices give hints or respond, include in \`cheatingIndicators\` (e.g., "Background voice giving hints at 01:45").
+      - **Reading Tone**: If candidate uses monotone pacing, reading tone, or vocalizes punctuation, include in \`cheatingIndicators\` (e.g., "Monotone reading tone at 01:20").
+      - **Whispers/Coaching**: If whispers or coaching cues are detected, include in \`cheatingIndicators\` (e.g., "Whisper detected at 01:15").
+
       **Input**: Audio file
       **Response JSON Format:**
       {
-        "communication": "[Clarity and articulation quality description]",
-        "communicationRating": "<String>",
+        "communication": "[Exact description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "communicationRating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
         "isOnlyOneVoiceInAudio": [true/false],
-        "voiceClarity": "[Clarity of voice]",
-        "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
+        "voiceClarity": "[Description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "multipleVoicesDetected": [true/false],
+        "cheatingIndicators": ["[e.g., 'Second voice detected at 01:30']"],
         "isCheatingDetected": [true/false],
-        "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-        "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
-        "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
+        "percentOfAnswerMatchWithAiModel": "[0–100%, e.g., '83%']",
+        "technicalDepth": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "asPerExplanation": "[Explanation or 'Not evaluated: Irrelevant response']" },
+        "technicalDepthAsPerExperience": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "asPerExperience": "[Explanation or 'Not evaluated: Irrelevant response']" },
         "isCopiedFromAITool": [true/false],
         "isCopiedFromAnyWebsite": [true/false],
-        "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
-        "overallContentQuality": "[Quality description]",
-        "detailedSummary": "[Detailed summary of the response]",
-        "overallRating": "<String>",
-        "correctPercentage": "[Percentage (0-100%)]",
-        "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+        "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[0–100%]"] },
+        "overallContentQuality": "[Description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "detailedSummary": "[Exact summary or 'No relevant content provided'/'Cheating detected']",
+        "overallRating": "<String, 0.0–5.0, e.g., '4.1' or '0.0'>",
+        "correctPercentage": "[0–100%, e.g., '85%' or '0%']",
+        "answerRating": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "reasonForDeduction": ["[e.g., 'Response is irrelevant to the question']"] },
         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
         "answerTime": {
           "totalDurationSeconds": [Number],
           "effectiveAnswerTimeSeconds": [Number],
-          "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
+          "effectiveAnswerTimePercentage": "[0–100%, e.g., '40%' or '0%']"
         },
         "answerEffectiveness": {
-          "rating": "<String>",
+          "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
           "relevanceBreakdown": {
             "relevantTimeSeconds": [Number],
             "irrelevantTimeSeconds": [Number],
-            "relevanceExplanation": "[Explanation of relevance]"
+            "relevanceExplanation": "[e.g., 'Response discussed unrelated topics']"
           }
         },
         "backgroundNoise": {
           "level": "[Low/Medium/High]",
-          "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
+          "description": "[e.g., 'High noise from conversations at 01:10']"
         },
-        "confidenceLevel": "<String>",
-        "responseCoherence": "<String>",
-        "environmentalSuitability": "<String>"
+        "confidenceLevel": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
+        "responseCoherence": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
+        "environmentalSuitability": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>"
       }
     `,
     subjective: `
-      ### Subjective Answer Evaluation Rules:
-      - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide a qualitative description and a numerical rating (as a string, e.g., "3.2").
-      - **Cheating Detection**: Set \`isCheatingDetected = true\` if:
-        - Text is copied from online sources (e.g., GeeksforGeeks, StackOverflow).
-        - Content is AI-generated with minimal edits.
-        - Copy-paste formatting or inconsistent languages detected.
-        - Overuse of generic phrases or high similarity (>80%) with reference answers.
-      - cheatingIndicators must list specific reasons (e.g., "High similarity with web content").
-      
+      ### Strict Subjective Answer Evaluation Rules:
+      - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide description and rating (0.0–5.0). Set to "0.0" and "Not evaluated: No relevant response" if irrelevant or cheating detected.
+      - **Cheating Detection**: Set **isCheatingDetected = true**, **correctPercentage = 0**, **overallRating = "0.0"**, and all other ratings to "0.0" if:
+        - Text matches online sources (>90% similarity). Include in \`cheatingIndicators\` (e.g., "90% similarity with StackOverflow").
+        - Text is AI-generated (>90% similarity). Include in \`cheatingIndicators\` (e.g., "AI-generated content at 90%").
+        - Copy-paste formatting or inconsistent languages detected. Include in \`cheatingIndicators\` (e.g., "Inconsistent language detected").
+        - Overuse of generic phrases or >80% similarity with reference answers. Include in \`cheatingIndicators\` (e.g., "80% similarity with reference answer").
+
       **Input**: Text answer: "${videoData.textAnswer || ""}"
       **Response JSON Format:**
       {
-        "communication": "[Clarity and articulation quality description]",
-        "communicationRating": "<String>",
-        "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
+        "communication": "[Exact description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "communicationRating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
+        "cheatingIndicators": ["[e.g., '90% similarity with StackOverflow']"],
         "isCheatingDetected": [true/false],
-        "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-        "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
-        "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
+        "percentOfAnswerMatchWithAiModel": "[0–100%, e.g., '83%']",
+        "technicalDepth": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "asPerExplanation": "[Explanation or 'Not evaluated: Irrelevant response']" },
+        "technicalDepthAsPerExperience": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "asPerExperience": "[Explanation or 'Not evaluated: Irrelevant response']" },
         "isCopiedFromAITool": [true/false],
         "isCopiedFromAnyWebsite": [true/false],
-        "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
-        "overallContentQuality": "[Quality description]",
-        "detailedSummary": "[Detailed summary of the response]",
-        "overallRating": "<String>",
-        "correctPercentage": "[Percentage (0-100%)]",
-        "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
+        "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[0–100%]"] },
+        "overallContentQuality": "[Description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
+        "detailedSummary": "[Exact summary or 'No relevant content provided'/'Cheating detected']",
+        "overallRating": "<String, 0.0–5.0, e.g., '4.1' or '0.0'>",
+        "correctPercentage": "[0–100%, e.g., '85%' or '0%']",
+        "answerRating": { "rating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>", "reasonForDeduction": ["[e.g., 'Response is irrelevant to the question']"] },
         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"]
       }
@@ -447,25 +694,6 @@ const processVideo = async (videoData) => {
       throw new ProcessingError("Text answer required for subjective question");
     }
 
-    const commonInstructions = `
-      You are a professional analyzer. Return the response in strict JSON format.
-      Analyze the candidate's response considering their experience (${videoData.experience}) and job role (${videoData.jobRole}).
-      
-      **Responsibilities:**
-      - Specify if metrics cannot be evaluated (e.g., "Not evaluated: [reason]").
-      - Evaluate relative to experience and job role.
-      - Boolean fields (is*) must be true/false.
-      - Ratings format: "[number].[number] out of 5".
-      - For answerRating < 5, detail deductions in reasonForDeduction as an array of strings.
-      - Limit answerSummary and answerImprovementSuggestions to 2–3 concise bullets.
-      - Cross-reference experience with technical depth.
-      - Use job role context for relevance.
-      - Language detection percentages must sum to 100%.
-
-      **overallRating**: Rate the answer on a scale from 1.0 to 5.0 (allow decimals, e.g., 4.1, 3.8) based on accuracy, relevance, and completeness.
-      **correctPercentage**: Estimate how correct the answer is as a percentage (0 to 100%).
-    `;
-
     let prompt;
     let fileInput = [];
     if (normalizedType === "video" || normalizedType === "audio") {
@@ -482,7 +710,9 @@ const processVideo = async (videoData) => {
       ];
     }
 
-    prompt = generatePrompt(videoData, normalizedType, commonInstructions);
+    prompt = generatePrompt(videoData, normalizedType);
+
+    console.log(prompt, 706);
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
