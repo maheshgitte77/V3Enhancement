@@ -27,7 +27,7 @@ const fileService = {
    */
   async generateUploadUrl({ userId, name, extension, module, size }) {
     try {
-      const key = `${uuidv4()}.${extension}`;
+      const key = `${module}/${uuidv4()}.${extension}`;
 
       const uploadUrl = s3.getSignedUrl("putObject", {
         Bucket: process.env.S3_BUCKET_NAME,
