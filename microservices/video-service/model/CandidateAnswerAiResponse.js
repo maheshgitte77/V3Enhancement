@@ -38,6 +38,9 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       required: true,
       default: "Pending",
     },
+    transcription: {
+      type: String,
+    },
     communication: {
       type: String,
     },

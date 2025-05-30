@@ -109,6 +109,7 @@ const uploadFile = async (fileManager, filePath, fileName, mimeType) => {
 
 const transformAiResponse = (parsedAnalysis) => {
   const defaultResponse = {
+    transcription: "No relevant speech detected",
     communication: "Not evaluated: No response provided",
     cheatingIndicators: [],
     isCheatingDetected: false,
@@ -202,227 +203,6 @@ const transformAiResponse = (parsedAnalysis) => {
   return transformed;
 };
 
-// const generatePrompt = (videoData, normalizedType, commonInstructions) => {
-//   const basePrompt = {
-//     common: `
-//             You are a professional analyzer. Return the response in strict JSON format.
-//       Analyze the candidate's response considering their experience (${videoData.experience}) and job role (${videoData.jobRole}).
-
-//       **Responsibilities:**
-//       - Specify if metrics cannot be evaluated (e.g., "Not evaluated: [reason]").
-//       - Evaluate relative to experience and job role.
-//       - Boolean fields (is*) must be true/false.
-//       - Ratings format: "[number].[number] out of 5".
-//       - For answerRating < 5, detail deductions in reasonForDeduction as an array of strings.
-//       - Limit answerSummary and answerImprovementSuggestions to 2–3 concise bullets.
-//       - Cross-reference experience with technical depth.
-//       - Use job role context for relevance.
-//       - Language detection percentages must sum to 100%.
-
-//       **overallRating**: Rate the answer on a scale from 1.0 to 5.0 (allow decimals, e.g., 4.1, 3.8) based on accuracy, relevance, and completeness.
-//       **correctPercentage**: Estimate how correct the answer is as a percentage (0 to 100%).
-//       ### Analysis Type: ${
-//         normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
-//       } response
-//       **Question for Analyzed**: ${videoData.QuestionAnalyzed}
-//       **Candidate Experience**: ${videoData.experience}
-//       **Job Role**: ${videoData.jobRole}
-//       **Question Duration**: ${videoData.questionDuration} (e.g., 5 minutes)
-
-//       ### Analysis Responsibilities:
-//       - **Exact Answer Time**: Calculate the actual time the candidate spends answering the question (excluding silence, pauses, or irrelevant content). Use advanced speech detection to identify active speaking periods. Report in seconds and as a percentage of the total question duration.
-//       - **Answer Effectiveness**: Evaluate how relevant and focused the response is to the question. For example, if the question is about Java Polymorphism and the candidate discusses all OOP pillars, quantify the time spent on relevant vs. irrelevant content. Provide a rating (as a string, e.g., "3.2") and a detailed relevance breakdown.
-//       - **Background Noise Detection**: Assess background noise levels (Low, Medium, High) specific to the question context. Flag excessive or irrelevant noise (e.g., unrelated conversations, music) as a potential issue in \`environmentalSuitability\`. Provide a detailed description of noise impact.
-//       - **Multiple Voice Detection**: Detect multiple voices, whispers, or coaching cues in the audio. If multiple voices are detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list "Multiple voices detected" in \`cheatingIndicators\`.
-//       - **Cheating Detection**:
-//         - Detect multiple voices, whispers, or coaching cues. Set appropriate flags and \`isCheatingDetected = true\` if violations occur.
-//         - List all cheating behaviors in \`cheatingIndicators\` with precise details (e.g., "Multiple voices detected at 1:23").
-//       - **Experience-Based Evaluation**: Adjust \`technicalDepthAsPerExperience\`, \`overallRating\`, and \`correctPercentage\` based on candidate experience. Senior candidates require deeper, more accurate answers.
-//       - **Additional Metrics**:
-//         - **Communication Rating**: Rate the candidate's communication clarity and articulation (as a string, e.g., "3.2") based on speech quality, grammar, and delivery.
-//         - **Confidence Level**: Rate the candidate's confidence (as a string, e.g., "3.2") based on tone, pacing, and body language (for video).
-//         - **Response Coherence**: Rate the logical flow and structure of the answer (as a string, e.g., "3.2").
-//         - **Environmental Suitability**: Rate the suitability of the recording environment (as a string, e.g., "3.2"), considering noise, lighting, and distractions.
-//     `,
-//     video: `
-//       ### Cheating Detection Rules:
-//       #### 🔍 Visual Cheating Indicators
-//       Set **isCheatingDetected = true** if any of the following are observed:
-//       - Candidate looks downward continuously for more than 5 seconds (indicative of reading notes).
-//       - Candidate looks away from the camera (incorrect eye contact) for more than **2%** of the total video duration.
-//       - Candidate appears to be **reading** from unauthorized materials (e.g., notes, screen, book).
-//       - A mobile phone or tablet is **visible in the frame** or the candidate interacts with it within **1 second** of detection:
-//         - Set \`mobileDetected = true\`.
-//         - Include "Mobile device detected in frame or interacted with" in \`cheatingIndicators\`.
-//       - More than one person is detected in the video:
-//         - Set \`isOnlyOnePersonInVideo = false\` and \`isCheatingDetected = true\`.
-//         - Include "Multiple persons detected in video" in \`cheatingIndicators\`.
-//       - Multiple voices or whispers are detected in the audio:
-//         - Set \`multipleVoicesDetected = true\`.
-//         - Include "Multiple voices detected" in \`cheatingIndicators\`.
-//       - External help, cues, or signs of coaching (e.g., candidate responds to off-camera gestures).
-//       - Unnatural pauses or odd body language suggesting consultation or external material.
-//       - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Candidate looked at a mobile device for 3 seconds at 1:45"). If no cheating, return [].
-
-//       #### 🔍 Eye Movement Tracking
-//       - Track eye movement behavior (e.g., frequency, direction, duration of gaze shifts).
-//       - Set \`eyeMovement = true\` if unnatural eye movements are detected (e.g., frequent downward glances or looking away for >2% of video duration).
-//       - Flag unnatural eye movements in \`cheatingIndicators\` (e.g., "Frequent downward glances for 2-3 seconds").
-//       - Provide a detailed description in \`eyeMovementDescription\` (e.g., "Candidate frequently looked downward for 2-3 seconds, suggesting possible note consultation").
-
-//       #### 🔍 Content Copying Detection
-//       - **isCopiedFromAITool**: Set to \`true\` if the response content matches AI-generated text by **>90%** (using similarity metrics like cosine similarity or plagiarism detection).
-//       - **isCopiedFromAnyWebsite**: Set to \`true\` if the response content matches web sources by **>90%** (using precise plagiarism detection tools).
-//       - Report the similarity percentage in \`percentOfAnswerMatchWithAiModel\` for AI tool matches.
-
-//       #### 🔍 Lip Syncing
-//       - Verify if audio matches lip movements. Set \`isLipSync = true\` if synchronized, otherwise \`false\`. Provide a one-line description in \`lipSyncDescription\` (e.g., "Audio matches lip movements accurately").
-
-//       **Input**: Video file
-//       **Response JSON Format:**
-//       {
-//         "communication": "[Clarity and articulation quality description]",
-//         "communicationRating": "<String>",
-//         "isLipSync": true,
-//         "lipSyncDescription": "[Description, e.g., 'Audio matches lip movements accurately']",
-//         "isOnlyOnePersonInVideo": true,
-//         "facialExpressions": "[Description of facial expressions]",
-//         "eyeMovement": false,
-//         "eyeMovementDescription": "[Detailed description of eye movement behavior, e.g., 'Frequent downward glances for 2-3 seconds']",
-//         "mobileDetected": false,
-//         "multipleVoicesDetected": false,
-//         "cheatingIndicators": ["[Reason 1, e.g., 'Mobile device detected in frame at 1:45']", "[Reason 2, e.g., 'Multiple voices detected at 1:23']"],
-//         "isCheatingDetected": false,
-//         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-//         "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
-//         "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
-//         "isCopiedFromAITool": false,
-//         "isCopiedFromAnyWebsite": false,
-//         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
-//         "overallContentQuality": "[Quality description]",
-//         "detailedSummary": "[Detailed summary of the response]",
-//         "overallRating": "<String>",
-//         "correctPercentage": "[Percentage (0-100%)]",
-//         "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
-//         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
-//         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
-//         "answerTime": {
-//           "totalDurationSeconds": [Number],
-//           "effectiveAnswerTimeSeconds": [Number],
-//           "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
-//         },
-//         "answerEffectiveness": {
-//           "rating": "<String>",
-//           "relevanceBreakdown": {
-//             "relevantTimeSeconds": [Number],
-//             "irrelevantTimeSeconds": [Number],
-//             "relevanceExplanation": "[Explanation of relevance]"
-//           }
-//         },
-//         "backgroundNoise": {
-//           "level": "[Low/Medium/High]",
-//           "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
-//         },
-//         "confidenceLevel": "<String>",
-//         "responseCoherence": "<String>",
-//         "environmentalSuitability": "<String>"
-//       }
-//     `,
-//     audio: `
-//       ### Cheating Detection Rules:
-//       #### 🔊 Audio Cheating Indicators
-//       Set **isCheatingDetected = true** if any of the following are observed:
-//       - More than one distinct voice is detected:
-//         - Set \`isOnlyOneVoiceInAudio = false\`.
-//       - Background voices reading, giving hints, or responding to questions.
-//       - Candidate is reading out loud from material, indicated by:
-//         - Monotone pacing
-//         - Reading tone
-//         - Vocalized punctuation (e.g., “comma”, “period”)
-//       - Whispers, low-volume coaching, or verbal cues not from the candidate.
-//       - cheatingIndicators must list **ALL** detected cheating behaviors with specific details (e.g., "Second voice detected at 1:30"). If no cheating, return [].
-
-//       **Input**: Audio file
-//       **Response JSON Format:**
-//       {
-//         "communication": "[Clarity and articulation quality description]",
-//         "communicationRating": "<String>",
-//         "isOnlyOneVoiceInAudio": [true/false],
-//         "voiceClarity": "[Clarity of voice]",
-//         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
-//         "isCheatingDetected": [true/false],
-//         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-//         "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
-//         "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
-//         "isCopiedFromAITool": [true/false],
-//         "isCopiedFromAnyWebsite": [true/false],
-//         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
-//         "overallContentQuality": "[Quality description]",
-//         "detailedSummary": "[Detailed summary of the response]",
-//         "overallRating": "<String>",
-//         "correctPercentage": "[Percentage (0-100%)]",
-//         "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
-//         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
-//         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"],
-//         "answerTime": {
-//           "totalDurationSeconds": [Number],
-//           "effectiveAnswerTimeSeconds": [Number],
-//           "effectiveAnswerTimePercentage": "[Percentage (e.g., 40%)]"
-//         },
-//         "answerEffectiveness": {
-//           "rating": "<String>",
-//           "relevanceBreakdown": {
-//             "relevantTimeSeconds": [Number],
-//             "irrelevantTimeSeconds": [Number],
-//             "relevanceExplanation": "[Explanation of relevance]"
-//           }
-//         },
-//         "backgroundNoise": {
-//           "level": "[Low/Medium/High]",
-//           "description": "[Detailed description of noise impact, e.g., 'High background noise from unrelated conversations']"
-//         },
-//         "confidenceLevel": "<String>",
-//         "responseCoherence": "<String>",
-//         "environmentalSuitability": "<String>"
-//       }
-//     `,
-//     subjective: `
-//       ### Subjective Answer Evaluation Rules:
-//       - **Communication**: Analyze grammar, clarity, structure, and coherence. Provide a qualitative description and a numerical rating (as a string, e.g., "3.2").
-//       - **Cheating Detection**: Set \`isCheatingDetected = true\` if:
-//         - Text is copied from online sources (e.g., GeeksforGeeks, StackOverflow).
-//         - Content is AI-generated with minimal edits.
-//         - Copy-paste formatting or inconsistent languages detected.
-//         - Overuse of generic phrases or high similarity (>80%) with reference answers.
-//       - cheatingIndicators must list specific reasons (e.g., "High similarity with web content").
-
-//       **Input**: Text answer: "${videoData.textAnswer || ""}"
-//       **Response JSON Format:**
-//       {
-//         "communication": "[Clarity and articulation quality description]",
-//         "communicationRating": "<String>",
-//         "cheatingIndicators": ["[Reason 1]", "[Reason 2]"],
-//         "isCheatingDetected": [true/false],
-//         "percentOfAnswerMatchWithAiModel": "[Percentage (e.g., 83%)]",
-//         "technicalDepth": { "rating": "<String>", "asPerExplanation": "[Explanation]" },
-//         "technicalDepthAsPerExperience": { "rating": "<String>", "asPerExperience": "[Explanation relative to experience]" },
-//         "isCopiedFromAITool": [true/false],
-//         "isCopiedFromAnyWebsite": [true/false],
-//         "languageDetection": { "languages": ["[Language 1]"], "percentageWise": ["[Percentage 1]"] },
-//         "overallContentQuality": "[Quality description]",
-//         "detailedSummary": "[Detailed summary of the response]",
-//         "overallRating": "<String>",
-//         "correctPercentage": "[Percentage (0-100%)]",
-//         "answerRating": { "rating": "<String>", "reasonForDeduction": ["[Reason 1]", "[Reason 2]"] },
-//         "answerSummary": ["[Point 1]", "[Point 2]", "[Optional Point 3]"],
-//         "answerImprovementSuggestions": ["[Suggestion 1]", "[Suggestion 2]", "[Optional Suggestion 3]"]
-//       }
-//     `,
-//   };
-
-//   return `${basePrompt.common}${basePrompt[normalizedType]}`;
-// };
-
 const generatePrompt = (videoData, normalizedType) => {
   const basePrompt = {
     common: `
@@ -447,6 +227,7 @@ const generatePrompt = (videoData, normalizedType) => {
         - List all cheating behaviors in \`cheatingIndicators\` with precise timestamps (e.g., "Candidate looked downward for 6 seconds at 01:05"). If no cheating, return \`[]\`.
         - If cheating is detected, set \`isCheatingDetected = true\`, \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and all other ratings to "0.0".
       - **Transcription**: Use exact transcription of the candidate’s response in the detected language(s). Do not paraphrase, summarize, or add content. If no relevant speech, note "No relevant speech detected".
+      - **Exact Transcription**: Provide an exact, verbatim transcription of the candidate’s response in the detected language(s) in the \`transcription\` field. Do not paraphrase, summarize, or add content. Include all spoken words, including filler words (e.g., "um," "uh"), false starts, and repetitions. If no relevant speech is detected, set \`transcription = "No relevant speech detected"\`. If multiple voices are detected, transcribe only the candidate’s voice unless otherwise instructed, and note additional voices in \`cheatingIndicators\`.
       - **Language Detection**: Percentages in \`languageDetection.percentageWise\` must sum to 100% and be based solely on detected languages.
       - **Experience and Job Role**: Evaluate \`technicalDepthAsPerExperience\` relative to candidate experience (${
         videoData.experience
@@ -458,6 +239,7 @@ const generatePrompt = (videoData, normalizedType) => {
       - **correctPercentage**: 0–100%, set to 0 if response is irrelevant, cheating is detected, or no substantive response is provided.
       - **overallRating**: "0.0"–"5.0", set to "0.0" for irrelevant responses, cheating, or no response.
       - **cheatingIndicators**: Array of strings with timestamps (e.g., "Second voice detected at 01:30"). Empty (\`[]\`) if no cheating.
+      - **transcription**: Exact, verbatim text of the candidate’s response or "No relevant speech detected".
 
       ### Analysis Type: ${
         normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
@@ -513,6 +295,7 @@ const generatePrompt = (videoData, normalizedType) => {
       **Input**: Video file
       **Response JSON Format:**
       {
+        "transcription": "[Exact, verbatim transcription of candidate’s response or 'No relevant speech detected']",
         "communication": "[Exact description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
         "communicationRating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
         "isLipSync": [true/false],
@@ -575,6 +358,7 @@ const generatePrompt = (videoData, normalizedType) => {
       **Input**: Audio file
       **Response JSON Format:**
       {
+        "transcription": "[Exact, verbatim transcription of candidate’s response or 'No relevant speech detected']",
         "communication": "[Exact description or 'Not evaluated: No relevant response'/'Not evaluated: Cheating detected']",
         "communicationRating": "<String, 0.0–5.0, e.g., '3.2' or '0.0'>",
         "isOnlyOneVoiceInAudio": [true/false],
@@ -711,8 +495,6 @@ const processVideo = async (videoData) => {
     }
 
     prompt = generatePrompt(videoData, normalizedType);
-
-    console.log(prompt, 706);
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -921,6 +703,7 @@ const processVideo = async (videoData) => {
           questionId: videoData.questionId,
           videoAnswerFileId: videoData.videoAnswerFileId,
           status: "Analyzed",
+          transcription: transformedAnalysis.transcription,
           communication: transformedAnalysis.communication,
           isCheatingDetected: transformedAnalysis.isCheatingDetected,
           cheatingIndicators: transformedAnalysis.cheatingIndicators,
@@ -1034,221 +817,6 @@ const processVideo = async (videoData) => {
     }
   }
 };
-
-// const processScreening = async (screeningData) => {
-//   const { candidateScreeningId, screeningAssessmentId } = screeningData;
-//   try {
-//     const screeningResult = await CandidateScreeningResult.findOne({
-//       candidateScreeningId,
-//     });
-//     if (!screeningResult) {
-//       throw new ProcessingError("CandidateScreeningResult not found");
-//     }
-
-//     // Extract correctPercentage from all question types in screeningResult.skills
-//     let correctPercentages = [];
-//     if (screeningResult.skills && screeningResult.skills.length) {
-//       screeningResult.skills.forEach((skill) => {
-//         // MCQ questions
-//         if (skill.mcq && skill.mcq.length) {
-//           correctPercentages.push(
-//             ...skill.mcq
-//               .map((mcq) => parseFloat(mcq.correctPercentage) || 0)
-//               .filter((percentage) => percentage >= 0)
-//           );
-//         }
-//         // Audio questions
-//         if (skill.audio && skill.audio.length) {
-//           correctPercentages.push(
-//             ...skill.audio
-//               .map((audio) => parseFloat(audio.correctPercentage) || 0)
-//               .filter((percentage) => percentage >= 0)
-//           );
-//         }
-//         // Video questions
-//         if (skill.video && skill.video.length) {
-//           correctPercentages.push(
-//             ...skill.video
-//               .map((video) => parseFloat(video.correctPercentage) || 0)
-//               .filter((percentage) => percentage >= 0)
-//           );
-//         }
-//         // Subjective questions
-//         if (skill.subjective && skill.subjective.length) {
-//           correctPercentages.push(
-//             ...skill.subjective
-//               .map(
-//                 (subjective) => parseFloat(subjective.correctPercentage) || 0
-//               )
-//               .filter((percentage) => percentage >= 0)
-//           );
-//         }
-//       });
-//     }
-
-//     // Calculate candidateFitScore
-//     const candidateFitScore = correctPercentages.length
-//       ? Math.round(
-//           correctPercentages.reduce((sum, val) => sum + val, 0) /
-//             correctPercentages.length
-//         )
-//       : 0;
-
-//     // Fetch aiResponses for non-MCQ evaluation
-//     const aiResponses = await CandidateAnswerAiResponse.find({
-//       candidateScreeningId: screeningResult.candidateScreeningId,
-//     });
-
-//     // Default AI response values
-//     let parsedResponse = {
-//       screeningSummary: ["No non-MCQ responses available"],
-//       communicationClarity: 0,
-//       analyticalThinking: 0,
-//       problemSolvingAbility: 0,
-//       fitScorePointers: [
-//         "No fit analysis available due to MCQ-only assessment",
-//       ],
-//     };
-
-//     // Generate AI response if aiResponses exist
-//     if (aiResponses.length) {
-//       const prompt = `
-//       Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
-
-//       **Evaluation Criteria:**
-//       - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
-//       - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
-//       - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
-//       - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill.
-//       - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance.
-
-//       **Candidate Screening Data:**
-//       ${aiResponses
-//         .map(
-//           (response, index) => `
-//       Question ${index + 1}:
-//       - Question: ${response.questionAnalyzed}
-//       - Answer Summary: ${response.answerSummary.join(", ")}
-//       - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
-//         ", "
-//       )}
-//       - Communication: ${response.communication}
-//       - Correct Percentage: ${response.correctPercentage}
-//       - Technical Depth: ${response.technicalDepth.rating} (${
-//             response.technicalDepth.asPerExplanation
-//           })
-//       - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
-//             response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
-//           })
-//       - Overall Rating: ${response.overallRating}
-//       - Confidence Level: ${response.confidenceLevel}
-//       - Response Coherence: ${response.responseCoherence}
-//       `
-//         )
-//         .join("\n")}
-
-//       **Response JSON Format:**
-//       {
-//         "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
-//         "communicationClarity": Number,
-//         "analyticalThinking": Number,
-//         "problemSolvingAbility": Number,
-//         "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
-//       }
-//       `;
-
-//       // Generate AI response
-//       const result = await model.generateContent([{ text: prompt }]);
-//       const aiResponse = result.response.text();
-//       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
-//         null,
-//         aiResponse.slice(
-//           aiResponse.indexOf("{"),
-//           aiResponse.lastIndexOf("}") + 1
-//         ),
-//       ];
-//       if (!jsonMatch[1]) {
-//         throw new ProcessingError(
-//           "Invalid JSON format in screening AI response"
-//         );
-//       }
-//       parsedResponse = JSON.parse(jsonMatch[1].trim());
-
-//       // Validate JSON structure
-//       if (
-//         !parsedResponse.screeningSummary ||
-//         !parsedResponse.communicationClarity
-//       ) {
-//         throw new ProcessingError("Incomplete screening AI response structure");
-//       }
-//     }
-
-//     // Update CandidateScreeningResult
-//     await CandidateScreeningResult.updateOne(
-//       { candidateScreeningId },
-//       {
-//         $set: {
-//           screeningSummary: parsedResponse.screeningSummary,
-//           communicationClarity: parsedResponse.communicationClarity,
-//           analyticalThinking: parsedResponse.analyticalThinking,
-//           problemSolvingAbility: parsedResponse.problemSolvingAbility,
-//           fitScorePointers: parsedResponse.fitScorePointers,
-//           candidateFitScore,
-//           updatedAt: new Date(),
-//         },
-//       }
-//     );
-
-//     // Calculate candidateRank and betterThanOfCandidates
-//     const allCandidateScreening = await CandidateScreening.find({
-//       screeningAssessmentId: screeningAssessmentId,
-//       status: "Appeared",
-//     });
-
-//     const allScreenings = await CandidateScreeningResult.find({
-//       candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
-//     });
-
-//     // Sort by candidateFitScore (descending)
-//     const sortedScreenings = allScreenings.sort(
-//       (a, b) => b.candidateFitScore - a.candidateFitScore
-//     );
-
-//     // Update ranks and percentages
-//     for (let i = 0; i < sortedScreenings.length; i++) {
-//       const currentScreening = sortedScreenings[i];
-//       const rank = i + 1;
-//       const betterThanOfCandidates =
-//         sortedScreenings.length > 1
-//           ? Math.round(
-//               ((sortedScreenings.length - rank) /
-//                 (sortedScreenings.length - 1)) *
-//                 100
-//             )
-//           : 100;
-
-//       await CandidateScreeningResult.updateOne(
-//         { candidateScreeningId: currentScreening.candidateScreeningId },
-//         {
-//           $set: {
-//             candidateRank: rank,
-//             betterThanOfCandidates,
-//             updatedAt: new Date(),
-//           },
-//         }
-//       );
-//     }
-
-//     logger.info(
-//       `Successfully processed screening for candidateScreeningId: ${candidateScreeningId}`
-//     );
-//   } catch (error) {
-//     logger.error(
-//       `Error processing screening for candidateScreeningId: ${candidateScreeningId}: ${error.message}`
-//     );
-//     throw error;
-//   }
-// };
 
 const processScreening = async (screeningData) => {
   const { candidateScreeningId, screeningAssessmentId } = screeningData;
@@ -1555,170 +1123,6 @@ const processScreening = async (screeningData) => {
     throw error;
   }
 };
-
-// const processScreening = async (screeningData) => {
-//   const { candidateScreeningId, screeningAssessmentId } = screeningData;
-//   try {
-//     const screeningResult = await CandidateScreeningResult.findOne({
-//       candidateScreeningId,
-//     });
-//     if (!screeningResult) {
-//       throw new ProcessingError("CandidateScreeningResult not found");
-//     }
-
-//     const aiResponses = await CandidateAnswerAiResponse.find({
-//       candidateScreeningId: screeningResult.candidateScreeningId,
-//     });
-
-//     if (!aiResponses.length) {
-//       throw new ProcessingError("No CandidateAnswerAiResponses found");
-//     }
-
-//     // Construct prompt with relevant data from aiResponses
-//     const prompt = `
-//     Analyze the following candidate screening data and provide a comprehensive evaluation in the specified JSON format.
-
-//     **Evaluation Criteria:**
-//     - **communicationClarity**: Percentage out of 100 based on the Communication field, assessing clarity, coherence, and effectiveness of expression.
-//     - **analyticalThinking**: Percentage out of 100 based on Question Analyzed, Technical Depth, and Answer Effectiveness, evaluating the candidate's ability to break down and analyze problems.
-//     - **problemSolvingAbility**: Percentage out of 100 based on Question Analyzed, Correct Percentage, and Answer Effectiveness, assessing the candidate's effectiveness in deriving solutions.
-//     - **screeningSummary**: Answer "What did the candidate show us?" with one generic pointer and two specific pointers based on candidate performance in each skill. Example: ["Demonstrated clear understanding of CRM workflows", "Showed strong analytical skills in breaking down complex problems", "Displayed effective problem-solving in technical scenarios"].
-//     - **fitScorePointers**: Answer "How well does the candidate fit the job?" with three pointers based on job requirements and screening performance. Example: ["✅ Fit for Role Type: Fast-paced, troubleshooting-heavy environment", "⚡ Primary Strength: Quick problem-solving", "🛠️ Area to Watch: Needs improvement in technical communication"].
-
-//     **Candidate Screening Data:**
-//     ${aiResponses
-//       .map(
-//         (response, index) => `
-//     Question ${index + 1}:
-//     - Question: ${response.questionAnalyzed}
-//     - Answer Summary: ${response.answerSummary.join(", ")}
-//     - Answer Improvement Suggestions: ${response.answerImprovementSuggestions.join(
-//       ", "
-//     )}
-//     - Communication: ${response.communication}
-//     - Correct Percentage: ${response.correctPercentage}
-//     - Technical Depth: ${response.technicalDepth.rating} (${
-//           response.technicalDepth.asPerExplanation
-//         })
-//     - Answer Effectiveness: ${response.answerEffectiveness.rating} (${
-//           response.answerEffectiveness.relevanceBreakdown.relevanceExplanation
-//         })
-//     - Overall Rating: ${response.overallRating}
-//     - Confidence Level: ${response.confidenceLevel}
-//     - Response Coherence: ${response.responseCoherence}
-//     `
-//       )
-//       .join("\n")}
-
-//     **Response JSON Format:**
-//     {
-//       "screeningSummary": ["Generic summary point", "Skill-based point 1", "Skill-based point 2"],
-//       "communicationClarity": Number,
-//       "analyticalThinking": Number,
-//       "problemSolvingAbility": Number,
-//       "fitScorePointers": ["Fit for role description", "Primary strength description", "Area to watch description"]
-//     }
-//     `;
-
-//     // Generate AI response
-//     const result = await model.generateContent([{ text: prompt }]);
-//     const aiResponse = result.response.text();
-//     const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
-//       null,
-//       aiResponse.slice(
-//         aiResponse.indexOf("{"),
-//         aiResponse.lastIndexOf("}") + 1
-//       ),
-//     ];
-//     if (!jsonMatch[1]) {
-//       throw new ProcessingError("Invalid JSON format in screening AI response");
-//     }
-//     const parsedResponse = JSON.parse(jsonMatch[1].trim());
-
-//     // Validate JSON structure
-//     if (
-//       !parsedResponse.screeningSummary ||
-//       !parsedResponse.communicationClarity
-//     ) {
-//       throw new ProcessingError("Incomplete screening AI response structure");
-//     }
-
-//     // Calculate candidateFitScore (average of correctPercentage)
-//     const correctPercentages = aiResponses
-//       .map((response) => parseFloat(response.correctPercentage) || 0)
-//       .filter((percentage) => percentage > 0);
-//     const candidateFitScore = correctPercentages.length
-//       ? Math.round(
-//           correctPercentages.reduce((sum, val) => sum + val, 0) /
-//             correctPercentages.length
-//         )
-//       : 0;
-
-//     // Update CandidateScreeningResult
-//     await CandidateScreeningResult.updateOne(
-//       { candidateScreeningId },
-//       {
-//         $set: {
-//           screeningSummary: parsedResponse.screeningSummary,
-//           communicationClarity: parsedResponse.communicationClarity,
-//           analyticalThinking: parsedResponse.analyticalThinking,
-//           problemSolvingAbility: parsedResponse.problemSolvingAbility,
-//           fitScorePointers: parsedResponse.fitScorePointers,
-//           candidateFitScore,
-//           updatedAt: new Date(),
-//         },
-//       }
-//     );
-
-//     const allCandidateScreening = await CandidateScreening.find({
-//       screeningAssessmentId: screeningAssessmentId,
-//       status: "Appeared",
-//     });
-
-//     // Calculate candidateRank and betterThanPercentageOfCandidates
-//     const allScreenings = await CandidateScreeningResult.find({
-//       candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
-//     });
-
-//     // Sort by candidateFitScore (descending)
-//     const sortedScreenings = allScreenings.sort(
-//       (a, b) => b.candidateFitScore - a.candidateFitScore
-//     );
-//     // Update ranks and percentages
-//     for (let i = 0; i < sortedScreenings.length; i++) {
-//       const currentScreening = sortedScreenings[i];
-//       const rank = i + 1;
-//       const betterThanOfCandidates =
-//         sortedScreenings.length > 1
-//           ? Math.round(
-//               ((sortedScreenings.length - rank) /
-//                 (sortedScreenings.length - 1)) *
-//                 100
-//             )
-//           : 100;
-
-//       await CandidateScreeningResult.updateOne(
-//         { candidateScreeningId: currentScreening.candidateScreeningId },
-//         {
-//           $set: {
-//             candidateRank: rank,
-//             betterThanOfCandidates,
-//             updatedAt: new Date(),
-//           },
-//         }
-//       );
-//     }
-
-//     logger.info(
-//       `Successfully processed screening for candidateScreeningId: ${candidateScreeningId}`
-//     );
-//   } catch (error) {
-//     logger.error(
-//       `Error processing screening for candidateScreeningId: ${candidateScreeningId}: ${error.message}`
-//     );
-//     throw error;
-//   }
-// };
 
 const runConsumer = async (consumerId) => {
   const consumer = kafka.consumer({
