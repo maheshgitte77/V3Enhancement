@@ -96,6 +96,13 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               default: "0%",
             },
             answerSummary: { type: [String], default: [] },
+            cheatingFlags: {
+              type: [String],
+              default: [],
+            },
+            transcription: {
+              type: String,
+            },
           },
         ],
         audio: [
@@ -140,6 +147,13 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               default: [],
             },
             answerSummary: { type: [String], default: [] },
+            cheatingFlags: {
+              type: [String],
+              default: [],
+            },
+            transcription: {
+              type: String,
+            },
           },
         ],
         subjective: [
@@ -179,6 +193,10 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               default: [],
             },
             answerSummary: { type: [String], default: [] },
+            cheatingFlags: {
+              type: [String],
+              default: [],
+            },
           },
         ],
       },
@@ -225,12 +243,7 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       default: [],
     },
     cheatingFlags: {
-      type: [
-        {
-          type: Map,
-          of: Boolean,
-        },
-      ],
+      type: [String],
       default: [],
     },
     screeningSummary: {
@@ -271,8 +284,6 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
-// CandidateScreeningResultSchema.index({ candidateScreeningId: 1 });
 
 module.exports = mongoose.model(
   "CandidateScreeningResult",
