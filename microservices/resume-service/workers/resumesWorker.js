@@ -3,10 +3,13 @@ const dotenv = require("dotenv");
 const fs = require("fs").promises;
 const path = require("path");
 const axios = require("axios");
+const Redis = require("ioredis");
 const convertDocxToPdf = require("../utils/convertDocxToPdf");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
+const { ObjectId } = require("mongodb");
+const { connectNativeMongoDB, getNativeDB } = require("../utils/nativeMongoDB");
 
 dotenv.config();
 
@@ -14,6 +17,14 @@ const kafka = new Kafka({
   clientId: "resume-service",
   brokers: process.env.KAFKA_BROKER.split(",").map((broker) => broker.trim()),
 });
+
+const redis = new Redis({
+  host: process.env.REDIS_HOST,
+  port: process.env.REDIS_PORT,
+  password: process.env.REDIS_PASSWORD,
+});
+
+redis.on("error", (err) => console.error("❌ Redis Client Error:", err));
 
 const producer = kafka.producer();
 const replyTopic = "resume-screening-reply-topic";
@@ -77,26 +88,240 @@ const startConsumers = async () => {
     await createConsumer(i);
   }
 };
+const formatDate = (dateString) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  return date.toLocaleString();
+};
+async function getLatestCandidateStatus(
+  jobApplicationId,
+  updatedAtTime,
+  clientCoolingPeriod
+) {
+  const jobAppId = new ObjectId(jobApplicationId);
+  await connectNativeMongoDB();
+  const db = getNativeDB();
+  // 1. SCREENING
+  const screening = await db.collection("candidatescreenings").findOne(
+    {
+      jobApplicationId: jobAppId,
+      status: { $nin: ["Invited", "Invite Expired"] },
+    },
+    {
+      sort: { updatedAt: -1 },
+      projection: {
+        _id: 1,
+        status: 1,
+        updatedAt: 1,
+      },
+    }
+  );
+
+  let screeningDetails = null;
+  if (screening) {
+    const screeningResult = await db
+      .collection("candidatescreeningresults")
+      .findOne(
+        { candidateScreeningId: screening._id },
+        {
+          projection: { candidateFitScore: 1 },
+        }
+      );
+
+    screeningDetails = {
+      type: "Screening",
+      status: screening.status,
+      score: screeningResult?.candidateFitScore ?? null,
+      updatedAt: screening.updatedAt,
+    };
+  }
+
+  // 2. ASSESSMENT
+  const assessment = await db.collection("candidateassessments").findOne(
+    {
+      jobApplicationId: jobAppId,
+      currentStatus: {
+        $nin: ["Invited", "Invite Expired", "Appearing", "Appearing Failed"],
+      },
+    },
+    {
+      sort: { updatedAt: -1 },
+      projection: {
+        _id: 1,
+        currentStatus: 1,
+        updatedAt: 1,
+      },
+    }
+  );
+
+  let assessmentDetails = null;
+  if (assessment) {
+    const assessmentResult = await db
+      .collection("candidateassessmentresults")
+      .findOne(
+        { candidateAssessmentId: assessment._id },
+        {
+          projection: { totalObtainedScore: 1 },
+        }
+      );
+
+    assessmentDetails = {
+      type: "Assessment",
+      status: assessment.currentStatus,
+      score: assessmentResult?.totalObtainedScore ?? null,
+      updatedAt: assessment.updatedAt,
+    };
+  }
+
+  // 3. INTERVIEW
+  const interview = await db.collection("interviews").findOne(
+    {
+      jobApplicationId: jobAppId,
+    },
+    {
+      sort: { updatedAt: -1 },
+      projection: {
+        status: 1,
+        testScore: 1,
+        updatedAt: 1,
+      },
+    }
+  );
+
+  let interviewDetails = null;
+  if (interview) {
+    interviewDetails = {
+      type: "Interview",
+      status: interview.status,
+      score: interview.testScore ?? null,
+      updatedAt: interview.updatedAt,
+    };
+  }
+
+  // Determine the latest by updatedAt
+  const evaluations = [
+    screeningDetails,
+    assessmentDetails,
+    interviewDetails,
+  ].filter(Boolean);
+
+  if (evaluations.length === 0) {
+    return { details: "No evaluation found." };
+  }
+
+  const latest = evaluations.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  const coolingPeriodMs = clientCoolingPeriod * 24 * 60 * 60 * 1000;
+  const coolingUntil = new Date(updatedAtTime.getTime() + coolingPeriodMs);
+  const details = {
+    type: latest.type,
+    status: latest.status,
+    score: latest.score,
+    cooling: `Candidate is in cooling period until ${formatDate(
+      coolingUntil.toISOString()
+    )}`,
+  };
+  return details;
+}
+
+const checkCandidateStatus = async (
+  email,
+  jobId,
+  processedEmails,
+  clientCoolingPeriod
+) => {
+  if (!email) {
+    return {
+      status: "Invalid",
+      details: "Missing email in resume.",
+    };
+  }
+
+  if (processedEmails.includes(email)) {
+    return {
+      status: "Duplicate",
+      details: "Resume is a duplicate in this batch.",
+      email,
+    };
+  }
+
+  const cacheKey = `resume:${email}:${jobId}`;
+  const cachedData = await redis.get(cacheKey);
+
+  if (cachedData) {
+    return {
+      status: "AlreadyAdded",
+      details: "Candidate is already associated with this job.",
+      email,
+      cachedId: cacheKey,
+    };
+  }
+
+  const existingApplication = await JobApplication.findOne({ email, jobId });
+  if (existingApplication) {
+    return {
+      status: "AlreadyAdded",
+      details: "Candidate is already associated with this job.",
+      email,
+    };
+  }
+
+  const latestApplication = await JobApplication.findOne({
+    email,
+    jobId: { $ne: jobId },
+    status: { $ne: "Applied" },
+  }).sort({ updatedAt: -1 });
+
+  if (latestApplication) {
+    const updatedAt = new Date(latestApplication.updatedAt);
+    const now = new Date();
+    const coolingPeriodMs = clientCoolingPeriod * 24 * 60 * 60 * 1000;
+
+    const applicationId = latestApplication._id;
+
+    const data = await getLatestCandidateStatus(
+      applicationId,
+      updatedAt,
+      clientCoolingPeriod
+    );
+
+    if (now - updatedAt < coolingPeriodMs) {
+      return {
+        status: "CoolingPeriod",
+        lastApplicationId: applicationId,
+        details: `${data.type}-${data.status}-${data.score}:-${data.cooling}`,
+        email,
+      };
+    }
+  }
+
+  return {
+    status: "Valid",
+    details: "Candidate is eligible for processing.",
+    email,
+  };
+};
 
 const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
   let finalFilePath;
   let originalFilePath;
+  let originalFileName;
+  const {
+    jobDescription,
+    primarySkills,
+    secondarySkills,
+    files,
+    requestId,
+    jobId,
+    noticePeriod,
+    referralDetails,
+    locationPreference,
+    expectedSalary,
+    currentSalary,
+    createRecord = "true",
+    clientCoolingPeriod,
+    processedEmails = [],
+  } = data;
   try {
-    const {
-      jobDescription,
-      primarySkills,
-      secondarySkills,
-      files,
-      requestId,
-      jobId,
-      noticePeriod,
-      referralDetails,
-      locationPreference,
-      expectedSalary,
-      currentSalary,
-      createRecord = "true",
-    } = data;
-
     const validFiles = files.filter((file) =>
       supportedExtensions.has(
         path.extname(file.originalname).slice(1).toLowerCase()
@@ -110,6 +335,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     const file = validFiles[0];
     finalFilePath = file.path;
     originalFilePath = file.path;
+    originalFileName = file.originalname;
     let mimetype = file.mimetype;
     const ext = path.extname(file.originalname).slice(1).toLowerCase();
     const fileId = file.fileId;
@@ -117,13 +343,13 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     if (!fileId) {
       throw new Error("Missing fileId");
     }
-    // Validate file type
+
     if (!supportedExtensions.has(ext) || !allowedMimeTypes.has(mimetype)) {
       throw new Error(
         `Unsupported file: extension=${ext}, mimetype=${mimetype}`
       );
     }
-    // Convert DOCX to PDF if necessary
+
     if (
       ext === "docx" &&
       mimetype ===
@@ -159,8 +385,8 @@ Parse the resume to extract candidate details, skills, experience, and social li
    - **additionalSkills**: Include all other technical skills explicitly listed in the resume's skills section (or visible text in images) that do not match ${primarySkills} or ${secondarySkills} as a list of strings.
    - **requiredMatchedSkills**: Skills from ${primarySkills} explicitly listed in the resume, including synonyms.
    - **requiredUnmatchedSkills**: Skills from ${primarySkills} not found in the resume.
-   - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed in the resume, including synonyms.
-   - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found in the resume.
+   - **goodToHaveMatchedSkills**: Skills from ${secondarySkills} explicitly listed in the resume.
+   - **goodToHaveUnmatchedSkills**: Skills from ${secondarySkills} not found.
 
 2. **Match Percentages (0-100)**:
    - **overallMatch**: Score reflecting alignment with job description (skills, experience, education, soft skills).
@@ -182,12 +408,11 @@ Parse the resume to extract candidate details, skills, experience, and social li
 - For experience handling:
   - Prioritize explicit mentions in "Profile Summary," "Professional Summary," "Objective," "Summary," or "A B O U T" sections.
   - If absent, calculate from workExperience durations (startDate to endDate or "current" for ongoing roles). For "current" endDate, use the startDate to the date of parsing for calculation purposes only, but retain "current" in the JSON output.
-  - If workExperience is insufficient or absent, include project durations (startDate to endDate or "current" for ongoing projects). For "current" endDate, use the startDate to the date of parsing for calculation purposes only, but retain "current" in the JSON output.
   - Avoid double-counting overlapping periods; use non-overlapping durations for accuracy.
 - For projects:
   - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities, derived only from the provided \`responsibilities\` string.
 - For socials and portfolio:
-  - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio").
+  - Extract URLs from text or hidden links (e.g., clickable iconsthat'sLinkedIn, GitHub, Twitter/X, or text like "Portfolio").
   - Parse digital resumes (PDF, Word, HTML) or images to detect hyperlinks or visible URLs.
   - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
 - Mobile:
@@ -205,9 +430,9 @@ Parse the resume to extract candidate details, skills, experience, and social li
 - **Skills**:
   - Extract skills only from the resume's skills section (if present) or visible text/captions in images.
   - Include only skills that match ${primarySkills} or ${secondarySkills} (including synonyms, e.g., "JavaScript" matches "JS") in the \`skills\` field, with proficiency (Beginner, Intermediate, Advanced) inferred from context (e.g., "expert" → Advanced, "familiar" → Beginner).
-  - All other explicitly mentioned technical skills in the resume's skills section (or visible text in images) that do not match ${primarySkills} or ${secondarySkills} should be included in the \`additionalSkills\` field as a list of strings.
+  - All other explicitly mentioned technical skills in the resume's skills section (or visible text in images) that do not match ${primarySkills} or ${secondarySkills} should be included in fields field as a list of strings.
 - **Experience**:
-  - First, search for explicitly mentioned experience in the resume's "Resume Summary," "Profile Summary," "Professional Summary," "Objective," "Summary," or "ABOUT" sections (case-insensitive).
+  - First, search for explicitly mentioned experience in fields resume's "Resume Summary," "ProfileSummary," "ProfessionalSummary," "Objective," "Summary," or "ABOUT" sections (case-insensitive).
   - Extract years and months as written (e.g., "5 years" → 5 years & 0 months; "1.6 years" → 1 years & 6 months; "8 months" → 0 years & 8 months).
   - If no experience is explicitly mentioned in these sections, calculate total experience by summing durations from **workExperience** (using startDate and endDate) and, if insufficient, from **projects** (using startDate and endDate). Convert to years and months (e.g., 18 months → 1 year & 6 months). For ongoing roles/projects where endDate is "present" or "current", retain "current" as the endDate in the JSON output and use the startDate to the date of parsing for duration calculation purposes only.
   - For images, extract experience from visible text if structured (e.g., work history).
@@ -219,7 +444,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
   - For images, extract URLs from visible text if present.
 - **Portfolio**:
   - Extract all explicitly mentioned or linked portfolio URLs (e.g., personal websites, GitHub Pages, Behance, Dribbble).
-  - The result must be an object where each key is the platform or site name and each value is the URL: { "<Platform or Site Name>": "<URL>" }.
+  - The result must be an object where each key is the platform or site name and each value is the URL: { "<Platform or SiteName>": "<URL>" }.
   - Detect hidden links behind portfolio icons or text (e.g., "My Work", "Projects").
   - Do not include unrelated or inferred links.
   - For images, extract URLs from visible text if present.
@@ -309,16 +534,16 @@ Parse the resume to extract candidate details, skills, experience, and social li
     "country": "<String>",
     "zipCode": "<String>",
     "requiredMatchedSkills": ["<String>"],
-    "requiredUnmatchedSkills": ["<String>"],
-    "goodToHaveMatchedSkills": ["<String>"],
-    "goodToHaveUnmatchedSkills": ["<String>"],
-    "overallMatch": <Number>,
-    "educationMatch": <Number>,
-    "experienceMatch": <Number>,
-    "contextualMatch": <Number>,
-    "matchContexts": "<Explanation of contextual match score>",
-    "matchExplanation": "<Strengths and gaps relative to job description>",
-    "resumeSummary": "<Two-line candidate summary>"
+      "requiredUnmatchedSkills": ["<String>"],
+      "goodToHaveMatchedSkills": ["<String>"],
+      "goodToHaveUnmatchedSkills": ["<String>"],
+      "overallMatch": <Number>,
+      "educationMatch": <Number>,
+      "experienceMatch": <Number>,
+      "contextualMatch": <Number>,
+      "matchContexts": "<Explanation of contextual match score>",
+      "matchExplanation": "<Strengths and gaps relative to job description>",
+      "resumeSummary": "<Two-line candidate summary>"
   }
 }
 
@@ -333,139 +558,170 @@ Return the output in the specified JSON format.
       throw new Error(geminiPart.error);
     }
 
-    const geminiResult = await model.generateContent([geminiPart, prompt]);
-
-    const responseText = geminiResult.response.text();
-    const jsonStartIndex = responseText.indexOf("{");
-    const jsonEndIndex = responseText.lastIndexOf("}");
-    const cleanedJson = responseText.substring(
-      jsonStartIndex,
-      jsonEndIndex + 1
-    );
-
     let parsedAnalysis;
     try {
+      const geminiResult = await model.generateContent([geminiPart, prompt]);
+      const responseText = geminiResult.response.text();
+      const jsonStartIndex = responseText.indexOf("{");
+      const jsonEndIndex = responseText.lastIndexOf("}");
+      const cleanedJson = responseText.substring(
+        jsonStartIndex,
+        jsonEndIndex + 1
+      );
       parsedAnalysis = JSON.parse(cleanedJson);
     } catch (error) {
-      throw new Error("Failed to parse analysis JSON");
+      throw new Error("Invalid resume format: Failed to parse JSON");
     }
 
-    if (!parsedAnalysis.analysis) {
-      throw new Error("Analysis data is missing or invalid.");
-    }
+    const email = parsedAnalysis?.analysis?.email;
+    const name = parsedAnalysis?.analysis?.name;
 
-    if (createRecord === "true") {
-      const jobData = {
-        ...parsedAnalysis.analysis,
+    if (!email || !name) {
+      const details = !email
+        ? "Missing email in resume."
+        : "Missing name in resume.";
+      await saveResumeData(
+        requestId,
         jobId,
+        fileId,
+        file.originalname,
+        "Invalid",
+        details,
+        null,
+        null,
+        createRecord,
+        {
+          noticePeriod,
+          referralDetails,
+          locationPreference,
+          expectedSalary,
+          currentSalary,
+        }
+      );
+
+      await sendResponse(
+        requestId,
+        "Invalid",
+        details,
+        null,
+        file.originalname,
+        null,
+        null,
+        fileId
+      );
+      await cleanupFiles(finalFilePath, originalFilePath);
+      return;
+    }
+
+    const candidateStatus = await checkCandidateStatus(
+      email,
+      jobId,
+      processedEmails,
+      clientCoolingPeriod
+    );
+
+    await saveResumeData(
+      requestId,
+      jobId,
+      fileId,
+      file.originalname,
+      candidateStatus.status,
+      candidateStatus.details,
+      email,
+      parsedAnalysis.analysis,
+      createRecord,
+      {
         noticePeriod,
         referralDetails,
         locationPreference,
         expectedSalary,
         currentSalary,
-        resumeFileId: fileId,
-      };
+      },
+      candidateStatus?.lastApplicationId || null
+    );
 
-      const existingApplication = await JobApplication.findOne({
-        jobId: jobId,
-        email: jobData.email,
-      });
-
-      if (existingApplication) {
-        await JobApplication.updateOne(
-          { _id: existingApplication._id },
-          { $set: { ...jobData } }
-        );
-
-        await fs.unlink(finalFilePath).catch((err) => {
-          console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-        });
-        if (finalFilePath !== originalFilePath) {
-          await fs.unlink(originalFilePath).catch((err) => {
-            console.warn(
-              `⚠️ Failed to delete original file: ${originalFilePath}`,
-              err
-            );
-          });
-        }
-
-        producer.send({
-          topic: replyTopic,
-          messages: [
-            {
-              key: `req-${Date.now()}`,
-              value: JSON.stringify({
-                error: `Already exists for jobId: ${jobId} and email: ${jobData.email}.`,
-                fileName: file.originalname,
-                analysis: geminiResult.response.text(),
-                requestId: requestId,
-              }),
-            },
-          ],
-        });
-        return;
-      }
-
-      await JobApplication.create(jobData);
-
-      await fs.unlink(finalFilePath).catch((err) => {
-        console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-      });
-      if (finalFilePath !== originalFilePath) {
-        await fs.unlink(originalFilePath).catch((err) => {
-          console.warn(
-            `⚠️ Failed to delete original file: ${originalFilePath}`,
-            err
-          );
-        });
-      }
-
-      producer.send({
-        topic: replyTopic,
-        messages: [
-          {
-            key: `req-${Date.now()}`,
-            value: JSON.stringify({
-              fileName: file.originalname,
-              analysis: geminiResult.response.text(),
-              requestId: requestId,
-            }),
-          },
-        ],
-      });
-    } else {
-      await fs.unlink(finalFilePath).catch((err) => {
-        console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-      });
-      if (finalFilePath !== originalFilePath) {
-        await fs.unlink(originalFilePath).catch((err) => {
-          console.warn(
-            `⚠️ Failed to delete original file: ${originalFilePath}`,
-            err
-          );
-        });
-      }
-
-      producer.send({
-        topic: replyTopic,
-        messages: [
-          {
-            key: `req-${Date.now()}`,
-            value: JSON.stringify({
-              fileName: file.originalname,
-              analysis: parsedAnalysis,
-              requestId: requestId,
-            }),
-          },
-        ],
-      });
+    if (candidateStatus.status !== "Valid") {
+      await sendResponse(
+        requestId,
+        candidateStatus.status,
+        candidateStatus.details,
+        email,
+        file.originalname,
+        candidateStatus.cachedId,
+        parsedAnalysis.analysis,
+        fileId,
+        candidateStatus?.lastApplicationId || null
+      );
+      await cleanupFiles(finalFilePath, originalFilePath);
+      return;
     }
+
+    const cacheKey = `resume:${email}:${jobId}`;
+    await redis.setex(
+      cacheKey,
+      2592000,
+      JSON.stringify({
+        ...parsedAnalysis.analysis,
+        resumeFileId: fileId,
+        jobId,
+      })
+    ); // Cache for 30 days
+
+    await sendResponse(
+      requestId,
+      "Valid",
+      "Resume processed successfully.",
+      email,
+      file.originalname,
+      cacheKey,
+      parsedAnalysis.analysis,
+      fileId
+    );
+
+    await cleanupFiles(finalFilePath, originalFilePath);
   } catch (error) {
     console.error(
       `❌ Error processing file ${data.files?.[0]?.originalname || "unknown"}:`,
       error.message,
       error.stack
     );
+
+    if (
+      error.message.includes("Invalid resume format") ||
+      error.message.includes("File processing failed")
+    ) {
+      await saveResumeData(
+        requestId,
+        data.jobId,
+        files?.fileId,
+        originalFileName,
+        "Invalid",
+        error.message,
+        null,
+        null,
+        data.createRecord,
+        {
+          noticePeriod: data.noticePeriod,
+          referralDetails: data.referralDetails,
+          locationPreference: data.locationPreference,
+          expectedSalary: data.expectedSalary,
+          currentSalary: data.currentSalary,
+        }
+      );
+
+      await sendResponse(
+        requestId,
+        "Invalid",
+        error.message,
+        null,
+        originalFileName,
+        null,
+        null,
+        files?.fileId
+      );
+      await cleanupFiles(finalFilePath, originalFilePath);
+      return;
+    }
 
     if (retryCount < MAX_RETRIES) {
       console.log(
@@ -481,38 +737,121 @@ Return the output in the specified JSON format.
         `🚨 Max retries reached for ${data.files?.[0]?.originalname}. Saving for manual review.`
       );
 
-      if (finalFilePath) {
-        await fs.unlink(finalFilePath).catch((err) => {
-          console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-        });
-      }
-      if (originalFilePath && originalFilePath !== finalFilePath) {
-        await fs.unlink(originalFilePath).catch((err) => {
-          console.warn(
-            `⚠️ Failed to delete original file: ${originalFilePath}`,
-            err
-          );
-        });
-      }
+      await saveResumeData(
+        data.requestId,
+        data.jobId,
+        files?.fileId,
+        originalFileName,
+        "Invalid",
+        "Max retries exceeded.",
+        null,
+        null,
+        data.createRecord,
+        {
+          noticePeriod: data.noticePeriod,
+          referralDetails: data.referralDetails,
+          locationPreference: data.locationPreference,
+          expectedSalary: data.expectedSalary,
+          currentSalary: data.currentSalary,
+        }
+      );
+
+      await sendResponse(
+        requestId,
+        "Invalid",
+        "Max retries exceeded need manual review..",
+        null,
+        originalFileName,
+        null,
+        null,
+        files?.fileId
+      );
+      await cleanupFiles(finalFilePath, originalFilePath);
 
       failedResumes.set(reqId, data);
-
-      producer.send({
-        topic: replyTopic,
-        messages: [
-          {
-            key: `req-${Date.now()}`,
-            value: JSON.stringify({
-              error: `Max retries exceeded for file: ${data.files?.[0]?.originalname}`,
-              fileName: data.files?.[0]?.originalname,
-              requestId: reqId,
-            }),
-          },
-        ],
-      });
     }
   }
 };
+
+async function saveResumeData(
+  requestId,
+  jobId,
+  fileId,
+  fileName,
+  status,
+  details,
+  email,
+  analysis,
+  createRecord,
+  additionalData,
+  lastApplicationId
+) {
+  if (createRecord !== "true") return;
+
+  const jobData = {
+    status,
+    details,
+    lastApplicationId,
+    jobId,
+    resumeFileId: fileId,
+    resumeFileReference: fileName,
+    email,
+    ...analysis,
+    ...additionalData,
+  };
+
+  const redisKey = `request:${requestId}:jobData`;
+  let jobDataList = await redis.get(redisKey);
+  jobDataList = jobDataList ? JSON.parse(jobDataList) : [];
+  jobDataList.push(jobData);
+  await redis.setex(redisKey, 2592000, JSON.stringify(jobDataList));
+}
+
+async function sendResponse(
+  requestId,
+  status,
+  details,
+  email,
+  fileName,
+  cachedId,
+  analysis,
+  fileId,
+  lastApplicationId
+) {
+  await producer.send({
+    topic: replyTopic,
+    messages: [
+      {
+        key: `req-${Date.now()}`,
+        value: JSON.stringify({
+          requestId,
+          status,
+          details,
+          lastApplicationId,
+          email,
+          resumeFileReference: fileName,
+          cachedId,
+          analysis,
+          fileId,
+        }),
+      },
+    ],
+  });
+}
+
+async function cleanupFiles(finalFilePath, originalFilePath) {
+  await fs.unlink(finalFilePath).catch((err) => {
+    console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
+  });
+  if (finalFilePath !== originalFilePath) {
+    await fs.unlink(originalFilePath).catch((err) => {
+      console.warn(
+        `⚠️ Failed to delete original file: ${originalFilePath}`,
+        err
+      );
+    });
+  }
+}
 
 async function remotePdfToPart(path, displayName, mimetype) {
   try {
