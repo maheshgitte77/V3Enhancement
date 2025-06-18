@@ -89,7 +89,9 @@ const analyzeResumes = async (req, res) => {
       await connectNativeMongoDB();
       const db = getNativeDB();
       const clientObjectId = new ObjectId(clientId);
-
+      const preferredLocations = locationPreference
+        .split(",")
+        .map((e) => e.trim());
       // 1. Get client's cooling period
       const client = await db
         .collection("clients")
@@ -152,7 +154,7 @@ const analyzeResumes = async (req, res) => {
             jobId,
             noticePeriod,
             referralDetails,
-            locationPreference,
+            preferredLocations,
             createRecord,
             expectedSalary,
             currentSalary,
@@ -358,19 +360,15 @@ const approveCandidates = async (req, res) => {
       !status ||
       !jobId
     ) {
-      return res
-        .status(400)
-        .json({
-          error: "requestId, emails array, status, and jobId are required",
-        });
+      return res.status(400).json({
+        error: "requestId, emails array, status, and jobId are required",
+      });
     }
 
     if (status !== "Valid") {
-      return res
-        .status(400)
-        .json({
-          error: "Invalid status. Only 'Valid' is allowed for approval",
-        });
+      return res.status(400).json({
+        error: "Invalid status. Only 'Valid' is allowed for approval",
+      });
     }
 
     // Fetch Redis data
@@ -546,10 +544,7 @@ const deleteCandidates = async (req, res) => {
 
     // Filter out candidates to delete
     const updatedJobDataList = jobDataList.filter((record) => {
-      if (
-        emails.includes(record.email) &&
-        record.jobId === jobId
-      ) {
+      if (emails.includes(record.email) && record.jobId === jobId) {
         deletedEmails.push(record.email);
         return false; // Remove from list
       }

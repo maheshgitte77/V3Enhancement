@@ -39,9 +39,6 @@ const JobApplicationSchema = new mongoose.Schema(
     preferredLocations: {
       type: [String],
     },
-    locationPreference: {
-      type: String,
-    },
     experience: {
       type: {
         years: {

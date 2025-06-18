@@ -314,7 +314,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     jobId,
     noticePeriod,
     referralDetails,
-    locationPreference,
+    preferredLocations,
     expectedSalary,
     currentSalary,
     createRecord = "true",
@@ -593,7 +593,7 @@ Return the output in the specified JSON format.
         {
           noticePeriod,
           referralDetails,
-          locationPreference,
+          preferredLocations,
           expectedSalary,
           currentSalary,
         }
@@ -633,7 +633,7 @@ Return the output in the specified JSON format.
       {
         noticePeriod,
         referralDetails,
-        locationPreference,
+        preferredLocations,
         expectedSalary,
         currentSalary,
       },
@@ -703,7 +703,7 @@ Return the output in the specified JSON format.
         {
           noticePeriod: data.noticePeriod,
           referralDetails: data.referralDetails,
-          locationPreference: data.locationPreference,
+          preferredLocations: data.preferredLocations,
           expectedSalary: data.expectedSalary,
           currentSalary: data.currentSalary,
         }
@@ -750,7 +750,7 @@ Return the output in the specified JSON format.
         {
           noticePeriod: data.noticePeriod,
           referralDetails: data.referralDetails,
-          locationPreference: data.locationPreference,
+          preferredLocations: data.preferredLocations,
           expectedSalary: data.expectedSalary,
           currentSalary: data.currentSalary,
         }
