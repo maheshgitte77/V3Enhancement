@@ -234,6 +234,10 @@ const JobApplicationSchema = new mongoose.Schema(
     zipCode: {
       type: String,
     },
+    isComplete: {
+      type: Boolean,
+      default: false,
+    },
     referralDetails: {
       name: String,
       email: String,
