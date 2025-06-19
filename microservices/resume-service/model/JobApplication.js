@@ -39,9 +39,6 @@ const JobApplicationSchema = new mongoose.Schema(
     preferredLocations: {
       type: [String],
     },
-    locationPreference: {
-      type: String,
-    },
     experience: {
       type: {
         years: {
@@ -233,6 +230,10 @@ const JobApplicationSchema = new mongoose.Schema(
     },
     zipCode: {
       type: String,
+    },
+    isComplete: {
+      type: Boolean,
+      default: false,
     },
     referralDetails: {
       name: String,
