@@ -90,8 +90,8 @@ const analyzeResumes = async (req, res) => {
       const db = getNativeDB();
       const clientObjectId = new ObjectId(clientId);
       const preferredLocations = locationPreference
-        .split(",")
-        .map((e) => e.trim());
+        ?.split(",")
+        ?.map((e) => e.trim());
       // 1. Get client's cooling period
       const client = await db
         .collection("clients")
