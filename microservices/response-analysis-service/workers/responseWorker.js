@@ -1,3 +1,20 @@
+/**
+ * @fileoverview Response Analysis Worker (V0)
+ * Handles the processing and analysis of candidate responses using Kafka and Google's Generative AI.
+ * This is the default (V0) implementation of the response analysis worker.
+ *
+ * @module ResponseWorker
+ * @requires kafkajs
+ * @requires fs
+ * @requires path
+ * @requires dotenv
+ * @requires @google/generative-ai
+ * @requires winston
+ * @requires ../model/CandidateAnswerAiResponse
+ * @requires ../model/CandidateScreeningResult
+ * @requires ../model/CandidateScreening
+ */
+
 const { Kafka } = require("kafkajs");
 const fs = require("fs").promises;
 const path = require("path");
@@ -14,7 +31,10 @@ const CandidateScreening = require("../model/CandidateScreening");
 
 dotenv.config();
 
-// Logger setup
+/**
+ * Winston logger configuration
+ * @type {winston.Logger}
+ */
 const logger = winston.createLogger({
   level: "info",
   format: winston.format.combine(
@@ -27,31 +47,56 @@ const logger = winston.createLogger({
   ],
 });
 
+/**
+ * Constants for file processing and retry logic
+ * @constant {string} UPLOADS_DIR - Directory for file uploads
+ * @constant {number} MAX_FILE_SIZE - Maximum allowed file size (2GB)
+ * @constant {number} MAX_RETRIES - Maximum number of retry attempts
+ * @constant {number} MAX_POLL_ATTEMPTS - Maximum number of polling attempts
+ * @constant {number} RETRY_BASE_DELAY - Base delay for retry backoff
+ */
 const UPLOADS_DIR = path.join(__dirname, "../Uploads/");
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
 const MAX_RETRIES = 3;
 const MAX_POLL_ATTEMPTS = 10;
 const RETRY_BASE_DELAY = 2000;
 
+/**
+ * Kafka client configuration
+ * @type {Kafka}
+ */
 const kafka = new Kafka({
-  clientId: "video-service",
+  clientId: "response-analysis-service",
   brokers: process.env.KAFKA_BROKER.split(",").map((broker) => broker.trim()),
 });
 
-// Initialize Google Gemini API
+/**
+ * Google Generative AI configuration
+ * @type {GoogleGenerativeAI}
+ */
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
   model: "gemini-2.5-pro-preview-03-25",
 });
 const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 
-// Custom error classes
+/**
+ * Custom error class for file-related errors
+ * @class FileError
+ * @extends Error
+ */
 class FileError extends Error {
   constructor(message) {
     super(message);
     this.name = "FileError";
   }
 }
+
+/**
+ * Custom error class for processing-related errors
+ * @class ProcessingError
+ * @extends Error
+ */
 class ProcessingError extends Error {
   constructor(message) {
     super(message);
@@ -59,7 +104,13 @@ class ProcessingError extends Error {
   }
 }
 
-// Utility functions
+/**
+ * Ensures a directory exists and is accessible
+ * @async
+ * @function ensureDirectory
+ * @param {string} dir - Directory path to check/create
+ * @throws {FileError} If directory cannot be created or accessed
+ */
 const ensureDirectory = async (dir) => {
   try {
     await fs.mkdir(dir, { recursive: true });
@@ -69,6 +120,13 @@ const ensureDirectory = async (dir) => {
   }
 };
 
+/**
+ * Validates a file's size and existence
+ * @async
+ * @function validateFile
+ * @param {string} filePath - Path to the file to validate
+ * @throws {FileError} If file is empty, too large, or inaccessible
+ */
 const validateFile = async (filePath) => {
   try {
     const stats = await fs.stat(filePath);
@@ -82,6 +140,15 @@ const validateFile = async (filePath) => {
   }
 };
 
+/**
+ * Polls for file processing status
+ * @async
+ * @function pollFileStatus
+ * @param {GoogleAIFileManager} fileManager - Google AI file manager instance
+ * @param {string} fileName - Name of the file to poll
+ * @returns {Promise<Object>} Processed file object
+ * @throws {FileError} If polling times out or file processing fails
+ */
 const pollFileStatus = async (fileManager, fileName) => {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
     const file = await fileManager.getFile(fileName);
@@ -98,6 +165,16 @@ const pollFileStatus = async (fileManager, fileName) => {
   );
 };
 
+/**
+ * Uploads a file to Google AI
+ * @async
+ * @function uploadFile
+ * @param {GoogleAIFileManager} fileManager - Google AI file manager instance
+ * @param {string} filePath - Path to the file to upload
+ * @param {string} fileName - Name to give the uploaded file
+ * @param {string} mimeType - MIME type of the file
+ * @returns {Promise<Object>} Uploaded file object
+ */
 const uploadFile = async (fileManager, filePath, fileName, mimeType) => {
   const response = await fileManager.uploadFile(filePath, {
     mimeType,
@@ -106,6 +183,12 @@ const uploadFile = async (fileManager, filePath, fileName, mimeType) => {
   return response.file;
 };
 
+/**
+ * Transforms AI analysis response into standardized format
+ * @function transformAiResponse
+ * @param {Object} parsedAnalysis - Raw analysis from AI
+ * @returns {Object} Standardized response object
+ */
 const transformAiResponse = (parsedAnalysis) => {
   const defaultResponse = {
     transcription: "No relevant speech detected",
@@ -201,7 +284,14 @@ const transformAiResponse = (parsedAnalysis) => {
   return transformed;
 };
 
-const generatePrompt = (videoData, normalizedType) => {
+/**
+ * Generates a prompt for the AI model based on response data
+ * @function generatePrompt
+ * @param {Object} responseData - The response data to analyze
+ * @param {string} normalizedType - The type of response (video/subjective/screening)
+ * @returns {string} Generated prompt for the AI model
+ */
+const generatePrompt = (responseData, normalizedType) => {
   const basePrompt = {
     common: `
       You are a professional analyzer tasked with evaluating candidate responses with maximum precision, strict adherence to provided data, and no hallucinations. Return the response in strict JSON format, deriving all metrics solely from the input (video, audio, or text). Do not fabricate, assume, or generate content beyond what is explicitly detected.
@@ -209,8 +299,8 @@ const generatePrompt = (videoData, normalizedType) => {
       **Strict Mode Responsibilities:**
       - **No Hallucinations**: Ensure all outputs are grounded in the input data. If a metric cannot be evaluated, set it to "Not evaluated: [specific reason]" and assign numerical values of 0.
       - **Relevance-Based Evaluation**: 
-        - \`correctPercentage\` (0–100%) and \`overallRating\` (0.0–5.0, as string) must reflect the response’s relevance and accuracy to the question (${
-          videoData.QuestionAnalyzed
+        - \`correctPercentage\` (0–100%) and \`overallRating\` (0.0–5.0, as string) must reflect the response's relevance and accuracy to the question (${
+          responseData.QuestionAnalyzed
         }). If irrelevant, set \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and explain in \`answerEffectiveness.relevanceBreakdown.relevanceExplanation\`.
       - **Multiple Voice Detection**: 
         - Detect multiple voices, whispers, or coaching cues. If detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list in \`cheatingIndicators\`.
@@ -222,12 +312,12 @@ const generatePrompt = (videoData, normalizedType) => {
       - **Cheating Detection**: 
         - List cheating behaviors in \`cheatingIndicators\` with timestamps. If none, return \`[]\`.
         - If cheating detected, set \`isCheatingDetected = true\`, \`correctPercentage = 0\`, \`overallRating = "0.0"\`.
-      - **Transcription**: Exact, verbatim transcription of candidate’s response. If none, "No relevant speech detected".
+      - **Transcription**: Exact, verbatim transcription of candidate's response. If none, "No relevant speech detected".
       - **Language Detection**: Percentages in \`languageDetection.percentageWise\` must sum to 100%.
       - **Experience and Job Role**: Evaluate \`technicalDepthAsPerExperience\` relative to experience (${
-        videoData.experience
+        responseData.experience
       }) and job role (${
-      videoData.jobRole
+      responseData.jobRole
     }). If irrelevant or cheating, set to "0.0".
 
       **Key Metrics**:
@@ -239,10 +329,10 @@ const generatePrompt = (videoData, normalizedType) => {
       ### Analysis Type: ${
         normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
       } response
-      **Question for Analysis**: ${videoData.QuestionAnalyzed}
-      **Candidate Experience**: ${videoData.experience}
-      **Job Role**: ${videoData.jobRole}
-      **Question Duration**: ${videoData.questionDuration}
+      **Question for Analysis**: ${responseData.QuestionAnalyzed}
+      **Candidate Experience**: ${responseData.experience}
+      **Job Role**: ${responseData.jobRole}
+      **Question Duration**: ${responseData.questionDuration}
 
       ### Analysis Responsibilities:
       - **Comprehensive Analysis**: Analyze all details (e.g., eye movement, lip syncing, voices, noise, text content).
@@ -395,7 +485,7 @@ const generatePrompt = (videoData, normalizedType) => {
       - **CopiedFromAITool**: Response matches AI-generated text (>90% similarity).
       - **CopiedFromWebsite**: Response matches web content (>90% similarity).
 
-      **Input**: Text answer: "${videoData.textAnswer || ""}"
+      **Input**: Text answer: "${responseData.textAnswer || ""}"
       **Response JSON Format:**
       {
         "communication": "[Description or 'Not evaluated']",
@@ -422,43 +512,54 @@ const generatePrompt = (videoData, normalizedType) => {
   return `${basePrompt.common}${basePrompt[normalizedType]}`;
 };
 
-const processVideo = async (videoData) => {
-  if (!videoData?.type) {
+/**
+ * Processes a candidate's response using AI analysis
+ * @async
+ * @function processResponse
+ * @param {Object} responseData - The response data to process
+ * @param {string} responseData.type - Type of response (video/subjective)
+ * @param {string} responseData.content - Response content or file path
+ * @param {Object} responseData.metadata - Additional metadata about the response
+ * @returns {Promise<Object>} Processed and analyzed response data
+ * @throws {ProcessingError} If response processing fails
+ */
+const processResponse = async (responseData) => {
+  if (!responseData?.type) {
     throw new ProcessingError("Missing question type");
   }
-  if (!videoData.QuestionAnalyzed) {
+  if (!responseData.QuestionAnalyzed) {
     throw new ProcessingError("Missing QuestionAnalyzed");
   }
-  if (!videoData.experience) {
+  if (!responseData.experience) {
     throw new ProcessingError("Missing candidate experience");
   }
-  if (!videoData.jobRole) {
+  if (!responseData.jobRole) {
     throw new ProcessingError("Missing job role");
   }
-  if (!videoData.questionDuration) {
+  if (!responseData.questionDuration) {
     throw new ProcessingError("Missing question duration");
   }
   if (
-    !videoData.candidateScreeningId ||
-    !videoData.jobApplicationId ||
-    !videoData.questionId
+    !responseData.candidateScreeningId ||
+    !responseData.jobApplicationId ||
+    !responseData.questionId
   ) {
     throw new ProcessingError("Missing required IDs");
   }
 
-  let videoPath;
+  let mediaPath;
   let uploadedFileName = null;
 
   try {
-    const normalizedType = videoData.type.toLowerCase();
+    const normalizedType = responseData.type.toLowerCase();
     if (normalizedType !== "subjective") {
-      if (!videoData.fileName || typeof videoData.fileName !== "string") {
+      if (!responseData.fileName || typeof responseData.fileName !== "string") {
         throw new FileError("Invalid or missing fileName");
       }
-      videoPath = path.join(UPLOADS_DIR, videoData.fileName);
+      mediaPath = path.join(UPLOADS_DIR, responseData.fileName);
       await ensureDirectory(UPLOADS_DIR);
-      await validateFile(videoPath);
-    } else if (!videoData.textAnswer) {
+      await validateFile(mediaPath);
+    } else if (!responseData.textAnswer) {
       throw new ProcessingError("Text answer required for subjective question");
     }
 
@@ -467,9 +568,9 @@ const processVideo = async (videoData) => {
     if (normalizedType === "video" || normalizedType === "audio") {
       const file = await uploadFile(
         fileManager,
-        videoPath,
-        videoData.fileName,
-        videoData.mimetype
+        mediaPath,
+        responseData.fileName,
+        responseData.mimetype
       );
       uploadedFileName = file.name;
       await pollFileStatus(fileManager, uploadedFileName);
@@ -478,7 +579,7 @@ const processVideo = async (videoData) => {
       ];
     }
 
-    prompt = generatePrompt(videoData, normalizedType);
+    prompt = generatePrompt(responseData, normalizedType);
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -504,30 +605,30 @@ const processVideo = async (videoData) => {
         const transformedAnalysis = transformAiResponse(parsedAnalysis);
 
         const doc = await CandidateScreeningResult.findOne({
-          candidateScreeningId: videoData.candidateScreeningId,
+          candidateScreeningId: responseData.candidateScreeningId,
         });
         if (!doc) {
           throw new ProcessingError(
-            `Candidate screening result not found for ID: ${videoData.candidateScreeningId}`
+            `Candidate screening result not found for ID: ${responseData.candidateScreeningId}`
           );
         }
 
-        const skill = doc.skills.find((s) => s.skill === videoData.skill);
+        const skill = doc.skills.find((s) => s.skill === responseData.skill);
         if (!skill) {
-          throw new ProcessingError(`Skill not found: ${videoData.skill}`);
+          throw new ProcessingError(`Skill not found: ${responseData.skill}`);
         }
 
-        const questionArray = {
+        const responseTypeKey = {
           video: "video",
           audio: "audio",
           subjective: "subjective",
         }[normalizedType];
-        const question = skill[questionArray]?.find(
-          (q) => q._id.toString() === videoData.questionId.toString()
+        const question = skill[responseTypeKey]?.find(
+          (q) => q._id.toString() === responseData.questionId.toString()
         );
         if (!question) {
           throw new ProcessingError(
-            `Question not found: ${videoData.questionId}`
+            `Question not found: ${responseData.questionId}`
           );
         }
 
@@ -605,8 +706,8 @@ const processVideo = async (videoData) => {
         } else if (normalizedType === "subjective") {
           metrics.subjective = {
             textLength:
-              typeof videoData.textAnswer === "string"
-                ? videoData.textAnswer.length
+              typeof responseData.textAnswer === "string"
+                ? responseData.textAnswer.length
                 : 0,
           };
         } else if (normalizedType === "mcq") {
@@ -627,11 +728,11 @@ const processVideo = async (videoData) => {
         // Create CandidateAnswerAiResponse
         const questionAiResponse = await CandidateAnswerAiResponse.create({
           type: normalizedType,
-          questionAnalyzed: videoData.QuestionAnalyzed,
-          candidateScreeningId: videoData.candidateScreeningId,
-          jobApplicationId: videoData.jobApplicationId,
-          questionId: videoData.questionId,
-          videoAnswerFileId: videoData.videoAnswerFileId,
+          questionAnalyzed: responseData.QuestionAnalyzed,
+          candidateScreeningId: responseData.candidateScreeningId,
+          jobApplicationId: responseData.jobApplicationId,
+          questionId: responseData.questionId,
+          videoAnswerFileId: responseData.videoAnswerFileId,
           status: "Analyzed",
           transcription: transformedAnalysis.transcription,
           communication: transformedAnalysis.communication,
@@ -673,7 +774,7 @@ const processVideo = async (videoData) => {
             ];
 
         // Update question fields
-        question.videoAnswerFileId = videoData.videoAnswerFileId;
+        question.videoAnswerFileId = responseData.videoAnswerFileId;
         question.candidateAnswerAiResponseId = questionAiResponse._id;
         question.answerSummary = answerSummary;
         question.cheatingFlags = cheatingFlags;
@@ -704,7 +805,7 @@ const processVideo = async (videoData) => {
         doc.cheatingFlags = finalCheatingFlags;
         await doc.save();
         logger.info(
-          `Successfully processed ${normalizedType} response for question ID: ${videoData.questionId}`
+          `Successfully processed ${normalizedType} response for question ID: ${responseData.questionId}`
         );
         return;
       } catch (error) {
@@ -722,20 +823,20 @@ const processVideo = async (videoData) => {
     }
     throw new ProcessingError("All processing attempts failed");
   } catch (error) {
-    logger.error(`Process video error: ${error.message}`);
+    logger.error(`Process response error: ${error.message}`);
     throw error;
   } finally {
     if (
-      videoPath &&
+      mediaPath &&
       (await fs
-        .access(videoPath)
+        .access(mediaPath)
         .then(() => true)
         .catch(() => false))
     ) {
       await fs
-        .unlink(videoPath)
+        .unlink(mediaPath)
         .catch((err) =>
-          logger.warn(`Failed to delete file: ${videoPath}, ${err.message}`)
+          logger.warn(`Failed to delete file: ${mediaPath}, ${err.message}`)
         );
     }
     if (uploadedFileName) {
@@ -750,7 +851,19 @@ const processVideo = async (videoData) => {
   }
 };
 
+/**
+ * Processes a candidate's screening response
+ * @async
+ * @function processScreening
+ * @param {Object} screeningData - The screening data to process
+ * @param {string} screeningData.type - Type of screening
+ * @param {Array} screeningData.questions - List of screening questions
+ * @param {Array} screeningData.answers - List of candidate answers
+ * @returns {Promise<Object>} Processed screening results
+ * @throws {ProcessingError} If screening processing fails
+ */
 const processScreening = async (screeningData) => {
+  console.log("Processing screening data V0");
   const { candidateScreeningId, screeningAssessmentId } = screeningData;
   try {
     const screeningResult = await CandidateScreeningResult.findOne({
@@ -1040,11 +1153,22 @@ const processScreening = async (screeningData) => {
   }
 };
 
+/**
+ * Runs a Kafka consumer to process messages
+ * @async
+ * @function runConsumer
+ * @param {string} consumerId - Unique identifier for the consumer
+ * @returns {Promise<void>}
+ */
 const runConsumer = async (consumerId) => {
+  const consumerGroupId = `${process.env.GROUP_ID_VIDEO_ANALYZE}_v0`;
   const consumer = kafka.consumer({
-    groupId: process.env.GROUP_ID_VIDEO_ANALYZE,
+    groupId: consumerGroupId,
   });
   await consumer.connect();
+  logger.info(
+    `V0 Consumer ${consumerId} connected with group ID: ${consumerGroupId}`
+  );
   await consumer.subscribe({
     topic: process.env.KAFKA_VIDEO_TOPIC,
     fromBeginning: true,
@@ -1052,11 +1176,24 @@ const runConsumer = async (consumerId) => {
   await consumer.run({
     eachMessage: async ({ message }) => {
       try {
-        const videoData = JSON.parse(message.value.toString());
-        if (videoData.isScreening) {
-          await processScreening(videoData);
+        const responseData = JSON.parse(message.value.toString());
+
+        // Version filtering: V0 worker processes messages with version "v0" or no version (backward compatibility)
+        if (
+          responseData.isScreening &&
+          responseData.version &&
+          responseData.version !== "v0"
+        ) {
+          logger.info(
+            `V0 Worker skipping message with version: ${responseData.version}`
+          );
+          return;
+        }
+
+        if (responseData.isScreening) {
+          await processScreening(responseData);
         } else {
-          await processVideo(videoData);
+          await processResponse(responseData);
         }
       } catch (error) {
         logger.error(`Consumer ${consumerId} error: ${error.message}`);
@@ -1066,6 +1203,13 @@ const runConsumer = async (consumerId) => {
   logger.info(`Consumer ${consumerId} started`);
 };
 
+/**
+ * Gets the number of partitions for a Kafka topic
+ * @async
+ * @function getPartitionCount
+ * @param {string} topic - Name of the Kafka topic
+ * @returns {Promise<number>} Number of partitions
+ */
 const getPartitionCount = async (topic) => {
   const admin = kafka.admin();
   try {
@@ -1077,6 +1221,13 @@ const getPartitionCount = async (topic) => {
   }
 };
 
+/**
+ * Creates a Kafka topic if it doesn't exist
+ * @async
+ * @function createTopicIfNotExists
+ * @param {string} topic - Name of the topic to create
+ * @returns {Promise<void>}
+ */
 const createTopicIfNotExists = async (topic) => {
   const admin = kafka.admin();
   try {
@@ -1096,6 +1247,12 @@ const createTopicIfNotExists = async (topic) => {
   }
 };
 
+/**
+ * Initializes Kafka consumers for processing messages
+ * @async
+ * @function initializeConsumers
+ * @returns {Promise<void>}
+ */
 const initializeConsumers = async () => {
   try {
     await createTopicIfNotExists(process.env.KAFKA_VIDEO_TOPIC);
@@ -1118,4 +1275,4 @@ const initializeConsumers = async () => {
 
 initializeConsumers();
 
-module.exports = { processVideo, processScreening };
+module.exports = { processResponse, processScreening };
