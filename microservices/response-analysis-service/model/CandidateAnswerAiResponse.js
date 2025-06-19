@@ -54,6 +54,8 @@ const mongoose = require("mongoose");
  * @property {Object} [relevanceAssessment] - V2: Intelligent relevance assessment
  * @property {string[]} [behavioralInsights] - V2: Behavioral pattern insights
  * @property {string} [responseQuality] - V2: Overall response quality (high/medium/low)
+ * @property {boolean} [baseAnswerProvided] - V2: Whether a base answer was provided for comparison
+ * @property {Object} [baseAnswerComparison] - V2: Comprehensive base answer comparison analysis
  * @property {Object} metrics - Type-specific metrics (video/audio/subjective/mcq)
  * @property {Object} behavioralAnalysis - V2: Enhanced behavioral analysis for cheating detection
  */
@@ -207,6 +209,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     },
     // V2: Enhanced behavioral analysis for cheating detection
     behavioralAnalysis: {
+      // Video/Audio behavioral analysis fields
       eyeMovementPattern: {
         type: String,
         enum: [
@@ -254,12 +257,62 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
         ],
         default: "Not assessed",
       },
+
+      // Subjective (typing-based) behavioral analysis fields
+      typingPattern: {
+        type: String,
+        enum: [
+          "Normal typing patterns",
+          "Slow and deliberate typing",
+          "Steady typing pace",
+          "Very fast typing observed",
+          "Suspicious typing patterns",
+          "Irregular typing speed detected",
+          "No typing data available",
+        ],
+      },
+      inputBehavior: {
+        type: String,
+        enum: [
+          "Original typing detected",
+          "Some copy-paste usage",
+          "Concerning input patterns",
+          "Multiple paste operations",
+          "Moderate copy-paste usage",
+          "Heavy copy-paste detected",
+          "Unable to analyze",
+        ],
+      },
+      compositionStyle: {
+        type: String,
+        enum: [
+          "Natural composition flow",
+          "Continuous writing style",
+          "Thoughtful composition style",
+          "Non-natural composition",
+          "Frequent thinking pauses",
+          "Extended research pauses",
+          "Not assessed",
+        ],
+      },
+      focusConsistency: {
+        type: String,
+        enum: [
+          "Maintained focus throughout",
+          "Mostly consistent focus",
+          "Occasional focus loss",
+          "Poor focus consistency",
+          "Frequent external interactions",
+          "Unknown",
+        ],
+      },
       suspiciousIndicators: {
         type: [String],
         default: [],
       },
       // V2: Timestamp tracking for behavioral observations
       behavioralTimestamps: {
+        // Video/Audio behavioral events
         eyeMovementEvents: [
           {
             timestamp: { type: Number, min: 0 }, // seconds from start
@@ -296,6 +349,48 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
             description: { type: String },
           },
         ],
+
+        // Subjective (typing-based) behavioral events
+        typingEvents: [
+          {
+            timestamp: { type: Number, min: 0 },
+            duration: { type: Number, min: 0 },
+            behavior: { type: String },
+            confidence: { type: Number, min: 0, max: 100 },
+            description: { type: String },
+          },
+        ],
+        inputBehaviorEvents: [
+          {
+            timestamp: { type: Number, min: 0 },
+            duration: { type: Number, min: 0 },
+            behavior: { type: String },
+            confidence: { type: Number, min: 0, max: 100 },
+            description: { type: String },
+            category: {
+              type: String,
+              enum: ["input", "paste", "copy", "speed", "research"],
+            },
+          },
+        ],
+        compositionEvents: [
+          {
+            timestamp: { type: Number, min: 0 },
+            duration: { type: Number, min: 0 },
+            behavior: { type: String },
+            confidence: { type: Number, min: 0, max: 100 },
+            description: { type: String },
+          },
+        ],
+        focusEvents: [
+          {
+            timestamp: { type: Number, min: 0 },
+            duration: { type: Number, min: 0 },
+            behavior: { type: String },
+            confidence: { type: Number, min: 0, max: 100 },
+            description: { type: String },
+          },
+        ],
         suspiciousEvents: [
           {
             timestamp: { type: Number, min: 0 },
@@ -305,7 +400,17 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
             description: { type: String },
             category: {
               type: String,
-              enum: ["cheating", "technical", "environmental", "behavioral"],
+              enum: [
+                "cheating",
+                "technical",
+                "environmental",
+                "behavioral",
+                "input",
+                "paste",
+                "copy",
+                "speed",
+                "research",
+              ],
             },
           },
         ],
@@ -313,6 +418,92 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
         totalSuspiciousTime: { type: Number, default: 0 }, // total seconds of suspicious behavior
         peakSuspiciousTimestamp: { type: Number, default: 0 }, // timestamp of highest confidence event
         behaviorDensity: { type: Number, default: 0 }, // suspicious events per minute
+      },
+    },
+
+    // V2: Base Answer Comparison for subjective questions
+    baseAnswerProvided: {
+      type: Boolean,
+      default: false,
+    },
+    baseAnswerComparison: {
+      hasExpectedAnswer: {
+        type: Boolean,
+        default: false,
+      },
+      overallMatch: {
+        score: {
+          type: Number,
+          min: 0,
+          max: 5,
+          default: 0,
+        },
+        quality: {
+          type: String,
+          enum: ["excellent", "good", "fair", "poor"],
+          default: "poor",
+        },
+        confidence: {
+          type: String,
+          enum: ["high", "medium", "low"],
+          default: "low",
+        },
+      },
+      scoreBreakdown: {
+        contentMatch: {
+          type: Number,
+          min: 0,
+          max: 5,
+          default: 0,
+        },
+        technicalCorrectness: {
+          type: Number,
+          min: 0,
+          max: 5,
+          default: 0,
+        },
+        methodValidity: {
+          type: Number,
+          min: 0,
+          max: 5,
+          default: 0,
+        },
+        innovationBonus: {
+          type: Number,
+          min: 0,
+          max: 1,
+          default: 0,
+        },
+      },
+      matchType: {
+        type: String,
+        enum: [
+          "exact_match",
+          "very_similar",
+          "alternative_solution",
+          "partial_match",
+          "related_but_different",
+          "minimal_overlap",
+          "no_comparison",
+        ],
+        default: "no_comparison",
+      },
+      matchDescription: {
+        type: String,
+        default: "",
+      },
+      analysisConfidence: {
+        type: String,
+        enum: ["high", "medium", "low"],
+        default: "low",
+      },
+      considerationFactors: {
+        type: [String],
+        default: [],
+      },
+      detailedAnalysis: {
+        type: String,
+        default: "",
       },
     },
 

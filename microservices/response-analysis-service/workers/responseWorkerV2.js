@@ -494,26 +494,22 @@ const calculateAdaptiveScoring = (analysis, context = {}) => {
     const currentRating = parseFloat(analysis.technicalDepth.rating) || 0;
 
     let adjustmentFactor = 1.0;
-    let adjustmentReason = "";
 
     if (experienceYears < 2) {
       adjustmentFactor = 1.1; // Boost for junior candidates
-      adjustmentReason = `Adjusted upward for junior candidate (${experienceYears} years experience)`;
       experienceAdjustmentApplied = true;
     } else if (experienceYears > 5) {
       adjustmentFactor = 0.95; // Slightly higher expectations for senior
-      adjustmentReason = `Adjusted for senior candidate expectations (${experienceYears} years experience)`;
       experienceAdjustmentApplied = true;
     } else {
-      adjustmentReason = `Standard evaluation for mid-level candidate (${experienceYears} years experience)`;
-      experienceAdjustmentApplied = true;
+      experienceAdjustmentApplied = true; // Standard evaluation for mid-level candidate
     }
 
     const adjustedRating = Math.min(5.0, currentRating * adjustmentFactor);
     adaptedAnalysis.technicalDepth = {
       ...adaptedAnalysis.technicalDepth,
       rating: adjustedRating.toFixed(1),
-      asPerExplanation: `${adaptedAnalysis.technicalDepth.asPerExplanation} ${adjustmentReason}`,
+      asPerExplanation: adaptedAnalysis.technicalDepth.asPerExplanation, // Removed technical annotation
       experienceAdjusted: experienceAdjustmentApplied,
     };
   }
@@ -540,7 +536,8 @@ const calculateAdaptiveScoring = (analysis, context = {}) => {
     adaptedAnalysis.technicalDepthAsPerExperience = {
       ...adaptedAnalysis.technicalDepthAsPerExperience,
       rating: adjustedRating.toFixed(1),
-      asPerExperience: `${adaptedAnalysis.technicalDepthAsPerExperience.asPerExperience} (V2 experience-adjusted evaluation)`,
+      asPerExperience:
+        adaptedAnalysis.technicalDepthAsPerExperience.asPerExperience, // Removed technical annotation
     };
   }
 
@@ -672,12 +669,339 @@ const analyzeBehavioralPatterns = (metrics, analysis) => {
 };
 
 /**
+ * V2: Advanced Multi-Dimensional Base Answer Analysis
+ * Performs comprehensive comparison between candidate answer and expected base answer
+ * @param {string} candidateAnswer - The candidate's response
+ * @param {string} baseAnswer - The expected/reference answer
+ * @param {Object} context - Additional context (experience, job role, etc.)
+ * @returns {Object} Detailed base answer comparison analysis
+ */
+const analyzeBaseAnswerV2 = (candidateAnswer, baseAnswer, context = {}) => {
+  // Validate inputs
+  if (!candidateAnswer || !baseAnswer) {
+    return {
+      hasExpectedAnswer: false,
+      overallMatch: {
+        score: 0.0,
+        quality: "poor",
+        confidence: "high",
+      },
+      scoreBreakdown: {
+        contentMatch: 0.0,
+        technicalCorrectness: 0.0,
+        methodValidity: 0.0,
+        innovationBonus: 0.0,
+      },
+      matchType: "no_comparison",
+      matchDescription: candidateAnswer
+        ? "No base answer provided for comparison"
+        : "No candidate answer provided",
+      analysisConfidence: "high",
+      considerationFactors: ["Missing required comparison data"],
+      detailedAnalysis:
+        "Cannot perform comparison without both candidate and base answers",
+    };
+  }
+
+  // Normalize text for comparison
+  const normalizeText = (text) =>
+    text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const candidateNorm = normalizeText(candidateAnswer);
+  const baseNorm = normalizeText(baseAnswer);
+
+  // Extract keywords for semantic comparison
+  const extractKeywords = (text) => {
+    return text
+      .split(" ")
+      .filter(
+        (word) =>
+          word.length > 3 &&
+          ![
+            "the",
+            "and",
+            "that",
+            "this",
+            "with",
+            "from",
+            "they",
+            "have",
+            "been",
+            "will",
+            "would",
+            "could",
+            "should",
+          ].includes(word)
+      );
+  };
+
+  const candidateKeywords = extractKeywords(candidateNorm);
+  const baseKeywords = extractKeywords(baseNorm);
+
+  // 1. Content Match Analysis (0.0-5.0)
+  const calculateContentMatch = () => {
+    // Exact match check
+    if (candidateNorm === baseNorm) return 5.0;
+
+    // Keyword overlap analysis
+    const commonKeywords = candidateKeywords.filter((word) =>
+      baseKeywords.includes(word)
+    );
+    const keywordOverlap =
+      baseKeywords.length > 0 ? commonKeywords.length / baseKeywords.length : 0;
+
+    // Text similarity using simple character-based approach
+    const longerText = Math.max(candidateAnswer.length, baseAnswer.length);
+    const shorterText = Math.min(candidateAnswer.length, baseAnswer.length);
+    const lengthSimilarity = shorterText / longerText;
+
+    // Combined content score
+    let contentScore = (keywordOverlap * 0.7 + lengthSimilarity * 0.3) * 5.0;
+
+    // Boost for high keyword overlap
+    if (keywordOverlap > 0.8) contentScore = Math.min(contentScore + 0.5, 5.0);
+    if (keywordOverlap > 0.6) contentScore = Math.min(contentScore + 0.3, 5.0);
+
+    return Math.round(contentScore * 10) / 10;
+  };
+
+  // 2. Technical Correctness Analysis (0.0-5.0)
+  const calculateTechnicalCorrectness = () => {
+    // Check for technical terms presence
+    const technicalTerms = baseKeywords.filter(
+      (word) =>
+        word.length > 5 ||
+        [
+          "api",
+          "sql",
+          "css",
+          "html",
+          "json",
+          "rest",
+          "http",
+          "tcp",
+          "udp",
+        ].includes(word)
+    );
+
+    const candidateTechnicalTerms = candidateKeywords.filter((word) =>
+      technicalTerms.includes(word)
+    );
+    const technicalAccuracy =
+      technicalTerms.length > 0
+        ? candidateTechnicalTerms.length / technicalTerms.length
+        : 0.5;
+
+    // Adjust based on experience level
+    const experienceLevel = parseInt(context.experience) || 0;
+    let adjustmentFactor = 1.0;
+    if (experienceLevel < 2) adjustmentFactor = 1.2; // More lenient for juniors
+    else if (experienceLevel > 5) adjustmentFactor = 0.9; // Stricter for seniors
+
+    let technicalScore = technicalAccuracy * adjustmentFactor * 5.0;
+    return Math.min(Math.round(technicalScore * 10) / 10, 5.0);
+  };
+
+  // 3. Method Validity Analysis (0.0-5.0)
+  const calculateMethodValidity = () => {
+    // Check if candidate mentions alternative valid approaches
+    const methodKeywords = [
+      "approach",
+      "method",
+      "way",
+      "solution",
+      "technique",
+      "strategy",
+    ];
+    const candidateHasMethods = methodKeywords.some((word) =>
+      candidateAnswer.toLowerCase().includes(word)
+    );
+    const baseHasMethods = methodKeywords.some((word) =>
+      baseAnswer.toLowerCase().includes(word)
+    );
+
+    // Base validity score from content match
+    const contentMatch = calculateContentMatch();
+    let methodScore = contentMatch * 0.8; // Start with content-based score
+
+    // Bonus for demonstrating understanding of different approaches
+    if (candidateHasMethods && baseHasMethods) methodScore += 0.5;
+    if (candidateAnswer.length > baseAnswer.length * 1.2) methodScore += 0.3; // Bonus for elaboration
+
+    return Math.min(Math.round(methodScore * 10) / 10, 5.0);
+  };
+
+  // 4. Innovation Bonus Calculation (0.0-1.0)
+  const calculateInnovationBonus = () => {
+    // Check for advanced concepts not in base answer
+    const candidateUniqueKeywords = candidateKeywords.filter(
+      (word) => !baseKeywords.includes(word)
+    );
+    const innovationIndicators = [
+      "optimize",
+      "efficient",
+      "performance",
+      "scalable",
+      "security",
+      "best practice",
+      "modern",
+    ];
+
+    const hasInnovation = candidateUniqueKeywords.some((word) =>
+      innovationIndicators.some(
+        (indicator) => word.includes(indicator) || indicator.includes(word)
+      )
+    );
+
+    // Bonus for providing more comprehensive answer
+    const isMoreComprehensive =
+      candidateAnswer.length > baseAnswer.length * 1.5;
+
+    let innovationBonus = 0.0;
+    if (hasInnovation) innovationBonus += 0.5;
+    if (isMoreComprehensive) innovationBonus += 0.3;
+    if (candidateUniqueKeywords.length > baseKeywords.length * 0.3)
+      innovationBonus += 0.2;
+
+    return Math.min(Math.round(innovationBonus * 10) / 10, 1.0);
+  };
+
+  // Calculate all scores
+  const contentMatch = calculateContentMatch();
+  const technicalCorrectness = calculateTechnicalCorrectness();
+  const methodValidity = calculateMethodValidity();
+  const innovationBonus = calculateInnovationBonus();
+
+  // Calculate overall match score
+  const baseScore =
+    contentMatch * 0.4 + technicalCorrectness * 0.35 + methodValidity * 0.25;
+  const overallScore = Math.min(baseScore + innovationBonus, 5.0);
+
+  // Determine match type and quality
+  const getMatchType = (score) => {
+    if (score >= 4.5) return "exact_match";
+    if (score >= 4.0) return "very_similar";
+    if (score >= 3.5) return "alternative_solution";
+    if (score >= 3.0) return "partial_match";
+    if (score >= 2.0) return "related_but_different";
+    return "minimal_overlap";
+  };
+
+  const getMatchQuality = (score) => {
+    if (score >= 4.0) return "excellent";
+    if (score >= 3.0) return "good";
+    if (score >= 2.0) return "fair";
+    return "poor";
+  };
+
+  const getMatchDescription = (matchType, score) => {
+    const descriptions = {
+      exact_match:
+        "Answer closely matches the expected response with high accuracy",
+      very_similar:
+        "Answer is very similar to expected response with minor variations",
+      alternative_solution:
+        "Different approach but achieves the same goal effectively",
+      partial_match:
+        "Answer addresses some key concepts from the expected response",
+      related_but_different:
+        "Answer shows topic awareness but differs significantly from expected approach",
+      minimal_overlap:
+        "Answer has limited alignment with the expected response",
+    };
+    return descriptions[matchType] || "Unable to determine match quality";
+  };
+
+  const getConfidenceLevel = (contentMatch, technicalCorrectness) => {
+    const avgScore = (contentMatch + technicalCorrectness) / 2;
+    if (avgScore >= 4.0) return "high";
+    if (avgScore >= 2.5) return "medium";
+    return "low";
+  };
+
+  const matchType = getMatchType(overallScore);
+  const matchQuality = getMatchQuality(overallScore);
+  const confidence = getConfidenceLevel(contentMatch, technicalCorrectness);
+
+  // Generate consideration factors
+  const considerationFactors = [];
+  if (context.experience)
+    considerationFactors.push(`Experience level: ${context.experience} years`);
+  if (context.jobRole)
+    considerationFactors.push(`Job role: ${context.jobRole}`);
+  if (innovationBonus > 0.3)
+    considerationFactors.push(
+      "Candidate provided additional innovative insights"
+    );
+  if (contentMatch < 2.0)
+    considerationFactors.push(
+      "Low content alignment may indicate different interpretation"
+    );
+  if (candidateAnswer.length > baseAnswer.length * 2)
+    considerationFactors.push("Comprehensive response with extensive detail");
+
+  // Generate detailed analysis
+  const detailedAnalysis = `
+Content Analysis: The candidate's response shows ${Math.round(
+    (contentMatch / 5) * 100
+  )}% content alignment with the expected answer. 
+Technical Assessment: Technical correctness rated at ${Math.round(
+    (technicalCorrectness / 5) * 100
+  )}% based on keyword analysis and experience level consideration.
+Method Evaluation: The approach validity scores ${Math.round(
+    (methodValidity / 5) * 100
+  )}%, indicating ${
+    methodValidity >= 3.5
+      ? "strong"
+      : methodValidity >= 2.5
+      ? "adequate"
+      : "limited"
+  } methodological understanding.
+Innovation Factor: ${
+    innovationBonus > 0.3
+      ? "Significant additional insights provided beyond base requirements"
+      : innovationBonus > 0.1
+      ? "Some additional value demonstrated"
+      : "Standard response without notable innovations"
+  }.
+Overall Assessment: ${matchQuality.toUpperCase()} match with ${confidence} confidence level.
+  `.trim();
+
+  return {
+    hasExpectedAnswer: true,
+    overallMatch: {
+      score: Math.round(overallScore * 10) / 10,
+      quality: matchQuality,
+      confidence: confidence,
+    },
+    scoreBreakdown: {
+      contentMatch: Math.round(contentMatch * 10) / 10,
+      technicalCorrectness: Math.round(technicalCorrectness * 10) / 10,
+      methodValidity: Math.round(methodValidity * 10) / 10,
+      innovationBonus: Math.round(innovationBonus * 10) / 10,
+    },
+    matchType,
+    matchDescription: getMatchDescription(matchType, overallScore),
+    analysisConfidence: confidence,
+    considerationFactors,
+    detailedAnalysis,
+  };
+};
+
+/**
  * Generate V2-specific prompt with context-aware instructions
  * @param {Object} responseData - Response data
  * @param {string} normalizedType - Response type
  * @returns {string} V2 prompt
  */
-const generateV2Prompt = (responseData, normalizedType) => {
+const generateV2Prompt = (
+  responseData,
+  normalizedType,
+  processingContext = {}
+) => {
   const basePrompt = `
 You are an advanced AI evaluator using BALANCED & CONTEXT-AWARE analysis. Your goal is to provide accurate, fair assessment with intelligent contextual understanding.
 
@@ -1167,14 +1491,14 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
   },
   "technicalDepth": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExplanation": "[Clear assessment of technical knowledge demonstrated - Excellent/Good/Fair/Needs Improvement with specific examples. DO NOT mention reading, cheating, or integrity concerns - these are handled separately]",
+    "asPerExplanation": "[PURELY TECHNICAL assessment of knowledge demonstrated - Excellent/Good/Fair/Needs Improvement with specific technical examples. NEVER mention integrity, cheating, or behavioral concerns - keep purely technical]",
     "experienceAdjusted": "[MANDATORY true/false - whether rating considers experience level]"
   },
   "technicalDepthAsPerExperience": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExperience": "[Assessment relative to {experienceYears} years experience - meets/exceeds/below expectations. DO NOT mention reading, cheating, or integrity concerns - these are handled separately]" 
+    "asPerExperience": "[PURELY TECHNICAL assessment relative to {experienceYears} years experience - meets/exceeds/below expectations. NEVER mention integrity, cheating, or behavioral concerns - keep purely technical]" 
   },
-  "overallContentQuality": "[HR-friendly quality assessment - Excellent/Good/Fair/Poor with clear reasoning. DO NOT mention reading, cheating, or integrity concerns - these are handled separately]",
+  "overallContentQuality": "[CENTRALIZED integrity reporting field - Include technical quality assessment AND any integrity concerns if detected. This is the ONLY field that should mention cheating, behavioral issues, or integrity concerns. Format: Technical quality + integrity impact if applicable]",
   "overallRating": "<String, 0.0–5.0>",
   "correctPercentage": "[0–100%]",
   "detailedSummary": "[Comprehensive HR-friendly summary focusing on: technical competency, communication skills, integrity assessment, and hiring recommendation context]",
@@ -1214,7 +1538,177 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 }
 `;
 
-  return basePrompt;
+  // Add cheating detection context if available
+  let cheatingContext = "";
+  if (processingContext.hasTypingAnalysis && processingContext.typingAnalysis) {
+    const typingAnalysis = processingContext.typingAnalysis;
+    const analysis = typingAnalysis.analysis?.details || {};
+    const isCheatingDetected = typingAnalysis.analysis?.flagged || false;
+    const cheatingConfidence = typingAnalysis.confidence || 0;
+
+    // Extract key behavioral metrics
+    const externalInteractions =
+      analysis.globalEventAnalysis?.details?.externalInteractionCount || 0;
+    const focusLossCount = analysis.focusAnalysis?.details?.focusLossCount || 0;
+    const pastePercentage =
+      analysis.pasteAnalysis?.details?.pastePercentage || 0;
+    const indicators = typingAnalysis.indicators || [];
+
+    cheatingContext = `
+
+**CRITICAL: BEHAVIORAL ANALYSIS ALREADY COMPLETED**
+**Pre-Analysis Cheating Detection Results:**
+- Cheating Detected: ${isCheatingDetected ? "YES" : "NO"}
+- Behavioral Confidence: ${cheatingConfidence}%
+- External Interactions: ${externalInteractions} events
+- Focus Loss Events: ${focusLossCount} times  
+- Paste Percentage: ${pastePercentage}%
+- Primary Concerns: ${indicators.slice(0, 3).join("; ") || "None detected"}
+
+**CENTRALIZED INTEGRITY REPORTING REQUIREMENT:**
+${
+  isCheatingDetected && cheatingConfidence >= 75
+    ? `
+Since behavioral analysis has DETECTED CHEATING with ${cheatingConfidence}% confidence, follow this CENTRALIZED approach:
+
+**technicalDepth.asPerExplanation MUST be PURELY TECHNICAL:**
+Focus ONLY on technical knowledge demonstrated. DO NOT mention integrity, cheating, or behavioral concerns. Example: "The technical content demonstrates [assessment level] with [specific technical points]."
+
+**technicalDepthAsPerExperience.asPerExperience MUST be PURELY TECHNICAL:**
+Focus ONLY on technical level relative to experience. DO NOT mention integrity, cheating, or behavioral concerns. Example: "For ${responseData.experience} years experience, the technical response shows [level] understanding of [concepts]."
+
+**overallContentQuality MUST CENTRALIZE ALL INTEGRITY CONCERNS:**
+This is the ONLY field that should mention integrity issues. Include comprehensive integrity assessment: "Content quality assessment is significantly impacted by behavioral analysis findings. While the technical content shows [quality level], behavioral evidence (${externalInteractions} external interactions, ${focusLossCount} focus losses, ${pastePercentage}% paste usage) indicates potential external assistance, making the content assessment unreliable for hiring decisions."
+
+**CRITICAL APPROACH:**
+- Technical fields = Pure technical assessment only
+- Overall Content Quality = Technical quality + integrity concerns combined
+- This prevents repetitive integrity messages across multiple fields
+- Provides cleaner, more professional reports for HR
+`
+    : `
+Behavioral analysis shows LOW RISK (${cheatingConfidence}% confidence). Focus on content quality assessment while noting the clean behavioral profile in overallContentQuality field only.
+`
+}
+
+**Integration Instructions:**
+- Your content analysis should acknowledge these behavioral findings
+- Maintain consistency between behavioral evidence and content assessment  
+- Provide end-user friendly explanations that help HR understand the implications
+- Balance content quality with delivery authenticity concerns
+`;
+  }
+
+  // V2: Add Base Answer Comparison Instructions when baseAnswer is provided
+  let baseAnswerInstructions = "";
+  if (responseData.baseAnswer && normalizedType === "subjective") {
+    baseAnswerInstructions = `
+
+**🎯 BASE ANSWER COMPARISON ANALYSIS (V2 ENHANCED)**
+
+**Expected Answer Provided:** "${responseData.baseAnswer}"
+
+**CRITICAL: You MUST include a complete baseAnswerComparison object in your response with the following structure:**
+
+"baseAnswerComparison": {
+  "hasExpectedAnswer": true,
+  "overallMatch": {
+    "score": 0.0-5.0,
+    "quality": "excellent|good|fair|poor",
+    "confidence": "high|medium|low"
+  },
+  "scoreBreakdown": {
+    "contentMatch": 0.0-5.0,
+    "technicalCorrectness": 0.0-5.0, 
+    "methodValidity": 0.0-5.0,
+    "innovationBonus": 0.0-1.0
+  },
+  "matchType": "exact_match|very_similar|alternative_solution|partial_match|related_but_different|minimal_overlap",
+  "matchDescription": "Human-readable description of the match quality",
+  "analysisConfidence": "high|medium|low",
+  "considerationFactors": ["Factor 1", "Factor 2", "Factor 3"],
+  "detailedAnalysis": "Comprehensive analysis of the comparison"
+}
+
+**V2 BASE ANSWER COMPARISON GUIDELINES:**
+
+**1. MULTI-DIMENSIONAL SCORING:**
+- **Content Match (0.0-5.0)**: How well the core concepts align
+  - 5.0: Exact or near-exact match
+  - 4.0-4.9: Very high alignment with minor differences
+  - 3.0-3.9: Good alignment with some variations
+  - 2.0-2.9: Partial alignment with notable differences
+  - 1.0-1.9: Limited alignment with significant gaps
+  - 0.0-0.9: Minimal to no alignment
+
+- **Technical Correctness (0.0-5.0)**: Accuracy of technical content
+  - 5.0: Technically perfect and accurate
+  - 4.0-4.9: Highly accurate with minor technical issues
+  - 3.0-3.9: Generally accurate with some technical concerns
+  - 2.0-2.9: Partially accurate with notable technical errors
+  - 1.0-1.9: Limited accuracy with significant technical issues
+  - 0.0-0.9: Technically incorrect or insufficient
+
+- **Method Validity (0.0-5.0)**: Validity of the approach/method used
+  - 5.0: Optimal method and approach
+  - 4.0-4.9: Excellent method with minor variations
+  - 3.0-3.9: Good method with acceptable variations
+  - 2.0-2.9: Adequate method with some concerns
+  - 1.0-1.9: Questionable method with significant issues
+  - 0.0-0.9: Invalid or poor method
+
+- **Innovation Bonus (0.0-1.0)**: Additional value beyond base expectations
+  - 0.8-1.0: Significant additional insights and improvements
+  - 0.5-0.7: Notable additional value and creativity
+  - 0.2-0.4: Some additional insights provided
+  - 0.0-0.1: Standard response without notable additions
+
+**2. MATCH TYPE DETERMINATION:**
+- **exact_match**: 95%+ content similarity, technical accuracy
+- **very_similar**: 80-94% similarity with minor variations
+- **alternative_solution**: Different approach but achieves same goal (70-85% effectiveness)
+- **partial_match**: Addresses 50-70% of key concepts correctly
+- **related_but_different**: Shows understanding but significantly different approach (30-50%)
+- **minimal_overlap**: Limited alignment with expected answer (<30%)
+
+**3. EXPERIENCE-ADJUSTED EVALUATION:**
+- **Junior (0-2 years)**: Apply 20% bonus to technical correctness for effort and understanding
+- **Mid-level (3-5 years)**: Standard evaluation with balanced expectations
+- **Senior (6+ years)**: Higher standards with focus on depth and innovation
+
+**4. CONTEXTUAL FACTORS TO CONSIDER:**
+- Candidate's experience level: ${responseData.experience} years
+- Job role expectations: ${responseData.jobRole}
+- Question complexity and type
+- Length and depth of response compared to base answer
+- Demonstration of practical understanding
+- Evidence of real-world application knowledge
+
+**5. CONFIDENCE SCORING:**
+- **High**: Clear alignment assessment possible, strong evidence for evaluation
+- **Medium**: Generally clear but some ambiguity in comparison
+- **Low**: Difficult to assess due to unclear response or complex comparison
+
+**6. MATCH DESCRIPTION GUIDELINES:**
+Provide specific, actionable descriptions:
+- "Answer demonstrates excellent understanding with comprehensive coverage of key concepts"
+- "Alternative approach shows creative problem-solving while maintaining technical accuracy"
+- "Partial coverage of main topics with room for improvement in [specific areas]"
+- "Different perspective that may reflect practical experience but misses core theoretical foundations"
+
+**CRITICAL REQUIREMENTS:**
+1. ALWAYS provide the complete baseAnswerComparison object
+2. Calculate overall score as weighted average: (contentMatch × 0.4) + (technicalCorrectness × 0.35) + (methodValidity × 0.25) + innovationBonus
+3. Ensure consistency between scores, match type, and descriptions
+4. Consider experience level in technical correctness evaluation
+5. Provide at least 3 consideration factors
+6. Include detailed analysis explaining the comparison rationale
+
+**IMPORTANT: This comparison is for HR and hiring managers - use clear, business-friendly language that explains the candidate's alignment with expected knowledge and approach.**
+`;
+  }
+
+  return basePrompt + cheatingContext + baseAnswerInstructions;
 };
 
 /**
@@ -1921,6 +2415,99 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     );
   }
 
+  // V2: Handle Base Answer Comparison for subjective questions
+  if (
+    context.baseAnswer &&
+    context.candidateAnswer &&
+    context.normalizedType === "subjective"
+  ) {
+    // Check if AI already provided baseAnswerComparison
+    if (!parsedAnalysis.baseAnswerComparison) {
+      // Generate fallback base answer comparison using our V2 analysis function
+      logger.info("V2: Generating fallback base answer comparison", {
+        hasBaseAnswer: !!context.baseAnswer,
+        hasCandidateAnswer: !!context.candidateAnswer,
+        baseAnswerLength: context.baseAnswer?.length || 0,
+        candidateAnswerLength: context.candidateAnswer?.length || 0,
+      });
+
+      const comparisonContext = {
+        experience: context.experience,
+        jobRole: context.jobRole,
+        questionType: context.normalizedType,
+      };
+
+      transformed.baseAnswerComparison = analyzeBaseAnswerV2(
+        context.candidateAnswer,
+        context.baseAnswer,
+        comparisonContext
+      );
+
+      logger.info("V2: Base answer comparison generated successfully", {
+        hasExpectedAnswer: transformed.baseAnswerComparison.hasExpectedAnswer,
+        overallScore: transformed.baseAnswerComparison.overallMatch?.score,
+        matchType: transformed.baseAnswerComparison.matchType,
+        confidence: transformed.baseAnswerComparison.analysisConfidence,
+      });
+    } else {
+      // Use AI-provided comparison but validate and enhance it
+      transformed.baseAnswerComparison = parsedAnalysis.baseAnswerComparison;
+
+      // Ensure all required fields are present
+      if (!transformed.baseAnswerComparison.hasExpectedAnswer) {
+        transformed.baseAnswerComparison.hasExpectedAnswer = true;
+      }
+
+      if (!transformed.baseAnswerComparison.overallMatch) {
+        transformed.baseAnswerComparison.overallMatch = {
+          score: 0.0,
+          quality: "poor",
+          confidence: "low",
+        };
+      }
+
+      if (!transformed.baseAnswerComparison.scoreBreakdown) {
+        transformed.baseAnswerComparison.scoreBreakdown = {
+          contentMatch: 0.0,
+          technicalCorrectness: 0.0,
+          methodValidity: 0.0,
+          innovationBonus: 0.0,
+        };
+      }
+
+      logger.info("V2: Using AI-provided base answer comparison", {
+        hasExpectedAnswer: transformed.baseAnswerComparison.hasExpectedAnswer,
+        overallScore: transformed.baseAnswerComparison.overallMatch?.score,
+        matchType: transformed.baseAnswerComparison.matchType,
+      });
+    }
+
+    // Add base answer provided flag for transparency
+    transformed.baseAnswerProvided = true;
+
+    // Log successful base answer comparison
+    logger.info("V2: Base answer comparison completed", {
+      baseAnswerProvided: true,
+      comparisonType: parsedAnalysis.baseAnswerComparison
+        ? "AI-generated"
+        : "V2-fallback",
+      overallScore: transformed.baseAnswerComparison.overallMatch?.score,
+      matchQuality: transformed.baseAnswerComparison.overallMatch?.quality,
+      matchType: transformed.baseAnswerComparison.matchType,
+    });
+  } else {
+    // No base answer provided
+    transformed.baseAnswerProvided = false;
+
+    if (context.normalizedType === "subjective") {
+      logger.info("V2: No base answer provided for subjective question", {
+        hasBaseAnswer: !!context.baseAnswer,
+        hasCandidateAnswer: !!context.candidateAnswer,
+        questionType: context.normalizedType,
+      });
+    }
+  }
+
   return transformed;
 };
 
@@ -1930,7 +2517,10 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
  * @param {Object} transformedAnalysis - Analysis result to enhance
  * @returns {Object} Enhanced analysis with unique, contextual integrity messages
  */
-const enhanceFieldsWithCheatingContext = (transformedAnalysis) => {
+const enhanceFieldsWithCheatingContext = (
+  transformedAnalysis,
+  responseType = "video"
+) => {
   // CRITICAL SAFETY CHECK: Only enhance when we have CONFIRMED high confidence cheating detection
   if (
     !transformedAnalysis.isCheatingDetected ||
@@ -1971,9 +2561,52 @@ const enhanceFieldsWithCheatingContext = (transformedAnalysis) => {
     return transformedAnalysis;
   }
 
+  // Define context-appropriate integrity messages based on response type
+  const integrityMessages = {
+    video: {
+      technicalDepth:
+        "\n\nNote: Technical accuracy assessment is compromised by evidence of reading from external sources during response delivery.",
+      experienceDepth:
+        "\n\nCaution: Candidate's authentic knowledge level unclear due to reliance on external reading material.",
+      contentQuality:
+        "However, assessment reliability is significantly impacted by strong evidence of reading from external sources, which questions the authenticity of demonstrated knowledge.",
+      answerReason:
+        "Strong evidence of reading from external sources detected - compromises assessment authenticity",
+      communication:
+        " Note: Communication assessment impacted by evidence of reading from external sources rather than natural conversation.",
+    },
+    audio: {
+      technicalDepth:
+        "\n\nNote: Technical accuracy assessment is compromised by evidence of reading from external sources during response delivery.",
+      experienceDepth:
+        "\n\nCaution: Candidate's authentic knowledge level unclear due to reliance on external reading material.",
+      contentQuality:
+        "However, assessment reliability is significantly impacted by strong evidence of reading from external sources, which questions the authenticity of demonstrated knowledge.",
+      answerReason:
+        "Strong evidence of reading from external sources detected - compromises assessment authenticity",
+      communication:
+        " Note: Communication assessment impacted by evidence of reading from external sources rather than natural conversation.",
+    },
+    subjective: {
+      technicalDepth:
+        "\n\nNote: Technical accuracy assessment is compromised by evidence of copy-pasting and external assistance during text submission.",
+      experienceDepth:
+        "\n\nCaution: Candidate's authentic knowledge level unclear due to reliance on external sources and copy-pasting behavior.",
+      contentQuality:
+        "However, assessment reliability is significantly impacted by strong evidence of copy-pasting and external assistance, which questions the authenticity of the submitted work.",
+      answerReason:
+        "Strong evidence of copy-pasting and external assistance detected - compromises assessment authenticity",
+      communication:
+        " Note: Communication assessment impacted by text-based integrity concerns rather than natural independent work.",
+    },
+  };
+
+  const messages = integrityMessages[responseType] || integrityMessages.video;
+
   logger.info("V2: Enhancing fields with contextual integrity messages", {
     originalCheatingDetected: transformedAnalysis.isCheatingDetected,
     cheatingConfidence: transformedAnalysis.cheatingConfidence,
+    responseType: responseType,
     fieldsToEnhance: [
       "technicalDepth",
       "technicalDepthAsPerExperience",
@@ -1983,88 +2616,187 @@ const enhanceFieldsWithCheatingContext = (transformedAnalysis) => {
     ],
   });
 
-  // 1. Technical Depth - Focus on assessment authenticity
+  // Helper function to detect if AI has already mentioned integrity concerns
+  const hasExistingIntegrityContent = (text) => {
+    if (!text) return false;
+
+    const integrityKeywords = [
+      "integrity",
+      "cheating",
+      "dishonest",
+      "fraudulent",
+      "suspicious",
+      "reading from",
+      "script",
+      "external source",
+      "external assistance",
+      "copy",
+      "paste",
+      "copied",
+      "pasted",
+      "plagiarism",
+      "authenticity",
+      "genuine",
+      "authentic",
+      "reliability",
+      "compromised",
+      "questionable",
+      "evidence of",
+      "detected",
+      "flagged",
+      "violation",
+      "breach",
+      "inappropriate",
+      "unauthorized",
+      "assisted",
+      "help",
+      "aid",
+      "behavioral analysis",
+      "integrity concern",
+      "assessment reliability",
+      "external reading",
+      "reading material",
+      "not original",
+      "not independent",
+    ];
+
+    const textLower = text.toLowerCase();
+    return integrityKeywords.some((keyword) => textLower.includes(keyword));
+  };
+
+  // Helper function to clean integrity content from technical fields
+  const cleanIntegrityContent = (text) => {
+    if (!text) return text;
+
+    // Remove sentences that contain integrity-related content
+    const sentences = text.split(/[.!?]+/).filter((s) => s.trim());
+    const cleanedSentences = sentences.filter((sentence) => {
+      return !hasExistingIntegrityContent(sentence);
+    });
+
+    // Join back and clean up
+    let cleaned = cleanedSentences.join(". ").trim();
+    if (cleaned && !cleaned.endsWith(".")) {
+      cleaned += ".";
+    }
+
+    return cleaned || "Technical analysis completed.";
+  };
+
+  // 1. Technical Depth - Keep purely technical, remove any existing integrity content
   if (transformedAnalysis.technicalDepth?.asPerExplanation) {
     if (
-      !transformedAnalysis.technicalDepth.asPerExplanation.includes(
-        "reading from external"
+      hasExistingIntegrityContent(
+        transformedAnalysis.technicalDepth.asPerExplanation
       )
     ) {
-      transformedAnalysis.technicalDepth.asPerExplanation +=
-        "\n\nNote:Technical accuracy assessment is compromised by evidence of reading from external sources during response delivery.";
+      // Remove integrity content from technical analysis to keep it purely technical
+      const cleanedContent = cleanIntegrityContent(
+        transformedAnalysis.technicalDepth.asPerExplanation
+      );
+      transformedAnalysis.technicalDepth.asPerExplanation = cleanedContent;
+      logger.info(
+        "V2: Cleaned integrity content from technicalDepth - keeping purely technical"
+      );
     }
   }
 
-  // 2. Experience-based Technical Depth - Focus on genuine capability
+  // 2. Experience-based Technical Depth - Keep purely technical, remove any existing integrity content
   if (transformedAnalysis.technicalDepthAsPerExperience?.asPerExperience) {
     if (
-      !transformedAnalysis.technicalDepthAsPerExperience.asPerExperience.includes(
-        "reading from external"
+      hasExistingIntegrityContent(
+        transformedAnalysis.technicalDepthAsPerExperience.asPerExperience
       )
     ) {
-      transformedAnalysis.technicalDepthAsPerExperience.asPerExperience +=
-        "\n\nCaution: Candidate's authentic knowledge level unclear due to reliance on external reading material.";
+      // Remove integrity content from experience analysis to keep it purely technical
+      const cleanedContent = cleanIntegrityContent(
+        transformedAnalysis.technicalDepthAsPerExperience.asPerExperience
+      );
+      transformedAnalysis.technicalDepthAsPerExperience.asPerExperience =
+        cleanedContent;
+      logger.info(
+        "V2: Cleaned integrity content from experienceDepth - keeping purely technical"
+      );
     }
   }
 
-  // 3. Overall Content Quality - Comprehensive integrity context
+  // 3. Overall Content Quality - ONLY place for integrity context
   if (transformedAnalysis.overallContentQuality) {
     if (
-      !transformedAnalysis.overallContentQuality.includes(
-        "reading from external"
-      )
+      !hasExistingIntegrityContent(transformedAnalysis.overallContentQuality)
     ) {
-      // Add integrity message on new line with bold/italic formatting
-      transformedAnalysis.overallContentQuality +=
-        "However, assessment reliability is significantly impacted by strong evidence of reading from external sources, which questions the authenticity of demonstrated knowledge.";
+      transformedAnalysis.overallContentQuality += messages.contentQuality;
+      logger.info(
+        "V2: Added integrity message to contentQuality - centralized integrity reporting"
+      );
+    } else {
+      logger.info(
+        "V2: Skipped contentQuality enhancement - AI already mentioned integrity concerns"
+      );
     }
   }
 
-  // 4. Answer Rating - Clear integrity reason
+  // 4. Answer Rating - Remove integrity reasons, keep technical deductions only
   if (transformedAnalysis.answerRating?.reasonForDeduction) {
-    const hasIntegrityReason =
-      transformedAnalysis.answerRating.reasonForDeduction.some(
-        (reason) =>
-          reason.toLowerCase().includes("reading") ||
-          reason.toLowerCase().includes("cheating") ||
-          reason.toLowerCase().includes("integrity") ||
-          reason.toLowerCase().includes("external source")
+    // Filter out any integrity-related reasons to keep technical focus
+    const cleanedReasons =
+      transformedAnalysis.answerRating.reasonForDeduction.filter(
+        (reason) => !hasExistingIntegrityContent(reason)
       );
 
-    if (!hasIntegrityReason) {
-      transformedAnalysis.answerRating.reasonForDeduction.unshift(
-        "Strong evidence of reading from external sources detected - compromises assessment authenticity"
+    if (
+      cleanedReasons.length !==
+      transformedAnalysis.answerRating.reasonForDeduction.length
+    ) {
+      transformedAnalysis.answerRating.reasonForDeduction = cleanedReasons;
+      logger.info(
+        "V2: Cleaned integrity reasons from answerRating - keeping technical focus"
       );
     }
   }
 
-  // 5. Communication - Clean, professional note
+  // 5. Communication - Keep purely technical, remove any existing integrity content
   if (transformedAnalysis.communication) {
-    if (!transformedAnalysis.communication.includes("reading from external")) {
-      transformedAnalysis.communication +=
-        " Note: Communication assessment impacted by evidence of reading from external sources rather than natural conversation.";
+    if (hasExistingIntegrityContent(transformedAnalysis.communication)) {
+      const cleanedContent = cleanIntegrityContent(
+        transformedAnalysis.communication
+      );
+      transformedAnalysis.communication = cleanedContent;
+      logger.info(
+        "V2: Cleaned integrity content from communication - keeping purely technical"
+      );
     }
   }
 
-  logger.info("V2: Fields enhanced with contextual integrity messages", {
-    technicalDepthEnhanced:
-      transformedAnalysis.technicalDepth?.asPerExplanation?.includes(
-        "reading from external"
-      ),
-    experienceDepthEnhanced:
-      transformedAnalysis.technicalDepthAsPerExperience?.asPerExperience?.includes(
-        "reading from external"
-      ),
-    contentQualityEnhanced: transformedAnalysis.overallContentQuality?.includes(
-      "reading from external"
-    ),
-    reasonsEnhanced: transformedAnalysis.answerRating?.reasonForDeduction?.some(
-      (r) => r.includes("reading")
-    ),
-    communicationEnhanced: transformedAnalysis.communication?.includes(
-      "reading from external"
-    ),
-  });
+  logger.info(
+    "V2: Centralized integrity reporting - cleaned technical fields",
+    {
+      responseType: responseType,
+      technicalDepthCleaned: transformedAnalysis.technicalDepth
+        ?.asPerExplanation
+        ? !hasExistingIntegrityContent(
+            transformedAnalysis.technicalDepth.asPerExplanation
+          )
+        : true,
+      experienceDepthCleaned: transformedAnalysis.technicalDepthAsPerExperience
+        ?.asPerExperience
+        ? !hasExistingIntegrityContent(
+            transformedAnalysis.technicalDepthAsPerExperience.asPerExperience
+          )
+        : true,
+      contentQualityHasIntegrity: transformedAnalysis.overallContentQuality
+        ? hasExistingIntegrityContent(transformedAnalysis.overallContentQuality)
+        : false,
+      answerRatingCleaned: transformedAnalysis.answerRating?.reasonForDeduction
+        ? !transformedAnalysis.answerRating.reasonForDeduction.some((reason) =>
+            hasExistingIntegrityContent(reason)
+          )
+        : true,
+      communicationCleaned: transformedAnalysis.communication
+        ? !hasExistingIntegrityContent(transformedAnalysis.communication)
+        : true,
+    }
+  );
 
   return transformedAnalysis;
 };
@@ -2077,8 +2809,13 @@ const enhanceFieldsWithCheatingContext = (transformedAnalysis) => {
  * @returns {Object} Cleaned analysis with no contradictory content
  */
 const cleanupContradictoryContent = (analysis) => {
-  // Only clean if cheating is NOT detected or confidence is low
-  if (analysis.isCheatingDetected && analysis.cheatingConfidence >= 75) {
+  // Only clean if cheating is NOT detected - regardless of confidence level
+  if (analysis.isCheatingDetected) {
+    logger.info("V2: Skipping cleanup - cheating detected", {
+      isCheatingDetected: analysis.isCheatingDetected,
+      cheatingConfidence: analysis.cheatingConfidence,
+      reason: "Preserving integrity messages for detected cheating case",
+    });
     return analysis; // No cleanup needed - cheating was detected
   }
 
@@ -2111,7 +2848,6 @@ const cleanupContradictoryContent = (analysis) => {
     const redundantPhrases = [
       /However,?\s*the assessment[^.]*compromised[^.]*\./gi,
       /the assessment[^.]*severely compromised[^.]*\./gi,
-      /Adjusted for[^.]*experience[^.]*\)/gi,
       /due to[^.]*reading[^.]*\./gi,
       /strong evidence[^.]*reading[^.]*\./gi,
       /integrity[^.]*questionable[^.]*\./gi,
@@ -2154,7 +2890,6 @@ const cleanupContradictoryContent = (analysis) => {
       /it's impossible to ascertain[^.]*\./gi,
       /The reliance on[^.]*script[^.]*\./gi,
       /suggests a potential lack[^.]*\./gi,
-      /\(V2 experience-adjusted evaluation\)/gi,
     ];
 
     redundantPhrases.forEach((regex) => {
@@ -2743,8 +3478,12 @@ const processResponse = async (responseData) => {
       }
     }
 
-    // V2: Use V2-specific contextual prompt
-    const prompt = generateV2Prompt(responseData, normalizedType);
+    // V2: Use V2-specific contextual prompt with cheating context
+    const prompt = generateV2Prompt(
+      responseData,
+      normalizedType,
+      processingContext
+    );
 
     // V2: AI Analysis with contextual processing and smart retry
     let transformedAnalysis;
@@ -2798,6 +3537,21 @@ const processResponse = async (responseData) => {
           overallContentQualityValue: parsedAnalysis.overallContentQuality,
           responseQualityValue: parsedAnalysis.responseQuality,
         });
+
+        // V2: Add base answer context for subjective questions
+        if (normalizedType === "subjective" && responseData.baseAnswer) {
+          processingContext.baseAnswer = responseData.baseAnswer;
+          processingContext.candidateAnswer = responseData.textAnswer;
+          processingContext.normalizedType = normalizedType;
+
+          logger.info("V2: Base answer context added for subjective question", {
+            hasBaseAnswer: !!processingContext.baseAnswer,
+            baseAnswerLength: processingContext.baseAnswer?.length || 0,
+            hasCandidateAnswer: !!processingContext.candidateAnswer,
+            candidateAnswerLength:
+              processingContext.candidateAnswer?.length || 0,
+          });
+        }
 
         // V2: Transform with context for adaptive processing
         transformedAnalysis = transformAiResponse(
@@ -3099,11 +3853,118 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
 
         // V2: FIXED - Enhanced field enhancement with cheating context for HR-friendly output
         // CRITICAL: This must run AFTER contextual analysis to use final cheating detection results
-        transformedAnalysis =
-          enhanceFieldsWithCheatingContext(transformedAnalysis);
+        transformedAnalysis = enhanceFieldsWithCheatingContext(
+          transformedAnalysis,
+          normalizedType
+        );
+
+        // V2: SUBJECTIVE BEHAVIORAL ANALYSIS OVERRIDE - Replace video/audio analysis with typing-based analysis
+        if (normalizedType === "subjective" && typingAnalysisResult) {
+          logger.info("V2: Applying subjective-specific behavioral analysis", {
+            candidateScreeningId: responseData.candidateScreeningId,
+            typingScore: typingAnalysisResult.score,
+            hasTypingData: typingAnalysisResult.hasTypingData,
+          });
+
+          // Replace with typing-based behavioral analysis
+          const subjectiveBehavioralAnalysis =
+            generateSubjectiveBehavioralAnalysis(
+              typingAnalysisResult,
+              processingContext
+            );
+
+          transformedAnalysis.behavioralAnalysis = subjectiveBehavioralAnalysis;
+
+          // Replace with typing-specific background noise
+          transformedAnalysis.backgroundNoise =
+            generateSubjectiveBackgroundNoise(typingAnalysisResult);
+
+          // Replace with typing-specific behavioral insights
+          transformedAnalysis.behavioralInsights =
+            generateSubjectiveBehavioralInsights(
+              typingAnalysisResult,
+              transformedAnalysis
+            );
+
+          // CRITICAL: Update main cheating indicators with typing-based suspicious behaviors
+          const typingBasedCheatingIndicators =
+            subjectiveBehavioralAnalysis.suspiciousIndicators.filter(
+              (indicator) =>
+                indicator.includes("external interactions") ||
+                indicator.includes("focus loss") ||
+                indicator.includes("copy-paste") ||
+                indicator.includes("cheating")
+            );
+
+          if (typingBasedCheatingIndicators.length > 0) {
+            // Merge with existing cheating indicators
+            transformedAnalysis.cheatingIndicators = [
+              ...new Set([
+                ...typingBasedCheatingIndicators,
+                ...(transformedAnalysis.cheatingIndicators || []),
+              ]),
+            ];
+
+            // Force cheating detection if we have high-confidence typing-based evidence
+            const hasHighConfidenceEvidence =
+              subjectiveBehavioralAnalysis.behavioralTimestamps.suspiciousEvents.some(
+                (event) =>
+                  event.confidence >= 90 && event.category === "cheating"
+              );
+
+            if (hasHighConfidenceEvidence) {
+              transformedAnalysis.isCheatingDetected = true;
+              transformedAnalysis.cheatingConfidence = Math.max(
+                transformedAnalysis.cheatingConfidence || 0,
+                90
+              );
+
+              logger.info(
+                "V2: CRITICAL - Forced cheating detection based on typing analysis",
+                {
+                  candidateScreeningId: responseData.candidateScreeningId,
+                  typingBasedIndicators: typingBasedCheatingIndicators,
+                  highConfidenceEvents:
+                    subjectiveBehavioralAnalysis.behavioralTimestamps.suspiciousEvents
+                      .filter(
+                        (event) =>
+                          event.confidence >= 90 &&
+                          event.category === "cheating"
+                      )
+                      .map((event) => event.behavior),
+                }
+              );
+            }
+          }
+
+          logger.info(
+            "V2: Subjective behavioral analysis applied successfully",
+            {
+              candidateScreeningId: responseData.candidateScreeningId,
+              typingPattern:
+                transformedAnalysis.behavioralAnalysis.typingPattern,
+              inputBehavior:
+                transformedAnalysis.behavioralAnalysis.inputBehavior,
+              backgroundNoise: transformedAnalysis.backgroundNoise?.level,
+              behavioralInsightsCount:
+                transformedAnalysis.behavioralInsights?.length || 0,
+              cheatingDetected: transformedAnalysis.isCheatingDetected,
+              cheatingConfidence: transformedAnalysis.cheatingConfidence,
+              typingBasedIndicators: typingBasedCheatingIndicators.length,
+            }
+          );
+        }
 
         // V2: COMPREHENSIVE CLEANUP - Remove any contradictory content for 99% accuracy
+        // CRITICAL: This runs AFTER all behavioral analysis and cheating detection is finalized
+        logger.info("V2: Running final cleanup", {
+          candidateScreeningId: responseData.candidateScreeningId,
+          cheatingDetected: transformedAnalysis.isCheatingDetected,
+          cheatingConfidence: transformedAnalysis.cheatingConfidence,
+          willCleanup: !transformedAnalysis.isCheatingDetected,
+        });
         transformedAnalysis = cleanupContradictoryContent(transformedAnalysis);
+
         break;
       } catch (error) {
         logger.warn(`V2: Analysis attempt ${attempt} failed`, {
@@ -5390,6 +6251,512 @@ const analyzeObviousReadingPatterns = (
  * @param {Object} context - Full response context including transcription
  * @returns {Object} Sophisticated cheating detection result
  */
+/**
+ * Generate simple behavioral analysis for subjective (typing-based) questions
+ * Uses plain language and mirrors current behavioral structure
+ */
+const generateSubjectiveBehavioralAnalysis = (
+  typingAnalysisResult,
+  context = {}
+) => {
+  if (!typingAnalysisResult || !typingAnalysisResult.hasTypingData) {
+    return {
+      typingPattern: "No typing data available",
+      inputBehavior: "Unable to analyze",
+      compositionStyle: "Not assessed",
+      focusConsistency: "Unknown",
+      suspiciousIndicators: ["No typing data for analysis"],
+      behavioralTimestamps: {
+        typingEvents: [],
+        inputBehaviorEvents: [],
+        compositionEvents: [],
+        focusEvents: [],
+        suspiciousEvents: [],
+        totalSuspiciousTime: 0,
+        peakSuspiciousTimestamp: 0,
+        behaviorDensity: 0,
+      },
+    };
+  }
+
+  const analysis = typingAnalysisResult.analysis?.details || {};
+  const score = typingAnalysisResult.score || 0;
+  const indicators = typingAnalysisResult.indicators || [];
+
+  const typingTimestamps = generateSimpleTypingTimestamps(analysis, indicators);
+
+  // CRITICAL: Extract high-confidence suspicious behaviors for main cheating detection
+  const highConfidenceSuspicious = typingTimestamps.suspiciousEvents
+    .filter((event) => event.confidence >= 85 && event.category === "cheating")
+    .map((event) => event.behavior);
+
+  // Combine original indicators with high-confidence suspicious behaviors
+  const allSuspiciousIndicators = [
+    ...indicators.slice(0, 2), // Keep top 2 original concerns
+    ...highConfidenceSuspicious.slice(0, 2), // Add top 2 high-confidence behaviors
+  ].slice(0, 3); // Limit to 3 total
+
+  return {
+    typingPattern: determineTypingPattern(analysis, score),
+    inputBehavior: determineInputBehavior(analysis, score),
+    compositionStyle: determineCompositionStyle(analysis, score),
+    focusConsistency: determineFocusPattern(analysis, score),
+    suspiciousIndicators: allSuspiciousIndicators,
+    behavioralTimestamps: typingTimestamps,
+  };
+};
+
+/**
+ * Determine typing pattern in simple terms
+ */
+const determineTypingPattern = (analysis, score) => {
+  const speedDetails = analysis.speedAnalysis?.details || {};
+  const burstCount = speedDetails.burstCount || 0;
+  const avgSpeed = speedDetails.averageSpeed || 0;
+
+  if (burstCount >= 3) {
+    return "Irregular typing speed detected";
+  } else if (score >= 0.8) {
+    return "Suspicious typing patterns";
+  } else if (avgSpeed > 15) {
+    return "Very fast typing observed";
+  } else if (avgSpeed > 8) {
+    return "Steady typing pace";
+  } else if (avgSpeed > 0) {
+    return "Slow and deliberate typing";
+  }
+  return "Normal typing patterns";
+};
+
+/**
+ * Determine input behavior in simple terms
+ */
+const determineInputBehavior = (analysis, score) => {
+  const pastePercentage = analysis.pasteAnalysis?.details?.pastePercentage || 0;
+  const pasteEvents = analysis.pasteAnalysis?.details?.pasteEventCount || 0;
+
+  if (pastePercentage >= 80) {
+    return "Heavy copy-paste detected";
+  } else if (pastePercentage >= 50) {
+    return "Moderate copy-paste usage";
+  } else if (pasteEvents >= 3) {
+    return "Multiple paste operations";
+  } else if (score >= 0.7) {
+    return "Concerning input patterns";
+  } else if (pasteEvents >= 1) {
+    return "Some copy-paste usage";
+  }
+  return "Original typing detected";
+};
+
+/**
+ * Determine composition style in simple terms
+ */
+const determineCompositionStyle = (analysis, score) => {
+  const pauseCount = analysis.pauseAnalysis?.details?.pauseCount || 0;
+  const longPauses = analysis.pauseAnalysis?.details?.longPauseCount || 0;
+  const excessivePauses =
+    analysis.pauseAnalysis?.details?.excessivePauseCount || 0;
+
+  if (excessivePauses >= 2) {
+    return "Extended research pauses";
+  } else if (longPauses >= 3) {
+    return "Frequent thinking pauses";
+  } else if (score >= 0.8) {
+    return "Non-natural composition";
+  } else if (pauseCount >= 5) {
+    return "Thoughtful composition style";
+  } else if (pauseCount <= 2) {
+    return "Continuous writing style";
+  }
+  return "Natural composition flow";
+};
+
+/**
+ * Determine focus pattern in simple terms
+ */
+const determineFocusPattern = (analysis, score) => {
+  const focusLossCount = analysis.focusAnalysis?.details?.focusLossCount || 0;
+  const globalCopyCount =
+    analysis.globalEventAnalysis?.details?.globalCopyCount || 0;
+  const externalInteractionCount =
+    analysis.globalEventAnalysis?.details?.externalInteractionCount || 0;
+
+  // CRITICAL: High external interactions indicate looking at external sources
+  if (externalInteractionCount >= 20) {
+    return "Frequent external interactions";
+  } else if (externalInteractionCount >= 10) {
+    return "Frequent external interactions";
+  } else if (globalCopyCount >= 3) {
+    return "Frequent external interactions";
+  } else if (focusLossCount >= 5) {
+    return "Poor focus consistency";
+  } else if (focusLossCount >= 3) {
+    return "Occasional focus loss";
+  } else if (focusLossCount >= 1) {
+    return "Mostly consistent focus";
+  }
+  return "Maintained focus throughout";
+};
+
+/**
+ * Generate simple typing timestamps
+ */
+const generateSimpleTypingTimestamps = (analysis, indicators) => {
+  const suspiciousEvents = [];
+
+  // Add paste events as suspicious if significant
+  const pastePercentage = analysis.pasteAnalysis?.details?.pastePercentage || 0;
+  const pasteEvents = analysis.pasteAnalysis?.details?.pasteEventCount || 0;
+
+  if (pastePercentage >= 80) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: "Large amount of content pasted",
+      confidence: 90,
+      category: "input",
+      duration: 1000,
+    });
+  } else if (pasteEvents >= 3) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: "Multiple paste operations",
+      confidence: 75,
+      category: "input",
+      duration: 500,
+    });
+  }
+
+  // Add speed bursts as suspicious
+  const burstCount = analysis.speedAnalysis?.details?.burstCount || 0;
+  if (burstCount >= 2) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: "Impossible typing speeds",
+      confidence: 85,
+      category: "speed",
+      duration: 2000,
+    });
+  }
+
+  // Add question copying as suspicious
+  if (analysis.globalEventAnalysis?.details?.hasQuestionCopying) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: "Question text copied",
+      confidence: 80,
+      category: "research",
+      duration: 300,
+    });
+  }
+
+  // CRITICAL: STRICT external interactions detection for subjective questions
+  const externalInteractionCount =
+    analysis.globalEventAnalysis?.details?.externalInteractionCount || 0;
+  if (externalInteractionCount >= 15) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Excessive external interactions (${externalInteractionCount} events - clear evidence of external resource usage)`,
+      confidence: 98,
+      category: "cheating",
+      duration: 5000,
+    });
+  } else if (externalInteractionCount >= 8) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `High external interactions (${externalInteractionCount} events - strong indication of cheating)`,
+      confidence: 90,
+      category: "cheating",
+      duration: 3000,
+    });
+  } else if (externalInteractionCount >= 5) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Multiple external interactions (${externalInteractionCount} events - probable external assistance)`,
+      confidence: 80,
+      category: "cheating",
+      duration: 2000,
+    });
+  } else if (externalInteractionCount >= 3) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Several external interactions (${externalInteractionCount} events - possible research activity)`,
+      confidence: 65,
+      category: "research",
+      duration: 1500,
+    });
+  }
+
+  // CRITICAL: STRICT focus loss detection for subjective questions
+  const focusLossCount = analysis.focusAnalysis?.details?.focusLossCount || 0;
+  if (focusLossCount >= 5) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Excessive focus loss (${focusLossCount} times - clear pattern of looking at external sources)`,
+      confidence: 95,
+      category: "cheating",
+      duration: 4000,
+    });
+  } else if (focusLossCount >= 3) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Frequent focus loss (${focusLossCount} times - strong indication of external assistance)`,
+      confidence: 85,
+      category: "cheating",
+      duration: 3000,
+    });
+  } else if (focusLossCount >= 2) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Multiple focus losses (${focusLossCount} times - possible external assistance)`,
+      confidence: 70,
+      category: "research",
+      duration: 2000,
+    });
+  }
+
+  // STRICT: Combined pattern analysis for enhanced detection
+  if (externalInteractionCount >= 4 && focusLossCount >= 2) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Combined suspicious pattern: ${externalInteractionCount} external interactions + ${focusLossCount} focus losses - highly indicative of cheating`,
+      confidence: 96,
+      category: "cheating",
+      duration: 6000,
+    });
+  }
+
+  // STRICT: Enhanced paste percentage detection - reusing existing pastePercentage variable
+  if (pastePercentage >= 50) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `High paste percentage (${pastePercentage}% of content pasted - strong indication of external source usage)`,
+      confidence: 92,
+      category: "cheating",
+      duration: 4000,
+    });
+  } else if (pastePercentage >= 30) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Moderate paste percentage (${pastePercentage}% of content pasted - possible external assistance)`,
+      confidence: 75,
+      category: "research",
+      duration: 2500,
+    });
+  }
+
+  // STRICT: Speed burst detection for copy-paste behavior
+  const speedBursts = analysis.speedAnalysis?.details?.speedBurstCount || 0;
+  if (speedBursts >= 2) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Multiple typing speed bursts detected (${speedBursts} bursts - indicates copy-paste behavior)`,
+      confidence: 88,
+      category: "cheating",
+      duration: 3000,
+    });
+  }
+
+  // STRICT: Long pause detection for research activity
+  const longPauses = analysis.pauseAnalysis?.details?.longPauseCount || 0;
+  const excessivePauses =
+    analysis.pauseAnalysis?.details?.excessivePauseCount || 0;
+
+  if (excessivePauses >= 2) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Extended research pauses detected (${excessivePauses} pauses over 30 seconds - clear research activity)`,
+      confidence: 94,
+      category: "cheating",
+      duration: 4500,
+    });
+  } else if (longPauses >= 3) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Multiple long pauses detected (${longPauses} pauses over 10 seconds - probable research activity)`,
+      confidence: 80,
+      category: "research",
+      duration: 3000,
+    });
+  }
+
+  // STRICT: Multi-factor cheating pattern detection
+  let multiFactorScore = 0;
+  if (externalInteractionCount >= 5) multiFactorScore += 3;
+  if (focusLossCount >= 3) multiFactorScore += 3;
+  if (pastePercentage >= 40) multiFactorScore += 2;
+  if (speedBursts >= 1) multiFactorScore += 2;
+  if (longPauses >= 3) multiFactorScore += 1;
+
+  if (multiFactorScore >= 7) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Multi-factor cheating indicators detected (score: ${multiFactorScore}/11 - comprehensive evidence of dishonest behavior)`,
+      confidence: 97,
+      category: "cheating",
+      duration: 7000,
+    });
+  } else if (multiFactorScore >= 5) {
+    suspiciousEvents.push({
+      timestamp: 0,
+      behavior: `Combined suspicious indicators detected (score: ${multiFactorScore}/11 - strong evidence of external assistance)`,
+      confidence: 90,
+      category: "cheating",
+      duration: 5000,
+    });
+  }
+
+  const totalSuspiciousTime = suspiciousEvents.reduce(
+    (total, event) => total + (event.duration || 0),
+    0
+  );
+
+  return {
+    typingEvents: [], // Could add keystroke timing events if needed
+    inputBehaviorEvents: suspiciousEvents.filter((e) => e.category === "input"),
+    compositionEvents: [], // Could add pause/composition events if needed
+    focusEvents: [], // Could add focus loss events if needed
+    suspiciousEvents: suspiciousEvents,
+    totalSuspiciousTime: totalSuspiciousTime,
+    peakSuspiciousTimestamp:
+      suspiciousEvents.length > 0
+        ? Math.max(...suspiciousEvents.map((e) => e.timestamp || 0))
+        : 0,
+    behaviorDensity: suspiciousEvents.length, // Simple count instead of complex calculation
+  };
+};
+
+/**
+ * Generate simple background noise for subjective questions
+ */
+const generateSubjectiveBackgroundNoise = (typingAnalysisResult) => {
+  const analysis = typingAnalysisResult?.analysis?.details || {};
+  const focusLossCount = analysis.focusAnalysis?.details?.focusLossCount || 0;
+  const externalInteractionCount =
+    analysis.globalEventAnalysis?.details?.externalInteractionCount || 0;
+
+  // CRITICAL: STRICT high external interactions should trigger high noise level
+  if (externalInteractionCount >= 8 || focusLossCount >= 5) {
+    return {
+      level: "high",
+      description: "Excessive interruptions during typing",
+      contextualImpact:
+        "Frequent distractions affected input consistency - strong indication of external assistance",
+    };
+  } else if (externalInteractionCount >= 5 || focusLossCount >= 3) {
+    return {
+      level: "high",
+      description: "Frequent interruptions during typing",
+      contextualImpact:
+        "Multiple distractions affected input consistency - possible external assistance",
+    };
+  } else if (externalInteractionCount >= 3 || focusLossCount >= 2) {
+    return {
+      level: "medium",
+      description: "Some interruptions during typing",
+      contextualImpact:
+        "Several distractions noted - elevated attention switching",
+    };
+  } else if (externalInteractionCount >= 1) {
+    return {
+      level: "low",
+      description: "Minor interruptions during typing",
+      contextualImpact: "Few distractions observed",
+    };
+  }
+
+  return {
+    level: "low",
+    description: "Stable typing environment",
+    contextualImpact: "No significant distractions observed",
+  };
+};
+
+/**
+ * Generate simple behavioral insights for subjective questions
+ */
+const generateSubjectiveBehavioralInsights = (
+  typingAnalysisResult,
+  transformedAnalysis
+) => {
+  const insights = [];
+  const analysis = typingAnalysisResult?.analysis?.details || {};
+  const score = typingAnalysisResult?.score || 0;
+
+  // Time engagement insight
+  const duration = transformedAnalysis.answerTime?.totalDurationSeconds || 0;
+  const textLength = transformedAnalysis.transcription?.length || 0;
+
+  if (duration >= 30 && textLength >= 200) {
+    insights.push("Good time investment in comprehensive response");
+  } else if (duration < 10 && textLength >= 100) {
+    insights.push("Quick response with substantial content");
+  }
+
+  // Typing confidence insight
+  const pastePercentage = analysis.pasteAnalysis?.details?.pastePercentage || 0;
+  if (pastePercentage < 20 && score < 0.3) {
+    insights.push("Shows confidence in original writing");
+  } else if (pastePercentage >= 60) {
+    insights.push("Heavy reliance on external sources");
+  }
+
+  // Technical accuracy insight
+  const technicalRating = parseFloat(
+    transformedAnalysis.technicalDepth?.rating || 0
+  );
+  if (technicalRating >= 4.5 && score >= 0.7) {
+    insights.push("High accuracy with concerning input patterns");
+  } else if (technicalRating >= 4.0 && score < 0.4) {
+    insights.push("Strong technical skills with natural composition");
+  }
+
+  // CRITICAL: STRICT External interaction insight
+  const externalInteractionCount =
+    analysis.globalEventAnalysis?.details?.externalInteractionCount || 0;
+  const focusLossCount = analysis.focusAnalysis?.details?.focusLossCount || 0;
+
+  if (externalInteractionCount >= 15) {
+    insights.push(
+      "Excessive external interactions detected - extremely high cheating risk"
+    );
+  } else if (externalInteractionCount >= 8) {
+    insights.push(
+      "High external interactions detected - strong cheating indication"
+    );
+  } else if (externalInteractionCount >= 5) {
+    insights.push(
+      "Multiple external interactions detected - probable cheating"
+    );
+  } else if (externalInteractionCount >= 3 && focusLossCount >= 2) {
+    insights.push(
+      "External interactions with focus loss detected - elevated cheating risk"
+    );
+  }
+
+  // Additional strict focus loss insights
+  if (focusLossCount >= 5) {
+    insights.push(
+      "Excessive focus loss pattern - clear external assistance indicator"
+    );
+  } else if (focusLossCount >= 3) {
+    insights.push("Frequent focus loss detected - strong cheating indication");
+  }
+
+  // Strict paste behavior insights - using existing pastePercentage variable
+  if (pastePercentage >= 50) {
+    insights.push(
+      "High paste percentage detected - external source dependency"
+    );
+  } else if (pastePercentage >= 30) {
+    insights.push(
+      "Moderate paste usage detected - possible external assistance"
+    );
+  }
+
+  return insights.slice(0, 3); // Keep it simple with max 3 insights
+};
+
 const sophisticatedCheatingDetection = (indicators, context = {}) => {
   logger.info(
     "V2: Starting sophisticated cheating detection for subtle behaviors",
