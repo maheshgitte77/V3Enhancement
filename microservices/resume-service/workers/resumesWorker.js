@@ -111,6 +111,7 @@ async function getLatestCandidateStatus(
       sort: { updatedAt: -1 },
       projection: {
         _id: 1,
+        screeningAssessmentId: 1,
         status: 1,
         updatedAt: 1,
       },
@@ -128,8 +129,22 @@ async function getLatestCandidateStatus(
         }
       );
 
+    const screeningData = await db.collection("screeningassessments").findOne(
+      {
+        _id: screening.screeningAssessmentId,
+      },
+      {
+        sort: { updatedAt: -1 },
+        projection: {
+          _id: 1,
+          name: 1,
+        },
+      }
+    );
+
     screeningDetails = {
       type: "Screening",
+      name: screeningData.name,
       status: screening.status,
       score: screeningResult?.candidateFitScore ?? null,
       updatedAt: screening.updatedAt,
@@ -148,6 +163,7 @@ async function getLatestCandidateStatus(
       sort: { updatedAt: -1 },
       projection: {
         _id: 1,
+        assessmentId: 1,
         currentStatus: 1,
         updatedAt: 1,
       },
@@ -164,9 +180,21 @@ async function getLatestCandidateStatus(
           projection: { totalObtainedScore: 1 },
         }
       );
-
+    const assessmentData = await db.collection("assessments").findOne(
+      {
+        _id: assessment.assessmentId,
+      },
+      {
+        sort: { updatedAt: -1 },
+        projection: {
+          _id: 1,
+          name: 1,
+        },
+      }
+    );
     assessmentDetails = {
       type: "Assessment",
+      name: assessmentData.name,
       status: assessment.currentStatus,
       score: assessmentResult?.totalObtainedScore ?? null,
       updatedAt: assessment.updatedAt,
@@ -182,6 +210,7 @@ async function getLatestCandidateStatus(
       sort: { updatedAt: -1 },
       projection: {
         status: 1,
+        round: 1,
         testScore: 1,
         updatedAt: 1,
       },
@@ -192,6 +221,7 @@ async function getLatestCandidateStatus(
   if (interview) {
     interviewDetails = {
       type: "Interview",
+      name: interview.round,
       status: interview.status,
       score: interview.testScore ?? null,
       updatedAt: interview.updatedAt,
@@ -214,6 +244,7 @@ async function getLatestCandidateStatus(
   const coolingUntil = new Date(updatedAtTime.getTime() + coolingPeriodMs);
   const details = {
     type: latest.type,
+    name: latest.name,
     status: latest.status,
     score: latest.score,
     cooling: `Candidate is in cooling period until ${formatDate(
@@ -244,17 +275,17 @@ const checkCandidateStatus = async (
     };
   }
 
-  const cacheKey = `resume:${email}:${jobId}`;
-  const cachedData = await redis.get(cacheKey);
+  // const cacheKey = `resume:${email}:${jobId}`;
+  // const cachedData = await redis.get(cacheKey);
 
-  if (cachedData) {
-    return {
-      status: "AlreadyAdded",
-      details: "Candidate is already associated with this job.",
-      email,
-      cachedId: cacheKey,
-    };
-  }
+  // if (cachedData) {
+  //   return {
+  //     status: "AlreadyAdded",
+  //     details: "Candidate is already associated with this job.",
+  //     email,
+  //     cachedId: cacheKey,
+  //   };
+  // }
 
   const existingApplication = await JobApplication.findOne({ email, jobId });
   if (existingApplication) {
@@ -288,7 +319,7 @@ const checkCandidateStatus = async (
       return {
         status: "CoolingPeriod",
         lastApplicationId: applicationId,
-        details: `${data.type}-${data.status}-${data.score}:-${data.cooling}`,
+        details: `${data.type}-${data.name}-${data.status}-${data.score}:-${data.cooling}`,
         email,
       };
     }
@@ -317,6 +348,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     preferredLocations,
     expectedSalary,
     currentSalary,
+    type,
     createRecord = "true",
     clientCoolingPeriod,
     processedEmails = [],
@@ -596,10 +628,20 @@ Return the output in the specified JSON format.
     const email = parsedAnalysis?.analysis?.email;
     const name = parsedAnalysis?.analysis?.name;
 
-    if (!email || !name) {
-      const details = !email
-        ? "Missing email in resume."
-        : "Missing name in resume.";
+    // Email format regex
+    const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+    // Check for missing or invalid email/name
+    if (!email || !isValidEmail(email) || !name) {
+      let details;
+      if (!email || !isValidEmail(email)) {
+        details = !email
+          ? "Missing email in resume."
+          : "Invalid email format in resume.";
+      } else {
+        details = "Missing name in resume.";
+      }
+
       await saveResumeData(
         requestId,
         jobId,
@@ -616,6 +658,7 @@ Return the output in the specified JSON format.
           preferredLocations,
           expectedSalary,
           currentSalary,
+          type,
         }
       );
 
@@ -629,6 +672,7 @@ Return the output in the specified JSON format.
         null,
         fileId
       );
+
       await cleanupFiles(finalFilePath, originalFilePath);
       return;
     }
@@ -656,6 +700,7 @@ Return the output in the specified JSON format.
         preferredLocations,
         expectedSalary,
         currentSalary,
+        type,
       },
       candidateStatus?.lastApplicationId || null
     );
@@ -726,6 +771,7 @@ Return the output in the specified JSON format.
           preferredLocations: data.preferredLocations,
           expectedSalary: data.expectedSalary,
           currentSalary: data.currentSalary,
+          type: data.type,
         }
       );
 
@@ -773,6 +819,7 @@ Return the output in the specified JSON format.
           preferredLocations: data.preferredLocations,
           expectedSalary: data.expectedSalary,
           currentSalary: data.currentSalary,
+          type: data.type,
         }
       );
 

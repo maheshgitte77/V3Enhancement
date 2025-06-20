@@ -97,6 +97,13 @@ const analyzeResumes = async (req, res) => {
         .collection("clients")
         .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1 } });
       const clientCoolingPeriod = client?.coolingPeriod;
+      const hasValidReferral =
+        referralDetails &&
+        Object.values(referralDetails).every(
+          (val) => typeof val === "string" && val.trim() !== ""
+        );
+
+      const type = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
       const isLive = live ? live : false;
 
@@ -158,6 +165,7 @@ const analyzeResumes = async (req, res) => {
             createRecord,
             expectedSalary,
             currentSalary,
+            type,
             // addedBy: addedBy || null,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
