@@ -405,6 +405,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
 - **Date Format**: 
   - **dateOfBirth**: Must be in DD/MM/YYYY format (e.g., "15/03/1990", "28/12/1985").
   - **All other date fields**: Must be in MM/YYYY format only (e.g., "03/2023", "12/2021"). This applies to educationDetails dates, certificationDetails issueDate, workExperience dates, and projects dates. For ongoing work/projects, use "current" for endDate.
+  - **Education dates special rule**: If resume only shows years for education (e.g., "2023-2025"), use 6th month (June) as default (e.g., "06/2023" to "06/2025").
 - Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
 - For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
 - Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
