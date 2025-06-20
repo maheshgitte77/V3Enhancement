@@ -434,6 +434,11 @@ Parse the resume to extract candidate details, skills, experience, and social li
 5. **resumeSummary**: Two-line overview of candidate’s profile.
 
 ### Special Instructions:
+- **Date Format**: 
+  - **dateOfBirth**: Must be in DD/MM/YYYY format (e.g., "15/03/1990", "28/12/1985").
+  - **All other date fields**: Must be in MM/YYYY format only (e.g., "03/2023", "12/2021"). This applies to educationDetails dates, certificationDetails issueDate, workExperience dates, and projects dates. For ongoing work/projects, use "current" for endDate.
+  - **Education dates special rule**: If resume only shows years for education (e.g., "2023-2025"), use 6th month (June) as default (e.g., "06/2023" to "06/2025").
+  - **Single date rule**: For all fields with startDate and endDate (educationDetails, workExperience, projects), if only ONE date is provided, use it as the endDate and omit startDate. Example: "2023" → endDate: "06/2023", startDate: omitted.
 - Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
 - For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
 - Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
@@ -484,7 +489,8 @@ Parse the resume to extract candidate details, skills, experience, and social li
   - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities for each project, derived only from the provided \`responsibilities\` string.
   - Additionally, extract and summarize the domain of the project (e.g., healthcare, fintech, e-commerce) based on the context of the project and the nature of the responsibilities if possible.
 - **Work Experience and Projects Date Handling**:
-  - For \`endDate\` in \`workExperience\` and \`projects\`, if the resume specifies "present" or "current", retain it as "current" in the JSON output (e.g., "20-02-2022 - current"). Do not replace with a specific date.
+  - All dates must be in MM/YYYY format (e.g., "03/2023", "12/2021").
+  - For \`endDate\` in \`workExperience\` and \`projects\`, if the resume specifies "present" or "current", retain it as "current" in the JSON output (e.g., "03/2022 - current"). Do not replace with a specific date.
 
 - Ensure valid JSON output with no trailing commas or invalid syntax.
 
@@ -498,7 +504,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
       "number": "<String>"
     },
     "gender": "<String>",
-    "dateOfBirth": "<Date>",
+    "dateOfBirth": "<DD/MM/YYYY>",
     "experience": {
       "years": <Number>,
       "months": <Number>
@@ -514,8 +520,8 @@ Parse the resume to extract candidate details, skills, experience, and social li
       {
         "course": "<String>",
         "universityOrBoard": "<String>",
-        "startDate": "<Date>",
-        "endDate": "<Date>",
+        "startDate": "<MM/YYYY>",
+        "endDate": "<MM/YYYY>",
         "gradeOrPercentage": "<String>"
       }
     ],
@@ -523,7 +529,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
       {
         "name": "<String>",
         "issuedBy": "<String>",
-        "issueDate": "<Date>",
+        "issueDate": "<MM/YYYY>",
         "description": "<String>"
       }
     ],
@@ -531,16 +537,16 @@ Parse the resume to extract candidate details, skills, experience, and social li
       {
         "companyName": "<String>",
         "designation": "<String>",
-        "startDate": "<Date>",
-        "endDate": "<Date | current>"
+        "startDate": "<MM/YYYY>",
+        "endDate": "<MM/YYYY | current>"
       }
     ],
     "projects": [
       {
         "title": "<String>",
         "teamSize": <Number>,
-        "startDate": "<Date>",
-        "endDate": "<Date | current>",
+        "startDate": "<MM/YYYY>",
+        "endDate": "<MM/YYYY | current>",
         "domain": "<String>",
         "technologiesUsed": ["<String>", "..."],
         "responsibilities": ["<String>", "..."]
