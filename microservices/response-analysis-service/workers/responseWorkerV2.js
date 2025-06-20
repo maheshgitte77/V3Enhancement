@@ -4227,9 +4227,10 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     question.cheatingFlags = finalCheatingFlags; // Use the processed flags
     question.transcription = questionAiResponse.transcription || "";
     question.correctPercentage = questionAiResponse.correctPercentage || "0%";
-    question.isCheatingDetected = question.isCheatingDetected
-      ? question.isCheatingDetected
-      : questionAiResponse.isCheatingDetected;
+    question.isCheatingDetected =
+      question.isCheatingDetected === true
+        ? question.isCheatingDetected
+        : questionAiResponse.isCheatingDetected;
     question.detectedCheatings = [
       ...(question.detectedCheatings || []),
       ...(questionAiResponse.cheatingIndicators || []),
