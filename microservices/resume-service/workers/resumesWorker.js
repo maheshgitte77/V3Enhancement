@@ -417,8 +417,14 @@ Parse the resume to extract candidate details, skills, experience, and social li
 - For projects:
   - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities, derived only from the provided \`responsibilities\` string.
 - For socials and portfolio:
-  - Extract URLs from text or hidden links (e.g., clickable iconsthat'sLinkedIn, GitHub, Twitter/X, or text like "Portfolio").
+  - Extract URLs from text or hidden links (e.g., clickable icons for LinkedIn, GitHub, Twitter/X, or text like "Portfolio").
   - Parse digital resumes (PDF, Word, HTML) or images to detect hyperlinks or visible URLs.
+  - **URL Normalization**: Always return complete, properly formatted URLs:
+    - If missing protocol, add "https://" (e.g., "linkedin.com/in/johndoe" → "https://linkedin.com/in/johndoe")
+    - For LinkedIn: "linkedin.com/infmjainaditya" → "https://linkedin.com/in/infmjainaditya" 
+    - For GitHub: "github.com/johndoe" → "https://github.com/johndoe"
+    - For Twitter/X: "twitter.com/johndoe" → "https://twitter.com/johndoe"
+    - If only username provided, construct full URL (e.g., "johndoe" for LinkedIn → "https://linkedin.com/in/johndoe")
   - Include only valid URLs for recognized platforms or portfolios; exclude unrelated links.
 - Mobile:
   - If a country code is explicitly written (e.g., '+91', '+1'), include it as the countryCode.
@@ -443,15 +449,23 @@ Parse the resume to extract candidate details, skills, experience, and social li
   - For images, extract experience from visible text if structured (e.g., work history).
 - **Socials**:
   - Extract explicitly listed social URLs or embedded hyperlinks behind icons/text (e.g., LinkedIn, GitHub, Twitter/X).
-  - The result must be an object where each key is the platform name and each value is the URL: { "<Platform>": "<URL>" }.
+  - **URL Normalization for Socials**: Convert all to proper URLs:
+    - "linkedin.com/infmjainaditya" → "https://linkedin.com/in/infmjainaditya"
+    - "github.com/johndoe" → "https://github.com/johndoe" 
+    - "twitter.com/johndoe" → "https://twitter.com/johndoe"
+    - "johndoe" (if context suggests LinkedIn) → "https://linkedin.com/in/johndoe"
+  - The result must be an object where each key is the platform name and each value is the complete URL: { "LinkedIn": "https://linkedin.com/in/johndoe" }.
   - Include only recognized platforms (LinkedIn, GitHub, Twitter/X, personal sites).
-  - Do not include just platform names or guessed URLs.
   - For images, extract URLs from visible text if present.
 - **Portfolio**:
   - Extract all explicitly mentioned or linked portfolio URLs (e.g., personal websites, GitHub Pages, Behance, Dribbble).
-  - The result must be an object where each key is the platform or site name and each value is the URL: { "<Platform or SiteName>": "<URL>" }.
+  - **URL Normalization for Portfolio**: Convert all to proper URLs:
+    - "behance.net/johndoe" → "https://behance.net/johndoe"
+    - "dribbble.com/johndoe" → "https://dribbble.com/johndoe"
+    - "johndoe.dev" → "https://johndoe.dev"
+    - Always add "https://" if protocol is missing
+  - The result must be an object where each key is the platform or site name and each value is the complete URL: { "Behance": "https://behance.net/johndoe" }.
   - Detect hidden links behind portfolio icons or text (e.g., "My Work", "Projects").
-  - Do not include unrelated or inferred links.
   - For images, extract URLs from visible text if present.
 - **Projects**:
   - Summarize the \`responsibilities\` field into a concise list of responsible responsibilities for each project, derived only from the provided \`responsibilities\` string.
