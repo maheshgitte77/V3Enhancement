@@ -41,6 +41,7 @@ const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 const supportedExtensions = new Set([
   "pdf",
   "docx",
+  "doc",
   "rtf",
   "txt",
   "jpg",
@@ -52,6 +53,7 @@ const supportedExtensions = new Set([
 const allowedMimeTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
   "application/rtf",
   "text/plain",
   "image/jpeg",
@@ -299,7 +301,9 @@ const checkCandidateStatus = async (
   const latestApplication = await JobApplication.findOne({
     email,
     jobId: { $ne: jobId },
-    status: { $ne: "Applied" },
+    status: {
+      $nin: ["Applied", "Invited For Screening", "Invited For Assessment"],
+    },
   }).sort({ updatedAt: -1 });
 
   if (latestApplication) {

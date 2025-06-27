@@ -11,6 +11,7 @@ const { connectNativeMongoDB, getNativeDB } = require("../utils/nativeMongoDB");
 const supportedExtensions = new Set([
   "pdf",
   "docx",
+  "doc",
   "rtf",
   "txt",
   "jpg",
@@ -21,6 +22,7 @@ const supportedExtensions = new Set([
 const allowedMimeTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
   "application/rtf",
   "text/plain",
   "image/jpeg",
@@ -116,6 +118,15 @@ const analyzeResumes = async (req, res) => {
 
       // Send immediate acknowledgment only for multiple resumes
       if (validFiles.length > 1) {
+        await db.collection("jobs").updateOne(
+          { _id: new ObjectId(jobId) },
+          {
+            $set: {
+              activeRequestId: requestId,
+              requestStatus: "Pending",
+            },
+          }
+        );
         res.status(200).json({
           message: "Resume processing initiated",
           requestId,
@@ -233,7 +244,7 @@ const getRequestData = async (req, res) => {
 const addToJobApplication = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { jobId, emails } = req.body;
+    const { jobId, changeStatus, emails } = req.body;
     const redis = req.redis;
 
     if (!jobId || !Array.isArray(emails) || emails.length === 0) {
@@ -253,9 +264,10 @@ const addToJobApplication = async (req, res) => {
     for (const email of emails) {
       const matchingRecord = jobDataList.find(
         (record) =>
-          record.email === email &&
-          record.jobId === jobId &&
-          record.status === "Valid"
+          (record.email === email &&
+            record.jobId === jobId &&
+            record.status === "Valid") ||
+          changeStatus === "Valid"
       );
 
       if (matchingRecord) {
@@ -310,6 +322,16 @@ const addToJobApplication = async (req, res) => {
     if (bulkOps.length > 0) {
       await JobApplication.bulkWrite(bulkOps);
     }
+
+    await redis.del(redisKey);
+    await connectNativeMongoDB();
+    const db = getNativeDB();
+    await db
+      .collection("jobs")
+      .updateOne(
+        { _id: new ObjectId(jobId) },
+        { $set: { activeRequestId: "", requestStatus: "Completed" } }
+      );
 
     res.status(200).json({
       message: "Successfully added records to JobApplication",
@@ -498,21 +520,6 @@ const updateCandidate = async (req, res) => {
     // Update Redis
     await redis.set(redisKey, JSON.stringify(jobDataList));
 
-    // // Sync with JobApplication
-    // await JobApplication.updateOne(
-    //   { jobId, email },
-    //   {
-    //     $set: {
-    //       ...jobDataList[candidateIndex],
-    //       email: newEmail,
-    //       mobile: { ...jobDataList[candidateIndex].mobile, number: newMobile },
-    //       status: "Valid",
-    //       details: "Candidate details updated",
-    //     },
-    //   },
-    //   { upsert: true }
-    // );
-
     res.status(200).json({
       message: "Candidate updated successfully",
       updatedCandidate: jobDataList[candidateIndex],
@@ -582,6 +589,14 @@ const deleteCandidates = async (req, res) => {
     // Delete Redis key if no candidates remain
     if (updatedJobDataList.length === 0) {
       await redis.del(redisKey);
+      await connectNativeMongoDB();
+      const db = getNativeDB();
+      await db
+        .collection("jobs")
+        .updateOne(
+          { _id: new ObjectId(jobId) },
+          { $set: { activeRequestId: "", requestStatus: "Completed" } }
+        );
     }
 
     res.status(200).json({

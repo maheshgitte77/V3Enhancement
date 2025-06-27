@@ -9,6 +9,8 @@ require("dotenv").config();
 require("./workers/resumesWorker");
 const resumeScreeningRoutes = require("./routes/resumeScreeningRoutes");
 const { default: axios } = require("axios");
+const { ObjectId } = require("mongodb");
+const { connectNativeMongoDB, getNativeDB } = require("./utils/nativeMongoDB");
 
 const app = express();
 app.use(cors());
@@ -111,20 +113,6 @@ const createConsumerInstance = async (id) => {
             responseCache.get(requestId).length ===
               requestInfo.expectedResponses
           ) {
-            // Save all jobData to JobApplication
-            // const redisKey = `request:${requestId}:jobData`;
-            // const jobDataList = await redis.get(redisKey);
-            // if (jobDataList) {
-            //   const jobDataArray = JSON.parse(jobDataList);
-            //   const validApplications = jobDataArray.filter(
-            //     (data) => data.status === "Valid"
-            //   );
-            //   if (validApplications.length > 0) {
-            //     const { JobApplication } = require("./model/JobApplication");
-            //     await JobApplication.insertMany(validApplications);
-            //   }
-            // }
-
             // Send final update (for single resume, this is the response)
             io.emit(`completion:${requestId}`, {
               requestId,
@@ -135,22 +123,24 @@ const createConsumerInstance = async (id) => {
               axios.post(
                 `${process.env.NOTIFICATION_SER_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
               );
+
+              await connectNativeMongoDB();
+              const db = getNativeDB();
+              await db.collection("jobs").updateOne(
+                { _id: new ObjectId(requestInfo.jobId) },
+                {
+                  $set: {
+                    activeRequestId: requestId,
+                    requestStatus: "Pending",
+                  },
+                }
+              );
             }
             requestInfo.res.json({
               requestId,
               message: "Processing completed",
               responses: responseCache.get(requestId),
             });
-            // await connectNativeMongoDB();
-            // const db = getNativeDB();
-            // const result = await db
-            //   .collection("jobs")
-            //   .updateOne(
-            //     { _id: requestInfo.jobId },
-            //     { $set: { requestStatus: "Pending" } }
-            //   );
-            // Clean up Redis and caches
-            // await redis.del(redisKey);
             pendingRequests.delete(requestId);
             responseCache.delete(requestId);
           }
