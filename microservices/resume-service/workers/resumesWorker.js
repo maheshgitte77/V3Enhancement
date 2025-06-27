@@ -2,7 +2,6 @@ const { Kafka } = require("kafkajs");
 const dotenv = require("dotenv");
 const fs = require("fs").promises;
 const path = require("path");
-const axios = require("axios");
 const Redis = require("ioredis");
 const convertDocxToPdf = require("../utils/convertDocxToPdf");
 const { GoogleGenerativeAI } = require("@google/generative-ai");

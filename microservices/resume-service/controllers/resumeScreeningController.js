@@ -215,21 +215,6 @@ const getRequestData = async (req, res) => {
     }
 
     const data = JSON.parse(jobDataList);
-    // const categorizedData = {
-    //   Valid: [],
-    //   Duplicate: [],
-    //   AlreadyAdded: [],
-    //   CoolingPeriod: [],
-    //   Invalid: [],
-    // };
-
-    // data.forEach((item) => {
-    //   if (categorizedData[item.status]) {
-    //     categorizedData[item.status].push(item);
-    //   } else {
-    //     console.warn(`Unknown status for resume: ${item.status}`);
-    //   }
-    // });
 
     res.status(200).json({
       requestId,
@@ -352,16 +337,12 @@ const addToJobApplication = async (req, res) => {
 
 const removeData = async (req, res) => {
   const redis = req.redis;
-
-  // Make sure requestId is extracted (e.g., from query, params, or body)
-  const { requestId } = req.params; // Or req.query / req.body, depending on route setup
+  const { requestId } = req.params;
 
   if (!requestId) {
     return res.status(400).json({ message: "Missing requestId." });
   }
-
   const redisKey = `request:${requestId}:jobData`;
-
   try {
     await redis.del(redisKey);
     res.status(200).json({
@@ -382,7 +363,6 @@ const approveCandidates = async (req, res) => {
     const { emails, status, jobId } = req.body;
     const redis = req.redis;
 
-    // Validate input
     if (
       !requestId ||
       !Array.isArray(emails) ||
@@ -401,7 +381,6 @@ const approveCandidates = async (req, res) => {
       });
     }
 
-    // Fetch Redis data
     const redisKey = `request:${requestId}:jobData`;
     let jobDataList = await redis.get(redisKey);
     jobDataList = jobDataList ? JSON.parse(jobDataList) : [];
@@ -415,7 +394,6 @@ const approveCandidates = async (req, res) => {
     const updatedRecords = [];
     const notFoundEmails = [];
 
-    // Update status for matching candidates
     jobDataList = jobDataList.map((record) => {
       if (emails.includes(record.email) && record.jobId === jobId) {
         const updatedRecord = {
@@ -474,7 +452,6 @@ const updateCandidate = async (req, res) => {
     const { email, newEmail, newMobile, status, jobId } = req.body;
     const redis = req.redis;
 
-    // Validate input
     if (!requestId || !email || !newEmail || !newMobile || !status || !jobId) {
       return res.status(400).json({
         error:
@@ -536,7 +513,6 @@ const deleteCandidates = async (req, res) => {
     const { emails, status, jobId } = req.body;
     const redis = req.redis;
 
-    // Validate input
     if (!requestId || !Array.isArray(emails) || emails.length === 0 || !jobId) {
       return res
         .status(400)
@@ -555,7 +531,6 @@ const deleteCandidates = async (req, res) => {
     }
 
     const deletedEmails = [];
-    const notFoundEmails = [];
 
     // Filter out candidates to delete
     const updatedJobDataList = jobDataList.filter((record) => {
