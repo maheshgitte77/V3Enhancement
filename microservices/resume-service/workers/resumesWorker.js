@@ -94,28 +94,23 @@ const formatDate = (dateString) => {
   const date = new Date(dateString);
   return date.toLocaleString();
 };
+
 async function getLatestCandidateStatus(
   jobApplicationId,
   updatedAtTime,
   clientCoolingPeriod
 ) {
   const jobAppId = new ObjectId(jobApplicationId);
+
   await connectNativeMongoDB();
   const db = getNativeDB();
+
   // 1. SCREENING
   const screening = await db.collection("candidatescreenings").findOne(
-    {
-      jobApplicationId: jobAppId,
-      status: { $nin: ["Invited", "Invite Expired"] },
-    },
+    { jobApplicationId: jobAppId },
     {
       sort: { updatedAt: -1 },
-      projection: {
-        _id: 1,
-        screeningAssessmentId: 1,
-        status: 1,
-        updatedAt: 1,
-      },
+      projection: { _id: 1, screeningAssessmentId: 1, status: 1, updatedAt: 1 },
     }
   );
 
@@ -125,27 +120,18 @@ async function getLatestCandidateStatus(
       .collection("candidatescreeningresults")
       .findOne(
         { candidateScreeningId: screening._id },
-        {
-          projection: { candidateFitScore: 1 },
-        }
+        { projection: { candidateFitScore: 1 } }
       );
-
-    const screeningData = await db.collection("screeningassessments").findOne(
-      {
-        _id: screening.screeningAssessmentId,
-      },
-      {
-        sort: { updatedAt: -1 },
-        projection: {
-          _id: 1,
-          name: 1,
-        },
-      }
-    );
+    const screeningData = await db
+      .collection("screeningassessments")
+      .findOne(
+        { _id: screening.screeningAssessmentId },
+        { sort: { updatedAt: -1 }, projection: { _id: 1, name: 1 } }
+      );
 
     screeningDetails = {
       type: "Screening",
-      name: screeningData.name,
+      name: screeningData?.name ?? "Unknown",
       status: screening.status,
       score: screeningResult?.candidateFitScore ?? null,
       updatedAt: screening.updatedAt,
@@ -154,20 +140,10 @@ async function getLatestCandidateStatus(
 
   // 2. ASSESSMENT
   const assessment = await db.collection("candidateassessments").findOne(
-    {
-      jobApplicationId: jobAppId,
-      currentStatus: {
-        $nin: ["Invited", "Invite Expired", "Appearing", "Appearing Failed"],
-      },
-    },
+    { jobApplicationId: jobAppId },
     {
       sort: { updatedAt: -1 },
-      projection: {
-        _id: 1,
-        assessmentId: 1,
-        currentStatus: 1,
-        updatedAt: 1,
-      },
+      projection: { _id: 1, assessmentId: 1, currentStatus: 1, updatedAt: 1 },
     }
   );
 
@@ -177,25 +153,18 @@ async function getLatestCandidateStatus(
       .collection("candidateassessmentresults")
       .findOne(
         { candidateAssessmentId: assessment._id },
-        {
-          projection: { totalObtainedScore: 1 },
-        }
+        { projection: { totalObtainedScore: 1 } }
       );
-    const assessmentData = await db.collection("assessments").findOne(
-      {
-        _id: assessment.assessmentId,
-      },
-      {
-        sort: { updatedAt: -1 },
-        projection: {
-          _id: 1,
-          name: 1,
-        },
-      }
-    );
+    const assessmentData = await db
+      .collection("assessments")
+      .findOne(
+        { _id: assessment.assessmentId },
+        { sort: { updatedAt: -1 }, projection: { _id: 1, name: 1 } }
+      );
+
     assessmentDetails = {
       type: "Assessment",
-      name: assessmentData.name,
+      name: assessmentData?.name ?? "Unknown",
       status: assessment.currentStatus,
       score: assessmentResult?.totalObtainedScore ?? null,
       updatedAt: assessment.updatedAt,
@@ -204,17 +173,10 @@ async function getLatestCandidateStatus(
 
   // 3. INTERVIEW
   const interview = await db.collection("interviews").findOne(
-    {
-      jobApplicationId: jobAppId,
-    },
+    { jobApplicationId: jobAppId },
     {
       sort: { updatedAt: -1 },
-      projection: {
-        status: 1,
-        round: 1,
-        testScore: 1,
-        updatedAt: 1,
-      },
+      projection: { status: 1, round: 1, testScore: 1, updatedAt: 1 },
     }
   );
 
@@ -222,45 +184,73 @@ async function getLatestCandidateStatus(
   if (interview) {
     interviewDetails = {
       type: "Interview",
-      name: interview.round,
+      name: interview.round ?? "Unknown",
       status: interview.status,
       score: interview.testScore ?? null,
       updatedAt: interview.updatedAt,
     };
   }
 
-  // Determine the latest by updatedAt
+  // Collect evaluations
   const evaluations = [
     screeningDetails,
     assessmentDetails,
     interviewDetails,
   ].filter(Boolean);
 
+  // If no evaluations exist
   if (evaluations.length === 0) {
-    return { details: "No evaluation found." };
+    return { status: "NoEvaluations", details: "No evaluation data found." };
   }
 
-  const latest = evaluations.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  // Sort by latest updatedAt
+  const latest = evaluations.sort(
+    (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+  )[0];
+
+  // Check if the latest evaluation status allows immediate eligibility
+  const isEligibleStatus =
+    (latest.type === "Screening" &&
+      ["Invited", "Invite Expired"].includes(latest.status)) ||
+    (latest.type === "Assessment" &&
+      ["Invited", "Invite Expired"].includes(latest.status)) ||
+    (latest.type === "Interview" &&
+      ["Scheduled", "Cancelled", "Rescheduled"].includes(latest.status));
+
+  if (isEligibleStatus) {
+    return {
+      status: "EligibleStatus",
+      details: "Latest evaluation status allows processing.",
+      evaluation: latest,
+    };
+  }
+
+  // Calculate cooling period
   const coolingPeriodMs = clientCoolingPeriod * 24 * 60 * 60 * 1000;
   const coolingUntil = new Date(updatedAtTime.getTime() + coolingPeriodMs);
-  const details = {
-    type: latest.type,
-    name: latest.name,
-    status: latest.status,
-    score: latest.score,
-    cooling: `Candidate is in cooling period until ${formatDate(
-      coolingUntil.toISOString()
-    )}`,
+
+  return {
+    status: "Evaluated",
+    details: {
+      type: latest.type,
+      name: latest.name,
+      status: latest.status,
+      score: latest.score,
+      cooling: `Candidate is in cooling period until ${formatDate(
+        coolingUntil.toISOString()
+      )}`,
+      // coolingData: latest,
+      coolingDate: coolingUntil,
+    },
   };
-  return details;
 }
 
-const checkCandidateStatus = async (
+async function checkCandidateStatus(
   email,
   jobId,
   processedEmails,
   clientCoolingPeriod
-) => {
+) {
   if (!email) {
     return {
       status: "Invalid",
@@ -276,18 +266,6 @@ const checkCandidateStatus = async (
     };
   }
 
-  // const cacheKey = `resume:${email}:${jobId}`;
-  // const cachedData = await redis.get(cacheKey);
-
-  // if (cachedData) {
-  //   return {
-  //     status: "AlreadyAdded",
-  //     details: "Candidate is already associated with this job.",
-  //     email,
-  //     cachedId: cacheKey,
-  //   };
-  // }
-
   const existingApplication = await JobApplication.findOne({ email, jobId });
   if (existingApplication) {
     return {
@@ -300,32 +278,71 @@ const checkCandidateStatus = async (
   const latestApplication = await JobApplication.findOne({
     email,
     jobId: { $ne: jobId },
-    status: {
-      $nin: ["Applied", "Invited For Screening", "Invited For Assessment"],
-    },
+    status: { $nin: ["Applied", "Added"] },
   }).sort({ updatedAt: -1 });
 
-  if (latestApplication) {
-    const updatedAt = new Date(latestApplication.updatedAt);
-    const now = new Date();
-    const coolingPeriodMs = clientCoolingPeriod * 24 * 60 * 60 * 1000;
+  if (!latestApplication) {
+    return {
+      status: "Valid",
+      details: "Candidate is eligible for processing.",
+      email,
+    };
+  }
 
-    const applicationId = latestApplication._id;
+  const updatedAt = new Date(latestApplication.updatedAt);
+  const now = new Date();
+  const coolingPeriodMs = clientCoolingPeriod * 24 * 60 * 60 * 1000;
 
-    const data = await getLatestCandidateStatus(
-      applicationId,
-      updatedAt,
-      clientCoolingPeriod
-    );
+  const evaluationData = await getLatestCandidateStatus(
+    latestApplication._id,
+    updatedAt,
+    clientCoolingPeriod
+  );
 
+  if (evaluationData.status === "EligibleStatus") {
+    return {
+      status: "Valid",
+      details: "Candidate is eligible for processing.",
+      email,
+    };
+  }
+
+  if (evaluationData.status === "NoEvaluations") {
     if (now - updatedAt < coolingPeriodMs) {
+      const coolingUntil = new Date(updatedAt.getTime() + coolingPeriodMs);
       return {
         status: "CoolingPeriod",
-        lastApplicationId: applicationId,
-        details: `${data.type}-${data.name}-${data.status}-${data.score}:-${data.cooling}`,
+        lastApplicationId: latestApplication._id,
+        details: `No evaluations found. Candidate is in cooling period until ${formatDate(
+          coolingUntil.toISOString()
+        )}`,
         email,
+        coolingData: {
+          isInCooling: true,
+          coolingStatus: "NoEvaluations",
+          coolingEndDate: formatDate(coolingUntil.toISOString()),
+        },
       };
     }
+    return {
+      status: "Valid",
+      details: "Candidate is eligible for processing.",
+      email,
+    };
+  }
+
+  if (now - updatedAt < coolingPeriodMs) {
+    return {
+      status: "CoolingPeriod",
+      lastApplicationId: latestApplication._id,
+      details: `${evaluationData.details.type}-${evaluationData.details.name}-${evaluationData.details.status}-${evaluationData.details.score}:-${evaluationData.details.cooling}`,
+      email,
+      coolingData: {
+        isInCooling: true,
+        coolingStatus: evaluationData.details.type,
+        coolingEndDate: evaluationData.details.coolingDate,
+      },
+    };
   }
 
   return {
@@ -333,7 +350,7 @@ const checkCandidateStatus = async (
     details: "Candidate is eligible for processing.",
     email,
   };
-};
+}
 
 const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
   let finalFilePath;
@@ -705,7 +722,8 @@ Return the output in the specified JSON format.
         currentSalary,
         type,
       },
-      candidateStatus?.lastApplicationId || null
+      candidateStatus?.lastApplicationId || null,
+      candidateStatus.coolingData
     );
 
     if (candidateStatus.status !== "Valid") {
@@ -733,7 +751,7 @@ Return the output in the specified JSON format.
         resumeFileId: fileId,
         jobId,
       })
-    ); // Cache for 30 days
+    );
 
     await sendResponse(
       requestId,
@@ -854,7 +872,8 @@ async function saveResumeData(
   analysis,
   createRecord,
   additionalData,
-  lastApplicationId
+  lastApplicationId,
+  coolingData
 ) {
   if (createRecord !== "true") return;
 
@@ -868,6 +887,7 @@ async function saveResumeData(
     email,
     ...analysis,
     ...additionalData,
+    ...coolingData,
   };
 
   const redisKey = `request:${requestId}:jobData`;

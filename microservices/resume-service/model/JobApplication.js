@@ -231,6 +231,23 @@ const JobApplicationSchema = new mongoose.Schema(
     zipCode: {
       type: String,
     },
+    isInCooling: {
+      type: Boolean,
+      default: false,
+      required: true,
+    },
+    coolingStatus: {
+      type: String,
+      enum: ["Screening", "Assessment", "Interview"],
+    },
+    coolingEndDate: {
+      type: Date,
+    },
+    currentPhase: {
+      type: String,
+      enum: ["Screening", "Assessment", "Interview"],
+      default: "Added",
+    },
     isComplete: {
       type: Boolean,
       default: false,

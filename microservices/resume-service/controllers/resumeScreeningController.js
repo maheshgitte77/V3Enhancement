@@ -258,7 +258,7 @@ const addToJobApplication = async (req, res) => {
       if (matchingRecord) {
         recordsToAdd.push({
           ...matchingRecord,
-          status: "Applied", // forcefully override or set status
+          status: "Added", // forcefully override or set status
         });
       } else {
         notFoundEmails.push(email);
@@ -275,7 +275,7 @@ const addToJobApplication = async (req, res) => {
         const jobData = {
           ...analysis,
           jobId,
-          status: "Applied",
+          status: "Added",
           // resumeFileId: null, // No fileId available from cache
           // resumeFileReference: null, // No file reference available
           // email,
