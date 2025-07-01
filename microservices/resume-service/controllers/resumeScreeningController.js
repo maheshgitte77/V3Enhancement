@@ -180,6 +180,7 @@ const analyzeResumes = async (req, res) => {
             // addedBy: addedBy || null,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
+            clientObjectId,
           },
           "resume-screening",
           validFiles.indexOf(file)
@@ -245,7 +246,6 @@ const addToJobApplication = async (req, res) => {
     const recordsToAdd = [];
     const notFoundEmails = [];
 
-    // Match records from request:${requestId}:jobData
     for (const email of emails) {
       const matchingRecord = jobDataList.find(
         (record) =>
@@ -258,14 +258,13 @@ const addToJobApplication = async (req, res) => {
       if (matchingRecord) {
         recordsToAdd.push({
           ...matchingRecord,
-          status: "Added", // forcefully override or set status
+          status: "Added",
         });
       } else {
         notFoundEmails.push(email);
       }
     }
 
-    // For emails not found in request:${requestId}:jobData, check resume:${email}:${jobId}
     for (const email of notFoundEmails) {
       const cacheKey = `resume:${email}:${jobId}`;
       const cachedData = await redis.get(cacheKey);
@@ -276,11 +275,6 @@ const addToJobApplication = async (req, res) => {
           ...analysis,
           jobId,
           status: "Added",
-          // resumeFileId: null, // No fileId available from cache
-          // resumeFileReference: null, // No file reference available
-          // email,
-          // status: "Valid",
-          // details: "Candidate data retrieved from cache",
         };
         recordsToAdd.push(jobData);
       }
@@ -292,8 +286,6 @@ const addToJobApplication = async (req, res) => {
         .json({ error: "No valid records found to add to JobApplication" });
     }
 
-    // Insert matching records into JobApplication
-    // await JobApplication.insertMany(recordsToAdd);
     const bulkOps = recordsToAdd.map((record) => {
       return {
         updateOne: {
@@ -419,21 +411,7 @@ const approveCandidates = async (req, res) => {
         .json({ error: "No matching candidates found to approve" });
     }
 
-    // Update Redis
     await redis.set(redisKey, JSON.stringify(jobDataList));
-
-    // Sync with JobApplication
-    const bulkOps = updatedRecords.map((record) => ({
-      updateOne: {
-        filter: { jobId: record.jobId, email: record.email },
-        update: { $set: record },
-        upsert: true,
-      },
-    }));
-
-    if (bulkOps.length > 0) {
-      await JobApplication.bulkWrite(bulkOps);
-    }
 
     res.status(200).json({
       message: "Candidates approved successfully",
@@ -449,135 +427,153 @@ const approveCandidates = async (req, res) => {
 const updateCandidate = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { email, newEmail, newMobile, status, jobId } = req.body;
+    const { id, newEmail, newMobile, status, jobId } = req.body;
     const redis = req.redis;
 
-    if (!requestId || !email || !newEmail || !newMobile || !status || !jobId) {
+    if (!requestId || !id || !newEmail || !newMobile || !status || !jobId) {
       return res.status(400).json({
         error:
-          "requestId, email, newEmail, newMobile, status, and jobId are required",
+          "requestId, id, newEmail, newMobile, status, and jobId are required",
       });
     }
 
-    if (status !== "Valid") {
-      return res
-        .status(400)
-        .json({ error: "Invalid status. Only 'Valid' is allowed for update" });
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail)) {
+      return res.status(400).json({ error: "Invalid email format" });
     }
 
-    // Fetch Redis data
-    const redisKey = `request:${requestId}:jobData`;
-    let jobDataList = await redis.get(redisKey);
-    jobDataList = jobDataList ? JSON.parse(jobDataList) : [];
+    const mobileRegex = /^\d{10}$/;
+    if (!mobileRegex.test(newMobile)) {
+      return res.status(400).json({ error: "Invalid mobile number format" });
+    }
 
-    if (jobDataList.length === 0) {
+    if (status !== "Valid") {
+      return res.status(400).json({
+        error: "Invalid status. Only 'Valid' is allowed for update",
+      });
+    }
+
+    const redisKey = `request:${requestId}:jobData`;
+    const jobDataListRaw = await redis.get(redisKey);
+
+    if (!jobDataListRaw) {
       return res
         .status(404)
         .json({ error: "No job data found for the given requestId" });
     }
 
-    // Find and update candidate
+    let jobDataList;
+    try {
+      jobDataList = JSON.parse(jobDataListRaw);
+    } catch (parseError) {
+      console.error("Error parsing Redis data:", parseError.message);
+      return res.status(500).json({ error: "Corrupted data in storage" });
+    }
+
+    if (!Array.isArray(jobDataList) || jobDataList.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "No job data found for the given requestId" });
+    }
+
     const candidateIndex = jobDataList.findIndex(
-      (record) => record.email === email && record.jobId === jobId
+      (record) =>
+        record.resumeFileId?.toString() === id && record.jobId === jobId
     );
 
     if (candidateIndex === -1) {
       return res.status(404).json({ error: "Candidate not found" });
     }
 
-    // Update candidate details
-    jobDataList[candidateIndex] = {
-      ...jobDataList[candidateIndex],
+    const candidate = jobDataList[candidateIndex];
+
+    const updatedCandidate = {
+      ...candidate,
       email: newEmail,
-      mobile: { ...jobDataList[candidateIndex].mobile, number: newMobile },
+      mobile: {
+        countryCode: candidate.mobile?.countryCode || "+91",
+        number: newMobile,
+      },
       status: "Valid",
       details: "Candidate details updated",
+      updatedAt: new Date().toISOString(),
     };
 
-    // Update Redis
-    await redis.set(redisKey, JSON.stringify(jobDataList));
+    jobDataList[candidateIndex] = updatedCandidate;
 
-    res.status(200).json({
+    await redis.set(redisKey, JSON.stringify(jobDataList), "EX", 24 * 60 * 60);
+
+    return res.status(200).json({
       message: "Candidate updated successfully",
-      updatedCandidate: jobDataList[candidateIndex],
+      updatedCandidate,
     });
   } catch (error) {
     console.error("Error updating candidate:", error.message, error.stack);
-    res.status(500).json({ error: "Failed to update candidate" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
 const deleteCandidates = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { emails, status, jobId } = req.body;
+    const { ids, jobId } = req.body;
     const redis = req.redis;
 
-    if (!requestId || !Array.isArray(emails) || emails.length === 0 || !jobId) {
-      return res
-        .status(400)
-        .json({ error: "requestId, emails array, and jobId are required" });
+    if (!requestId || !Array.isArray(ids) || ids.length === 0 || !jobId) {
+      return res.status(400).json({
+        error: "requestId, ids array, and jobId are required",
+      });
     }
 
-    // Fetch Redis data
     const redisKey = `request:${requestId}:jobData`;
     let jobDataList = await redis.get(redisKey);
     jobDataList = jobDataList ? JSON.parse(jobDataList) : [];
 
     if (jobDataList.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "No job data found for the given requestId" });
+      return res.status(404).json({
+        error: "No job data found for the given requestId",
+      });
     }
 
-    const deletedEmails = [];
+    const deletedIds = [];
 
-    // Filter out candidates to delete
     const updatedJobDataList = jobDataList.filter((record) => {
-      if (emails.includes(record.email) && record.jobId === jobId) {
-        deletedEmails.push(record.email);
-        return false; // Remove from list
+      const recordIdStr = record.resumeFileId?.toString();
+      if (recordIdStr && ids.includes(recordIdStr) && record.jobId === jobId) {
+        deletedIds.push(recordIdStr);
+        return false;
       }
-      return true; // Keep in list
+      return true;
     });
 
-    if (deletedEmails.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "No matching candidates found to delete" });
+    if (deletedIds.length === 0) {
+      return res.status(404).json({
+        error: "No matching candidates found to delete",
+      });
     }
 
-    // Update Redis
     await redis.set(redisKey, JSON.stringify(updatedJobDataList));
 
-    // Sync with JobApplication
-    const bulkOps = deletedEmails.map((email) => ({
-      deleteOne: {
-        filter: { jobId, email },
-      },
-    }));
-
-    if (bulkOps.length > 0) {
-      await JobApplication.bulkWrite(bulkOps);
-    }
-
-    // Delete Redis key if no candidates remain
     if (updatedJobDataList.length === 0) {
       await redis.del(redisKey);
+
       await connectNativeMongoDB();
       const db = getNativeDB();
-      await db
-        .collection("jobs")
-        .updateOne(
-          { _id: new ObjectId(jobId) },
-          { $set: { activeRequestId: "", requestStatus: "Completed" } }
-        );
+      await db.collection("jobs").updateOne(
+        { _id: new ObjectId(jobId) },
+        {
+          $set: {
+            activeRequestId: "",
+            requestStatus: "Completed",
+          },
+        }
+      );
     }
 
     res.status(200).json({
       message: "Candidates deleted successfully",
-      deletedCount: deletedEmails.length,
-      notFoundEmails: emails.filter((email) => !deletedEmails.includes(email)),
+      deletedCount: deletedIds.length,
+      notFoundIds: ids.filter((id) => !deletedIds.includes(id)),
     });
   } catch (error) {
     console.error("Error deleting candidates:", error.message, error.stack);

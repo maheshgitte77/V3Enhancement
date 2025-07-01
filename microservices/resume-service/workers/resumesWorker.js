@@ -239,7 +239,6 @@ async function getLatestCandidateStatus(
       cooling: `Candidate is in cooling period until ${formatDate(
         coolingUntil.toISOString()
       )}`,
-      // coolingData: latest,
       coolingDate: coolingUntil,
     },
   };
@@ -249,7 +248,8 @@ async function checkCandidateStatus(
   email,
   jobId,
   processedEmails,
-  clientCoolingPeriod
+  clientCoolingPeriod,
+  clientObjectId
 ) {
   if (!email) {
     return {
@@ -275,9 +275,26 @@ async function checkCandidateStatus(
     };
   }
 
+  await connectNativeMongoDB();
+  const db = getNativeDB();
+
+  const clientJobsCursor = await db.collection("jobs").find(
+    {
+      clientId: clientObjectId,
+      status: { $in: ["Open", "Closed"] },
+    },
+    {
+      sort: { updatedAt: -1 },
+      projection: { _id: 1, status: 1, updatedAt: 1 },
+    }
+  );
+
+  const clientJobs = await clientJobsCursor.toArray();
+  const clientJobIds = clientJobs.map((job) => job._id);
+
   const latestApplication = await JobApplication.findOne({
     email,
-    jobId: { $ne: jobId },
+    jobId: { $in: clientJobIds, $ne: jobId },
     status: { $nin: ["Applied", "Added"] },
   }).sort({ updatedAt: -1 });
 
@@ -308,22 +325,6 @@ async function checkCandidateStatus(
   }
 
   if (evaluationData.status === "NoEvaluations") {
-    if (now - updatedAt < coolingPeriodMs) {
-      const coolingUntil = new Date(updatedAt.getTime() + coolingPeriodMs);
-      return {
-        status: "CoolingPeriod",
-        lastApplicationId: latestApplication._id,
-        details: `No evaluations found. Candidate is in cooling period until ${formatDate(
-          coolingUntil.toISOString()
-        )}`,
-        email,
-        coolingData: {
-          isInCooling: true,
-          coolingStatus: "NoEvaluations",
-          coolingEndDate: formatDate(coolingUntil.toISOString()),
-        },
-      };
-    }
     return {
       status: "Valid",
       details: "Candidate is eligible for processing.",
@@ -331,7 +332,10 @@ async function checkCandidateStatus(
     };
   }
 
-  if (now - updatedAt < coolingPeriodMs) {
+  if (
+    now - updatedAt < coolingPeriodMs &&
+    evaluationData.status === "Evaluated"
+  ) {
     return {
       status: "CoolingPeriod",
       lastApplicationId: latestApplication._id,
@@ -372,6 +376,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     createRecord = "true",
     clientCoolingPeriod,
     processedEmails = [],
+    clientObjectId,
   } = data;
   try {
     const validFiles = files.filter((file) =>
@@ -669,8 +674,8 @@ Return the output in the specified JSON format.
         file.originalname,
         "Invalid",
         details,
-        null,
-        null,
+        email,
+        parsedAnalysis.analysis,
         createRecord,
         {
           noticePeriod,
@@ -686,10 +691,10 @@ Return the output in the specified JSON format.
         requestId,
         "Invalid",
         details,
-        null,
+        email,
         file.originalname,
         null,
-        null,
+        parsedAnalysis.analysis,
         fileId
       );
 
@@ -701,7 +706,8 @@ Return the output in the specified JSON format.
       email,
       jobId,
       processedEmails,
-      clientCoolingPeriod
+      clientCoolingPeriod,
+      clientObjectId
     );
 
     await saveResumeData(
@@ -772,92 +778,37 @@ Return the output in the specified JSON format.
       error.stack
     );
 
-    if (
-      error.message.includes("Invalid resume format") ||
-      error.message.includes("File processing failed")
-    ) {
-      await saveResumeData(
-        requestId,
-        data.jobId,
-        files?.fileId,
-        originalFileName,
-        "Invalid",
-        error.message,
-        null,
-        null,
-        data.createRecord,
-        {
-          noticePeriod: data.noticePeriod,
-          referralDetails: data.referralDetails,
-          preferredLocations: data.preferredLocations,
-          expectedSalary: data.expectedSalary,
-          currentSalary: data.currentSalary,
-          type: data.type,
-        }
-      );
+    await saveResumeData(
+      requestId,
+      data.jobId,
+      files?.fileId,
+      originalFileName,
+      "Invalid",
+      error.message,
+      null,
+      null,
+      data.createRecord,
+      {
+        noticePeriod: data.noticePeriod,
+        referralDetails: data.referralDetails,
+        preferredLocations: data.preferredLocations,
+        expectedSalary: data.expectedSalary,
+        currentSalary: data.currentSalary,
+        type: data.type,
+      }
+    );
 
-      await sendResponse(
-        requestId,
-        "Invalid",
-        error.message,
-        null,
-        originalFileName,
-        null,
-        null,
-        files?.fileId
-      );
-      await cleanupFiles(finalFilePath, originalFilePath);
-      return;
-    }
-
-    if (retryCount < MAX_RETRIES) {
-      console.log(
-        `🔄 Retrying ${data.files?.[0]?.originalname} (${
-          retryCount + 1
-        }/${MAX_RETRIES}) in ${RETRY_DELAY / 1000} seconds...`
-      );
-      setTimeout(() => {
-        processResume(data, topic, reqId, partition, retryCount + 1);
-      }, RETRY_DELAY);
-    } else {
-      console.error(
-        `🚨 Max retries reached for ${data.files?.[0]?.originalname}. Saving for manual review.`
-      );
-
-      await saveResumeData(
-        data.requestId,
-        data.jobId,
-        files?.fileId,
-        originalFileName,
-        "Invalid",
-        "Max retries exceeded.",
-        null,
-        null,
-        data.createRecord,
-        {
-          noticePeriod: data.noticePeriod,
-          referralDetails: data.referralDetails,
-          preferredLocations: data.preferredLocations,
-          expectedSalary: data.expectedSalary,
-          currentSalary: data.currentSalary,
-          type: data.type,
-        }
-      );
-
-      await sendResponse(
-        requestId,
-        "Invalid",
-        "Max retries exceeded need manual review..",
-        null,
-        originalFileName,
-        null,
-        null,
-        files?.fileId
-      );
-      await cleanupFiles(finalFilePath, originalFilePath);
-
-      failedResumes.set(reqId, data);
-    }
+    await sendResponse(
+      requestId,
+      "Invalid",
+      error.message,
+      null,
+      originalFileName,
+      null,
+      null,
+      files?.fileId
+    );
+    await cleanupFiles(finalFilePath, originalFilePath);
   }
 };
 
@@ -945,7 +896,7 @@ async function cleanupFiles(finalFilePath, originalFilePath) {
 
 async function remotePdfToPart(path, displayName, mimetype) {
   try {
-    await fs.access(path); // Check if file exists (promise-based)
+    await fs.access(path);
     const uploadResult = await fileManager.uploadFile(path, {
       mimeType: mimetype,
       displayName,

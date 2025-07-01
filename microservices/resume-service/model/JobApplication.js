@@ -206,12 +206,15 @@ const JobApplicationSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        "Invited",
+        "Added",
         "Applied",
-        "Shortlisted",
-        "Interview Scheduled",
-        "Interview Completed",
-        "Offered",
+        "In Process",
+        "Archived",
         "Hired",
+        "On Hold",
+        "Cancelled Hired",
+        "Onboarded",
         "Rejected",
       ],
       default: "Applied",
@@ -247,6 +250,9 @@ const JobApplicationSchema = new mongoose.Schema(
       type: String,
       enum: ["Screening", "Assessment", "Interview"],
       default: "Added",
+    },
+    lastApplicationId: {
+      type: mongoose.Schema.Types.ObjectId,
     },
     isComplete: {
       type: Boolean,

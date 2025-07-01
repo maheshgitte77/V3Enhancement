@@ -5,8 +5,6 @@ let nativeDb;
 
 const connectNativeMongoDB = async () => {
   try {
-    console.log(`ℹ  Attempting native MongoDB connection...!`);
-
     const username = process.env.DB_USERNAME;
     const password = process.env.DB_PASSWORD;
     const databaseName = process.env.DB_NAME;
@@ -15,15 +13,11 @@ const connectNativeMongoDB = async () => {
     const authSource = process.env.DB_AUTH_SOURCE || "admin";
 
     const mongoURI = `mongodb://${username}:${password}@${host}:${port}/${databaseName}?retryWrites=true&authSource=${authSource}`;
-    console.log(`ℹ  Native MongoDB URI: ${mongoURI}`);
 
-    const client = new MongoClient(mongoURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    const client = new MongoClient(mongoURI);
 
     await client.connect();
-    console.log(`✅  Native MongoDB connected to database: ${databaseName}`);
+    // console.log(`✅  Native MongoDB connected to database: ${databaseName}`);
 
     nativeDb = client.db(databaseName);
 

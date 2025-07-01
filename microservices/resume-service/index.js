@@ -97,7 +97,6 @@ const createConsumerInstance = async (id) => {
           }
           responseCache.get(requestId).push(responseData);
 
-          // Emit live update via WebSocket (skip for single resume)
           const requestInfo = pendingRequests.get(requestId);
           if (requestInfo && requestInfo.expectedResponses > 1) {
             io.emit(`progress:${requestId}`, {
@@ -113,10 +112,10 @@ const createConsumerInstance = async (id) => {
             responseCache.get(requestId).length ===
               requestInfo.expectedResponses
           ) {
-            // Send final update (for single resume, this is the response)
             io.emit(`completion:${requestId}`, {
               requestId,
               message: "All resumes processed",
+              jobId: requestInfo.jobId,
               responses: responseCache.get(requestId),
             });
             if (requestInfo.expectedResponses > 1) {
@@ -131,7 +130,7 @@ const createConsumerInstance = async (id) => {
                 {
                   $set: {
                     activeRequestId: requestId,
-                    requestStatus: "Pending",
+                    requestStatus: "Completed",
                   },
                 }
               );
