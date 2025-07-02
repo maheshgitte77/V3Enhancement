@@ -31,8 +31,6 @@ const NUM_CONSUMERS = parseInt(process.env.NUM_CONSUMERS, 10) || 6;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 5000;
 
-const failedResumes = new Map();
-
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "models/gemini-2.0-flash" });
 const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
@@ -137,7 +135,6 @@ async function getLatestCandidateStatus(
       updatedAt: screening.updatedAt,
     };
   }
-
   // 2. ASSESSMENT
   const assessment = await db.collection("candidateassessments").findOne(
     { jobApplicationId: jobAppId },
@@ -170,7 +167,6 @@ async function getLatestCandidateStatus(
       updatedAt: assessment.updatedAt,
     };
   }
-
   // 3. INTERVIEW
   const interview = await db.collection("interviews").findOne(
     { jobApplicationId: jobAppId },
@@ -190,7 +186,6 @@ async function getLatestCandidateStatus(
       updatedAt: interview.updatedAt,
     };
   }
-
   // Collect evaluations
   const evaluations = [
     screeningDetails,
@@ -280,7 +275,7 @@ async function checkCandidateStatus(
 
   const clientJobsCursor = await db.collection("jobs").find(
     {
-      clientId: clientObjectId,
+      clientId: new ObjectId(clientObjectId),
       status: { $in: ["Open", "Closed"] },
     },
     {
@@ -288,7 +283,6 @@ async function checkCandidateStatus(
       projection: { _id: 1, status: 1, updatedAt: 1 },
     }
   );
-
   const clientJobs = await clientJobsCursor.toArray();
   const clientJobIds = clientJobs.map((job) => job._id);
 
@@ -379,6 +373,9 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     clientObjectId,
   } = data;
   try {
+    if (!files?.length) {
+      throw new Error("No files provided for processing.");
+    }
     const validFiles = files.filter((file) =>
       supportedExtensions.has(
         path.extname(file.originalname).slice(1).toLowerCase()
@@ -405,6 +402,17 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       throw new Error(
         `Unsupported file: extension=${ext}, mimetype=${mimetype}`
       );
+    }
+
+    // Validate file existence and integrity
+    try {
+      await fs.access(file.path);
+      const stats = await fs.stat(file.path);
+      if (stats.size === 0) {
+        throw new Error("File is empty");
+      }
+    } catch (error) {
+      throw new Error(`File access error: ${error.message}`);
     }
 
     if (
@@ -658,14 +666,11 @@ Return the output in the specified JSON format.
 
     // Check for missing or invalid email/name
     if (!email || !isValidEmail(email) || !name) {
-      let details;
-      if (!email || !isValidEmail(email)) {
-        details = !email
-          ? "Missing email in resume."
-          : "Invalid email format in resume.";
-      } else {
-        details = "Missing name in resume.";
-      }
+      let details = !email
+        ? "Missing email in resume."
+        : !isValidEmail(email)
+        ? "Invalid email format in resume."
+        : "Missing name in resume.";
 
       await saveResumeData(
         requestId,
@@ -778,6 +783,14 @@ Return the output in the specified JSON format.
       error.stack
     );
 
+    // Store failed resume details
+    await logFailedResume(
+      requestId,
+      files?.[0]?.fileId,
+      originalFileName,
+      error
+    );
+
     await saveResumeData(
       requestId,
       data.jobId,
@@ -809,6 +822,15 @@ Return the output in the specified JSON format.
       files?.fileId
     );
     await cleanupFiles(finalFilePath, originalFilePath);
+    if (retryCount < MAX_RETRIES && isTransientError(error)) {
+      console.log(
+        `Retrying file ${originalFileName} (Attempt ${
+          retryCount + 1
+        }/${MAX_RETRIES})`
+      );
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+      await processResume(data, topic, reqId, partition, retryCount + 1);
+    }
   }
 };
 
@@ -881,22 +903,31 @@ async function sendResponse(
 }
 
 async function cleanupFiles(finalFilePath, originalFilePath) {
-  await fs.unlink(finalFilePath).catch((err) => {
-    console.warn(`⚠️ Failed to delete file: ${finalFilePath}`, err);
-  });
+  const filesToDelete = [finalFilePath];
   if (finalFilePath !== originalFilePath) {
-    await fs.unlink(originalFilePath).catch((err) => {
-      console.warn(
-        `⚠️ Failed to delete original file: ${originalFilePath}`,
-        err
-      );
-    });
+    filesToDelete.push(originalFilePath);
+  }
+
+  for (const filePath of filesToDelete) {
+    if (filePath) {
+      try {
+        await fs.access(filePath);
+        await fs.unlink(filePath);
+        console.log(`Deleted file: ${filePath}`);
+      } catch (err) {
+        console.warn(`⚠️ Failed to delete file: ${filePath}`, err);
+      }
+    }
   }
 }
 
 async function remotePdfToPart(path, displayName, mimetype) {
   try {
     await fs.access(path);
+    const stats = await fs.stat(path);
+    if (stats.size === 0) {
+      throw new Error("File is empty");
+    }
     const uploadResult = await fileManager.uploadFile(path, {
       mimeType: mimetype,
       displayName,
@@ -913,6 +944,31 @@ async function remotePdfToPart(path, displayName, mimetype) {
       error: `File processing failed: ${error.message}`,
     };
   }
+}
+
+// Helper to log failed resumes
+async function logFailedResume(requestId, fileId, fileName, error) {
+  await redis.lpush(
+    `failed_resumes:${requestId}`,
+    JSON.stringify({
+      fileId,
+      fileName,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    })
+  );
+}
+
+// Helper to identify transient errors
+function isTransientError(error) {
+  const transientErrors = [
+    "ENOENT: no such file or directory",
+    "ETIMEDOUT",
+    "EAGAIN",
+    "ECONNRESET",
+    "ECONNREFUSED",
+  ];
+  return transientErrors.some((err) => error.message.includes(err));
 }
 
 (async () => {

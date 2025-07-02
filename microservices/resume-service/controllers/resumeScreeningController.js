@@ -7,11 +7,12 @@ const fileService = require("../utils/fileService");
 const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
 const { connectNativeMongoDB, getNativeDB } = require("../utils/nativeMongoDB");
+const { v4: uuidv4 } = require("uuid");
 
 const supportedExtensions = new Set([
   "pdf",
   "docx",
-  "doc",
+  // "doc",
   "rtf",
   "txt",
   "jpg",
@@ -22,7 +23,7 @@ const supportedExtensions = new Set([
 const allowedMimeTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/msword",
+  // "application/msword",
   "application/rtf",
   "text/plain",
   "image/jpeg",
@@ -35,7 +36,9 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     cb(
       null,
-      `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`
+      `${file.fieldname}-${uuidv4()}-${Date.now()}${path.extname(
+        file.originalname
+      )}`
     );
   },
 });
