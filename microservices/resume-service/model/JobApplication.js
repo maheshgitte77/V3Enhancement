@@ -25,7 +25,7 @@ const JobApplicationSchema = new mongoose.Schema(
       type: String,
     },
     dateOfBirth: {
-      type: Date,
+      type: String,
     },
     noticePeriod: {
       type: String,
