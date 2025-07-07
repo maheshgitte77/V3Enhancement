@@ -91,7 +91,7 @@ const analyzeResumes = async (req, res) => {
         addedBy,
         clientId,
       } = req.body;
-      await connectNativeMongoDB();
+      // Use existing connection - connectNativeMongoDB is already called in index.js
       const db = getNativeDB();
       const clientObjectId = new ObjectId(clientId);
       const preferredLocations = locationPreference
@@ -304,7 +304,7 @@ const addToJobApplication = async (req, res) => {
     }
 
     await redis.del(redisKey);
-    await connectNativeMongoDB();
+    // Use existing connection - connectNativeMongoDB is already called in index.js
     const db = getNativeDB();
     await db
       .collection("jobs")
@@ -560,7 +560,7 @@ const deleteCandidates = async (req, res) => {
     if (updatedJobDataList.length === 0) {
       await redis.del(redisKey);
 
-      await connectNativeMongoDB();
+      // Use existing connection - connectNativeMongoDB is already called in index.js
       const db = getNativeDB();
       await db.collection("jobs").updateOne(
         { _id: new ObjectId(jobId) },

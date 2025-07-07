@@ -100,7 +100,7 @@ async function getLatestCandidateStatus(
 ) {
   const jobAppId = new ObjectId(jobApplicationId);
 
-  await connectNativeMongoDB();
+  // Use existing connection - connectNativeMongoDB is already called in index.js
   const db = getNativeDB();
 
   // 1. SCREENING
@@ -270,7 +270,7 @@ async function checkCandidateStatus(
     };
   }
 
-  await connectNativeMongoDB();
+  // Use existing connection - connectNativeMongoDB is already called in index.js
   const db = getNativeDB();
 
   const clientJobsCursor = await db.collection("jobs").find(

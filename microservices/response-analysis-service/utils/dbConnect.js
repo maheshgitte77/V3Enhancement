@@ -16,8 +16,14 @@ const connectDB = async () => {
       useNewUrlParser: true,
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 30000,
-      maxPoolSize: 200,
+      maxPoolSize: 10,
+      minPoolSize: 2,
+      maxIdleTimeMS: 300000,
       socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
+      heartbeatFrequencyMS: 10000,
+      retryWrites: true,
+      retryReads: true,
     });
 
     console.log(`✅  MongoDB connected to database ${databaseName}`);
