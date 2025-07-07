@@ -6,7 +6,7 @@ const { produceMessage } = require("../utils/producer");
 const fileService = require("../utils/fileService");
 const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
-const { connectNativeMongoDB, getNativeDB } = require("../utils/nativeMongoDB");
+const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 
 const supportedExtensions = new Set([
@@ -91,8 +91,8 @@ const analyzeResumes = async (req, res) => {
         addedBy,
         clientId,
       } = req.body;
-      // Use existing connection - connectNativeMongoDB is already called in index.js
-      const db = getNativeDB();
+      // Use existing mongoose connection for schemaless operations
+      const db = mongoose.connection.db;
       const clientObjectId = new ObjectId(clientId);
       const preferredLocations = locationPreference
         ?.split(",")
@@ -304,8 +304,8 @@ const addToJobApplication = async (req, res) => {
     }
 
     await redis.del(redisKey);
-    // Use existing connection - connectNativeMongoDB is already called in index.js
-    const db = getNativeDB();
+    // Use existing mongoose connection for schemaless operations
+    const db = mongoose.connection.db;
     await db
       .collection("jobs")
       .updateOne(
@@ -560,8 +560,8 @@ const deleteCandidates = async (req, res) => {
     if (updatedJobDataList.length === 0) {
       await redis.del(redisKey);
 
-      // Use existing connection - connectNativeMongoDB is already called in index.js
-      const db = getNativeDB();
+      // Use existing mongoose connection for schemaless operations
+      const db = mongoose.connection.db;
       await db.collection("jobs").updateOne(
         { _id: new ObjectId(jobId) },
         {

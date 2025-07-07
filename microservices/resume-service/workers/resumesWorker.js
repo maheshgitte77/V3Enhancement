@@ -8,7 +8,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
-const { connectNativeMongoDB, getNativeDB } = require("../utils/nativeMongoDB");
+const mongoose = require("mongoose");
 
 dotenv.config();
 
@@ -100,8 +100,8 @@ async function getLatestCandidateStatus(
 ) {
   const jobAppId = new ObjectId(jobApplicationId);
 
-  // Use existing connection - connectNativeMongoDB is already called in index.js
-  const db = getNativeDB();
+  // Use existing mongoose connection for schemaless operations
+  const db = mongoose.connection.db;
 
   // 1. SCREENING
   const screening = await db.collection("candidatescreenings").findOne(
@@ -270,8 +270,8 @@ async function checkCandidateStatus(
     };
   }
 
-  // Use existing connection - connectNativeMongoDB is already called in index.js
-  const db = getNativeDB();
+  // Use existing mongoose connection for schemaless operations
+  const db = mongoose.connection.db;
 
   const clientJobsCursor = await db.collection("jobs").find(
     {

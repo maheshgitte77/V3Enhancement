@@ -10,7 +10,7 @@ require("./workers/resumesWorker");
 const resumeScreeningRoutes = require("./routes/resumeScreeningRoutes");
 const { default: axios } = require("axios");
 const { ObjectId } = require("mongodb");
-const { connectNativeMongoDB, getNativeDB } = require("./utils/nativeMongoDB");
+const mongoose = require("mongoose");
 
 const app = express();
 app.use(cors());
@@ -123,8 +123,7 @@ const createConsumerInstance = async (id) => {
                 `${process.env.NOTIFICATION_SER_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
               );
 
-              await connectNativeMongoDB();
-              const db = getNativeDB();
+              const db = mongoose.connection.db;
               await db.collection("jobs").updateOne(
                 { _id: new ObjectId(requestInfo.jobId) },
                 {
