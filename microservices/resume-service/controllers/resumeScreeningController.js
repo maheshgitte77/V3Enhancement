@@ -113,10 +113,10 @@ const analyzeResumes = async (req, res) => {
       const isLive = live ? live : false;
 
       const primarySkillList = new Set(
-        primarySkills.split(",").map((s) => s.trim())
+        primarySkills?.split(",").map((s) => s.trim())
       );
       const secondarySkillList = new Set(
-        secondarySkills.split(",").map((s) => s.trim())
+        secondarySkills?.split(",").map((s) => s.trim())
       );
 
       // Send immediate acknowledgment only for multiple resumes
