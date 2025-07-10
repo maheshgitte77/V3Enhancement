@@ -8,7 +8,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
-const { connectNativeMongoDB, getNativeDB } = require("../utils/nativeMongoDB");
+const mongoose = require("mongoose");
 
 dotenv.config();
 
@@ -100,8 +100,8 @@ async function getLatestCandidateStatus(
 ) {
   const jobAppId = new ObjectId(jobApplicationId);
 
-  await connectNativeMongoDB();
-  const db = getNativeDB();
+  // Use existing mongoose connection for schemaless operations
+  const db = mongoose.connection.db;
 
   // 1. SCREENING
   const screening = await db.collection("candidatescreenings").findOne(
@@ -270,8 +270,8 @@ async function checkCandidateStatus(
     };
   }
 
-  await connectNativeMongoDB();
-  const db = getNativeDB();
+  // Use existing mongoose connection for schemaless operations
+  const db = mongoose.connection.db;
 
   const clientJobsCursor = await db.collection("jobs").find(
     {
@@ -472,6 +472,17 @@ Parse the resume to extract candidate details, skills, experience, and social li
   - **All other date fields**: Must be in MM/YYYY format only (e.g., "03/2023", "12/2021"). This applies to educationDetails dates, certificationDetails issueDate, workExperience dates, and projects dates. For ongoing work/projects, use "current" for endDate.
   - **Education dates special rule**: If resume only shows years for education (e.g., "2023-2025"), use 6th month (June) as default (e.g., "06/2023" to "06/2025").
   - **Single date rule**: For all fields with startDate and endDate (educationDetails, workExperience, projects), if only ONE date is provided, use it as the endDate and omit startDate. Example: "2023" → endDate: "06/2023", startDate: omitted.
+- **Grade/Percentage Format**: 
+  - **gradeOrPercentage**: Must follow one of these exact formats:
+    - **Percentage**: "85%" (number followed by % sign, range 0-100)
+    - **CGPA**: "CGPA 8.5" or "cgpa 7.8" (CGPA/cgpa followed by space and number 0-10)
+    - **Grade**: "A", "B+", "O" (single letter A-F or O, optionally followed by +)
+  - **Format conversion examples**:
+    - "80/100" → "80%"
+    - "8.5 CGPA" → "CGPA 8.5"
+    - "First Class" → "A"
+    - "85 percent" → "85%"
+    - "Nine point five" → "CGPA 9.5"
 - Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
 - For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
 - Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
