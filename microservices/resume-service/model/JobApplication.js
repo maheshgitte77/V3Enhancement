@@ -219,6 +219,14 @@ const JobApplicationSchema = new mongoose.Schema(
       ],
       default: "Applied",
     },
+    candidateType: {
+      type: String,
+      enum: [
+        "Uploaded",
+        "Applied",
+      ],
+      default: "Uploaded",
+    },
     address: {
       type: String,
     },
