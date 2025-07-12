@@ -88,7 +88,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     videoAnswerFileId: {
       type: String,
       required: function () {
-        return ["video", "audio"].includes(this.type);
+        return ["video"].includes(this.type);
       },
     },
     status: {
