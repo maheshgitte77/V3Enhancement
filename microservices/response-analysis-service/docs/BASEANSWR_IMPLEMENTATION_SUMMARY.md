@@ -187,7 +187,7 @@ POST /api/response/analyzeSubjective/v1
 {
   "experience": "3",
   "jobRole": "Software Developer",
-  "QuestionAnalyzed": "Explain the difference between let and var in JavaScript",
+  "question": "Explain the difference between let and var in JavaScript",
   "candidateAnswer": "let has block scope while var has function scope",
   "baseAnswer": "let is block-scoped and var is function-scoped. let prevents hoisting issues.",
   // ... other required fields
@@ -201,7 +201,7 @@ POST /api/response/analyzeSubjective/v2
 {
   "experience": "5",
   "jobRole": "Senior Developer",
-  "QuestionAnalyzed": "How would you optimize a slow database query?",
+  "question": "How would you optimize a slow database query?",
   "candidateAnswer": "Add indexes, use query optimization, consider caching",
   "baseAnswer": "Add appropriate indexes, analyze execution plan, optimize WHERE clauses",
   // ... other required fields

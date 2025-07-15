@@ -190,7 +190,7 @@ Provide comprehensive analysis focusing on:
   ${generateAudioFieldsTemplate()}
 }
 
-**Question**: ${responseData.QuestionAnalyzed}
+**Question**: ${responseData.question}
 **Experience**: ${responseData.experience} years  
 **Job Role**: ${responseData.jobRole}
 **Duration**: ${responseData.questionDuration}

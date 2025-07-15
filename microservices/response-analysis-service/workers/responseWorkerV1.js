@@ -458,7 +458,7 @@ Use clear, everyday language that HR teams can understand:
 - Focus on constructive feedback
 - Assume good intentions unless proven otherwise
 
-**Question**: ${responseData.QuestionAnalyzed}
+**Question**: ${responseData.question}
 **Experience**: ${responseData.experience}
 **Job Role**: ${responseData.jobRole}
 **Expected Duration**: ${responseData.questionDuration} seconds
@@ -978,7 +978,7 @@ const processResponse = async (responseData) => {
     logger.error("V1: Missing question type", { responseData });
     throw new ProcessingError("Question type is required");
   }
-  if (!responseData.QuestionAnalyzed) {
+  if (!responseData.question) {
     logger.error("V1: Missing question content", { responseData });
     throw new ProcessingError("Question content is required");
   }
@@ -1378,11 +1378,11 @@ const processResponse = async (responseData) => {
     logger.info("V1: Creating CandidateAnswerAiResponse");
     const questionAiResponse = await CandidateAnswerAiResponse.create({
       type: normalizedType,
-      questionAnalyzed: responseData.QuestionAnalyzed,
+      question: responseData.question,
       candidateScreeningId: responseData.candidateScreeningId,
       jobApplicationId: responseData.jobApplicationId,
       questionId: responseData.questionId,
-      videoAnswerFileId: responseData.videoAnswerFileId,
+      answerFileId: responseData.answerFileId,
       status: "Analyzed",
       transcription: transformedAnalysis.transcription,
       communication: transformedAnalysis.communication,
@@ -1421,7 +1421,7 @@ const processResponse = async (responseData) => {
 
     // V1: Update question fields with V1 approach
     logger.info("V1: Updating question fields");
-    question.videoAnswerFileId = responseData.videoAnswerFileId;
+    question.answerFileId = responseData.answerFileId;
     question.candidateAnswerAiResponseId = questionAiResponse._id;
     question.answerSummary = answerSummary;
     question.cheatingFlags = finalCheatingFlags; // Use V1 processed flags
@@ -1694,7 +1694,7 @@ const processScreening = async (screeningData) => {
 
         const questionText = questionDetails
           ? questionDetails.question
-          : response.questionAnalyzed;
+          : response.question;
 
         prompt += `
     Question ${questionIndex++}:

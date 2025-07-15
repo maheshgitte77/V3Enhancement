@@ -18,11 +18,11 @@ const mongoose = require("mongoose");
  * @type {mongoose.Schema}
  *
  * @property {string} type - Type of response (video/audio/subjective/mcq)
- * @property {string} questionAnalyzed - The question that was asked
+ * @property {string} question - The question that was asked
  * @property {ObjectId} candidateScreeningId - Reference to the screening session
  * @property {ObjectId} jobApplicationId - Reference to the job application
  * @property {string} questionId - Unique identifier for the question
- * @property {string} [videoAnswerFileId] - File ID for video/audio responses
+ * @property {string} [answerFileId] - File ID for video/audio responses
  * @property {string} status - Analysis status (Pending/Analyzed/Error)
  * @property {string} [transcription] - Text transcription of audio/video
  * @property {string} [communication] - Communication assessment
@@ -66,7 +66,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       enum: ["video", "audio", "subjective", "mcq"],
       required: true,
     },
-    questionAnalyzed: {
+    question: {
       type: String,
       required: true,
     },
@@ -85,7 +85,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    videoAnswerFileId: {
+    answerFileId: {
       type: String,
       required: function () {
         return ["video"].includes(this.type);
