@@ -118,7 +118,7 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
             videoQuestionTranscript: { type: String },
             isAiGenerated: { type: Boolean, default: false },
             usedRetakeCount: { type: Number, default: 0 },
-            videoAnswerFileId: { type: String },
+            answerFileId: { type: String },
             candidateAnswer: { type: String },
             timeSpent: {
               type: Number,

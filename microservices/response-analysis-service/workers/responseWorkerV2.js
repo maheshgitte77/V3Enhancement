@@ -1150,7 +1150,7 @@ When cheating is detected with high confidence (>75%), ALL fields must reflect t
 - Assess relevanceAssessment with intelligent scoring
 - Consider contextualImpact of background noise
 
-**Question**: ${responseData.QuestionAnalyzed}
+**Question**: ${responseData.question}
 **Experience**: ${responseData.experience} years
 **Job Role**: ${responseData.jobRole}
 **Duration**: ${responseData.questionDuration}
@@ -3248,7 +3248,7 @@ const processResponse = async (responseData) => {
       "Response type is required for contextual analysis"
     );
   }
-  if (!responseData.QuestionAnalyzed) {
+  if (!responseData.question) {
     throw new ProcessingError(
       "Question content is required for intelligent assessment"
     );
@@ -3334,7 +3334,7 @@ const processResponse = async (responseData) => {
     ) {
       const relevanceAssessment = assessIntelligentRelevance(
         responseData.textAnswer,
-        responseData.QuestionAnalyzed
+        responseData.question
       );
       processingContext.relevanceScore = relevanceAssessment.score;
       processingContext.responseQuality =
@@ -4170,11 +4170,11 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     // V2: Create enhanced CandidateAnswerAiResponse with contextual data
     const questionAiResponse = await CandidateAnswerAiResponse.create({
       type: normalizedType,
-      questionAnalyzed: responseData.QuestionAnalyzed,
+      question: responseData.question,
       candidateScreeningId: responseData.candidateScreeningId,
       jobApplicationId: responseData.jobApplicationId,
       questionId: responseData.questionId,
-      videoAnswerFileId: responseData.videoAnswerFileId,
+      answerFileId: responseData.answerFileId,
       status: "Analyzed", // V2: Mark as V2 processed
       transcription: transformedAnalysis.transcription,
       communication: transformedAnalysis.communication,
@@ -4221,7 +4221,7 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       : [questionAiResponse.answerSummary?.toString() || "No summary provided"];
 
     // V2: Enhanced question field updates with contextual data
-    question.videoAnswerFileId = responseData.videoAnswerFileId;
+    question.answerFileId = responseData.answerFileId;
     question.candidateAnswerAiResponseId = questionAiResponse._id;
     question.answerSummary = answerSummary;
     question.cheatingFlags = finalCheatingFlags; // Use the processed flags
@@ -4565,7 +4565,7 @@ const processScreening = async (screeningData) => {
 
         const questionText = questionDetails
           ? questionDetails.question
-          : response.questionAnalyzed;
+          : response.question;
 
         prompt += `
     Question ${questionIndex++}:

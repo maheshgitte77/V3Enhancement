@@ -300,7 +300,7 @@ const generatePrompt = (responseData, normalizedType) => {
       - **No Hallucinations**: Ensure all outputs are grounded in the input data. If a metric cannot be evaluated, set it to "Not evaluated: [specific reason]" and assign numerical values of 0.
       - **Relevance-Based Evaluation**: 
         - \`correctPercentage\` (0–100%) and \`overallRating\` (0.0–5.0, as string) must reflect the response's relevance and accuracy to the question (${
-          responseData.QuestionAnalyzed
+          responseData.question
         }). If irrelevant, set \`correctPercentage = 0\`, \`overallRating = "0.0"\`, and explain in \`answerEffectiveness.relevanceBreakdown.relevanceExplanation\`.
       - **Multiple Voice Detection**: 
         - Detect multiple voices, whispers, or coaching cues. If detected, set \`multipleVoicesDetected = true\`, \`isCheatingDetected = true\`, and list in \`cheatingIndicators\`.
@@ -329,7 +329,7 @@ const generatePrompt = (responseData, normalizedType) => {
       ### Analysis Type: ${
         normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
       } response
-      **Question for Analysis**: ${responseData.QuestionAnalyzed}
+      **Question for Analysis**: ${responseData.question}
       **Candidate Experience**: ${responseData.experience}
       **Job Role**: ${responseData.jobRole}
       **Question Duration**: ${responseData.questionDuration}
@@ -527,8 +527,8 @@ const processResponse = async (responseData) => {
   if (!responseData?.type) {
     throw new ProcessingError("Missing question type");
   }
-  if (!responseData.QuestionAnalyzed) {
-    throw new ProcessingError("Missing QuestionAnalyzed");
+  if (!responseData.question) {
+    throw new ProcessingError("Missing question");
   }
   if (!responseData.experience) {
     throw new ProcessingError("Missing candidate experience");
@@ -728,11 +728,11 @@ const processResponse = async (responseData) => {
         // Create CandidateAnswerAiResponse
         const questionAiResponse = await CandidateAnswerAiResponse.create({
           type: normalizedType,
-          questionAnalyzed: responseData.QuestionAnalyzed,
+          question: responseData.question,
           candidateScreeningId: responseData.candidateScreeningId,
           jobApplicationId: responseData.jobApplicationId,
           questionId: responseData.questionId,
-          videoAnswerFileId: responseData.videoAnswerFileId,
+          answerFileId: responseData.answerFileId,
           status: "Analyzed",
           transcription: transformedAnalysis.transcription,
           communication: transformedAnalysis.communication,
@@ -774,7 +774,7 @@ const processResponse = async (responseData) => {
             ];
 
         // Update question fields
-        question.videoAnswerFileId = responseData.videoAnswerFileId;
+        question.answerFileId = responseData.answerFileId;
         question.candidateAnswerAiResponseId = questionAiResponse._id;
         question.answerSummary = answerSummary;
         question.cheatingFlags = cheatingFlags;
@@ -1010,7 +1010,7 @@ const processScreening = async (screeningData) => {
 
         const questionText = questionDetails
           ? questionDetails.question
-          : response.questionAnalyzed;
+          : response.question;
 
         prompt += `
     Question ${questionIndex++}:

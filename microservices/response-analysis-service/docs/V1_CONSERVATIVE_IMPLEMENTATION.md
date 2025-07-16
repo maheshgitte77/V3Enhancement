@@ -540,7 +540,7 @@ Use clear, everyday language:
 - "showed good knowledge" not "demonstrated comprehensive understanding"
 - "someone else was helping" not "external assistance detected"
 
-Question: ${responseData.QuestionAnalyzed}
+Question: ${responseData.question}
 Experience: ${responseData.experience}
 Job Role: ${responseData.jobRole}
 

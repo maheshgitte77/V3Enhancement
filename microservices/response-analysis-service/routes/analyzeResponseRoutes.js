@@ -43,11 +43,11 @@ const uploadNone = upload.none();
  * @param {Object} req.body - Request body
  * @param {string} req.body.experience - Candidate experience level
  * @param {string} req.body.jobRole - Target job role
- * @param {string} req.body.QuestionAnalyzed - Question content
+ * @param {string} req.body.question - Question content
  * @param {string} req.body.candidateScreeningId - Screening ID
  * @param {string} req.body.jobApplicationId - Application ID
  * @param {string} req.body.questionId - Question ID
- * @param {string} req.body.videoAnswerFileId - Video file ID
+ * @param {string} req.body.answerFileId - Video file ID
  * @param {string} req.body.skillName - Skill being assessed
  * @param {string} req.body.type - Response type
  * @param {number} req.body.maxTime - Maximum time allowed
@@ -61,11 +61,11 @@ router.post("/analyzeMediaResponse", analyzeMediaResponse);
  * @param {Object} req.body - Request body
  * @param {string} req.body.experience - Candidate experience level
  * @param {string} req.body.jobRole - Target job role
- * @param {string} req.body.QuestionAnalyzed - Question content
+ * @param {string} req.body.question - Question content
  * @param {string} req.body.candidateScreeningId - Screening ID
  * @param {string} req.body.jobApplicationId - Application ID
  * @param {string} req.body.questionId - Question ID
- * @param {string} req.body.videoAnswerFileId - Answer file ID
+ * @param {string} req.body.answerFileId - Answer file ID
  * @param {string} req.body.skillName - Skill being assessed
  * @param {string} req.body.type - Response type
  * @param {string} req.body.candidateAnswer - Candidate's text response
@@ -100,11 +100,11 @@ router.post("/analyzeMediaResponse/v1", analyzeMediaResponseV1);
  * @param {Object} req.body - Request body
  * @param {string} req.body.experience - Candidate experience level
  * @param {string} req.body.jobRole - Target job role
- * @param {string} req.body.QuestionAnalyzed - Question content
+ * @param {string} req.body.question - Question content
  * @param {string} req.body.candidateScreeningId - Screening ID
  * @param {string} req.body.jobApplicationId - Application ID
  * @param {string} req.body.questionId - Question ID
- * @param {string} req.body.videoAnswerFileId - Answer file ID
+ * @param {string} req.body.answerFileId - Answer file ID
  * @param {string} req.body.skillName - Skill being assessed
  * @param {string} req.body.type - Response type
  * @param {string} req.body.candidateAnswer - Candidate's text response
@@ -138,11 +138,11 @@ router.post("/analyzeMediaResponse/v2", analyzeMediaResponseV2);
  * @param {Object} req.body - Request body
  * @param {string} req.body.experience - Candidate experience level
  * @param {string} req.body.jobRole - Target job role
- * @param {string} req.body.QuestionAnalyzed - Question content
+ * @param {string} req.body.question - Question content
  * @param {string} req.body.candidateScreeningId - Screening ID
  * @param {string} req.body.jobApplicationId - Application ID
  * @param {string} req.body.questionId - Question ID
- * @param {string} req.body.videoAnswerFileId - Answer file ID
+ * @param {string} req.body.answerFileId - Answer file ID
  * @param {string} req.body.skillName - Skill being assessed
  * @param {string} req.body.type - Response type
  * @param {string} req.body.candidateAnswer - Candidate's text response
