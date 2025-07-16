@@ -108,7 +108,7 @@ const analyzeResumes = async (req, res) => {
           (val) => typeof val === "string" && val.trim() !== ""
         );
 
-      const type = hasValidReferral ? "Referral" : "Uploaded";
+      const candidateType = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
       const isLive = live ? live : false;
 
@@ -179,7 +179,7 @@ const analyzeResumes = async (req, res) => {
             createRecord,
             expectedSalary,
             currentSalary,
-            type,
+            candidateType,
             // addedBy: addedBy || null,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),

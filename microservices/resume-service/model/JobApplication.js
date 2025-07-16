@@ -224,6 +224,7 @@ const JobApplicationSchema = new mongoose.Schema(
       enum: [
         "Uploaded",
         "Applied",
+        "Referral"
       ],
       default: "Uploaded",
     },

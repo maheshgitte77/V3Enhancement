@@ -366,7 +366,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     preferredLocations,
     expectedSalary,
     currentSalary,
-    type,
+    candidateType,
     createRecord = "true",
     clientCoolingPeriod,
     processedEmails = [],
@@ -680,8 +680,8 @@ Return the output in the specified JSON format.
       let details = !email
         ? "Missing email in resume."
         : !isValidEmail(email)
-        ? "Invalid email format in resume."
-        : "Missing name in resume.";
+          ? "Invalid email format in resume."
+          : "Missing name in resume.";
 
       await saveResumeData(
         requestId,
@@ -699,7 +699,7 @@ Return the output in the specified JSON format.
           preferredLocations,
           expectedSalary,
           currentSalary,
-          type,
+          candidateType,
         }
       );
 
@@ -742,7 +742,7 @@ Return the output in the specified JSON format.
         preferredLocations,
         expectedSalary,
         currentSalary,
-        type,
+        candidateType,
       },
       candidateStatus?.lastApplicationId || null,
       candidateStatus.coolingData
@@ -818,7 +818,7 @@ Return the output in the specified JSON format.
         preferredLocations: data.preferredLocations,
         expectedSalary: data.expectedSalary,
         currentSalary: data.currentSalary,
-        type: data.type,
+        candidateType: data.candidateType,
       }
     );
 
@@ -835,8 +835,7 @@ Return the output in the specified JSON format.
     await cleanupFiles(finalFilePath, originalFilePath);
     if (retryCount < MAX_RETRIES && isTransientError(error)) {
       console.log(
-        `Retrying file ${originalFileName} (Attempt ${
-          retryCount + 1
+        `Retrying file ${originalFileName} (Attempt ${retryCount + 1
         }/${MAX_RETRIES})`
       );
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
