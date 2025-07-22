@@ -103,9 +103,10 @@ const analyzeResumes = async (req, res) => {
         .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1 } });
       const clientCoolingPeriod = client?.coolingPeriod;
       const hasValidReferral =
-        referralDetails &&
-        Object.values(referralDetails).every(
-          (val) => typeof val === "string"
+        !!(
+          referralDetails &&
+          referralDetails?.name?.trim() &&
+          referralDetails?.email?.trim()
         );
 
       const candidateType = hasValidReferral ? "Referral" : "Uploaded";
