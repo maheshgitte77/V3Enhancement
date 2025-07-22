@@ -105,7 +105,7 @@ const analyzeResumes = async (req, res) => {
       const hasValidReferral =
         referralDetails &&
         Object.values(referralDetails).every(
-          (val) => typeof val === "string" && val.trim() !== ""
+          (val) => typeof val === "string"
         );
 
       const candidateType = hasValidReferral ? "Referral" : "Uploaded";
@@ -192,7 +192,7 @@ const analyzeResumes = async (req, res) => {
 
       if (isLive || validFiles.length === 1) {
         req.pendingRequests.set(requestId, {
-          res: validFiles.length === 1 ? res : { json: () => {} },
+          res: validFiles.length === 1 ? res : { json: () => { } },
           expectedResponses: validFiles.length,
           jobId: jobId,
           requestBy: addedBy || null,
