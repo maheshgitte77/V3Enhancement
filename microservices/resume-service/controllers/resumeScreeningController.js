@@ -242,6 +242,8 @@ const addToJobApplication = async (req, res) => {
         .status(400)
         .json({ error: "jobId and emails array are required" });
     }
+    const InvitedOn = new Date(); // current date
+    const ExpiredOn = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // +3 days
 
     const redisKey = `request:${requestId}:jobData`;
     let jobDataList = await redis.get(redisKey);
@@ -263,6 +265,8 @@ const addToJobApplication = async (req, res) => {
         recordsToAdd.push({
           ...matchingRecord,
           status: "Added",
+          InvitedOn,
+          ExpiredOn,
         });
       } else {
         notFoundEmails.push(email);
@@ -279,6 +283,8 @@ const addToJobApplication = async (req, res) => {
           ...analysis,
           jobId,
           status: "Added",
+          ExpiredOn,
+          InvitedOn
         };
         recordsToAdd.push(jobData);
       }
@@ -313,6 +319,22 @@ const addToJobApplication = async (req, res) => {
         { _id: new ObjectId(jobId) },
         { $set: { activeRequestId: "", requestStatus: "Completed" } }
       );
+
+    // Prepare candidate list for notification API
+    const candidateList = recordsToAdd.map((candidate) => ({
+      email: candidate.email,
+      name: candidate.name,
+    }));
+    
+    // Notify external service
+    await axios.post(
+      `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
+      {
+        jobId,
+        expiryDate: ExpiredOn,
+        candidateList,
+      }
+    );
 
     res.status(200).json({
       message: "Successfully added records to JobApplication",

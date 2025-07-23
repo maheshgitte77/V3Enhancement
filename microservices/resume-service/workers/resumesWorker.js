@@ -418,7 +418,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     if (
       ext === "docx" &&
       mimetype ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       const pdfPath = path.join(
         __dirname,

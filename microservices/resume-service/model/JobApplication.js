@@ -273,6 +273,12 @@ const JobApplicationSchema = new mongoose.Schema(
       mobile: String,
       code: String,
     },
+    InvitedOn: {
+      type: Date,
+    },
+    ExpiredOn: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
