@@ -537,7 +537,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    strict: "throw",
+    strict: false, // Allow additional fields for flexibility
   }
 );
 

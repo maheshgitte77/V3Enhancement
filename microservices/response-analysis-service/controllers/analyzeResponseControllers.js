@@ -2,6 +2,10 @@
 const multer = require("multer");
 const { Kafka, Partitioners } = require("kafkajs");
 const dotenv = require("dotenv");
+const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const { v4: uuidv4 } = require("uuid");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 
 // Import all worker versions
@@ -34,6 +38,119 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage }).single("file");
 
+/**
+ * Simplified file download helper function
+ * @param {string} fileUri - URI to download file from
+ * @param {string} providedMimeType - Optional MIME type from request
+ * @returns {Promise<Object>} File object with path, filename, mimetype, size
+ */
+const downloadFileFromUri = async (fileUri, providedMimeType) => {
+  try {
+    // Create unique filename
+    const fileExtension = path.extname(new URL(fileUri).pathname) || ".webm";
+    const uniqueFilename = `file-${Date.now()}-${uuidv4()}${fileExtension}`;
+    const downloadPath = path.join("Uploads/", uniqueFilename);
+
+    // Ensure uploads directory exists
+    if (!fs.existsSync("Uploads/")) {
+      fs.mkdirSync("Uploads/", { recursive: true });
+    }
+
+    console.log("⬇️ Downloading file from URI...");
+
+    // Download file
+    const response = await axios({
+      method: "GET",
+      url: fileUri,
+      responseType: "stream",
+      timeout: 30000, // 30 second timeout
+    });
+
+    // Write file to disk
+    const writer = fs.createWriteStream(downloadPath);
+    response.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
+
+    // Determine MIME type (use provided or detect from extension)
+    const mimeType =
+      providedMimeType ||
+      (fileExtension.toLowerCase() === ".webm"
+        ? "video/webm"
+        : fileExtension.toLowerCase() === ".mp4"
+        ? "video/mp4"
+        : "video/webm");
+
+    // Get file stats and validate
+    const fileStats = fs.statSync(downloadPath);
+
+    if (fileStats.size === 0) {
+      // Clean up empty file
+      fs.unlinkSync(downloadPath);
+      throw createDownloadError("Downloaded file is empty", 400);
+    }
+
+    return {
+      path: downloadPath,
+      filename: uniqueFilename,
+      mimetype: mimeType,
+      originalname: uniqueFilename,
+      size: fileStats.size,
+    };
+  } catch (error) {
+    // Map different error types to appropriate status codes and messages
+    if (error.code === "ETIMEDOUT") {
+      throw createDownloadError("File download timed out", 408);
+    } else if (error.code === "ENOTFOUND" || error.code === "ECONNRESET") {
+      throw createDownloadError("Cannot reach the file URL", 502);
+    } else if (error.response?.status) {
+      throw createDownloadError(
+        `Download failed with HTTP ${error.response.status}`,
+        error.response.status
+      );
+    } else if (error.statusCode) {
+      // Re-throw our custom errors
+      throw error;
+    } else {
+      throw createDownloadError(`File download failed: ${error.message}`, 500);
+    }
+  }
+};
+
+/**
+ * Helper to create consistent download error objects
+ */
+const createDownloadError = (message, statusCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+/**
+ * Simplified file cleanup helper
+ * @param {string} filePath - Path to file to clean up
+ * @param {string} filename - Filename for logging
+ * @param {string} context - Context for logging (optional)
+ */
+const cleanupDownloadedFile = (filePath, filename, context = "") => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`🧹 Cleaned up downloaded file ${context}:`, filename);
+    } else {
+      console.log(`ℹ️ File already cleaned up ${context}:`, filename);
+    }
+  } catch (cleanupError) {
+    console.warn(
+      `⚠️ Could not clean up file ${context}:`,
+      cleanupError.message
+    );
+  }
+};
+
 // Generic function to create versioned controllers
 const createVersionedMediaResponseController = (worker, version) => {
   return async (req, res) => {
@@ -44,8 +161,7 @@ const createVersionedMediaResponseController = (worker, version) => {
     );
     upload(req, res, async (err) => {
       if (err) return res.status(400).json({ error: "File upload failed" });
-      if (!req.file)
-        return res.status(400).json({ error: "No video file uploaded." });
+
       const {
         experience,
         jobRole,
@@ -57,7 +173,42 @@ const createVersionedMediaResponseController = (worker, version) => {
         skillName,
         type,
         maxTime,
+        file_uri, // New parameter for URI-based file processing
+        mimetype, // Provided mimetype from the request
       } = req.body;
+
+      // Handle file input - either uploaded file or URI download
+      let fileObject;
+
+      if (file_uri) {
+        // Simplified URI-based file download
+        console.log("🌐 Processing file from URI:", file_uri);
+        try {
+          fileObject = await downloadFileFromUri(file_uri, mimetype);
+          console.log("✅ File downloaded successfully:", {
+            filename: fileObject.filename,
+            size: fileObject.size,
+            mimetype: fileObject.mimetype,
+          });
+        } catch (downloadError) {
+          console.error("❌ File download failed:", downloadError.message);
+          return res.status(downloadError.statusCode || 500).json({
+            error: downloadError.message,
+            suggestion:
+              "Verify the file_uri is accessible and points to a valid media file",
+          });
+        }
+      } else if (req.file) {
+        // Standard uploaded file processing
+        console.log("📁 Processing uploaded file:", req.file.filename);
+        fileObject = req.file;
+      } else {
+        // No file provided via upload or URI
+        return res.status(400).json({
+          error:
+            "No file provided. Please upload a file or provide file_uri parameter.",
+        });
+      }
 
       try {
         // Enhanced logging and query for existing records
@@ -129,9 +280,9 @@ const createVersionedMediaResponseController = (worker, version) => {
         // }
 
         const videoData = {
-          videoPath: req.file.path,
-          fileName: req.file.filename,
-          mimetype: req.file.mimetype,
+          videoPath: fileObject.path,
+          fileName: fileObject.filename,
+          mimetype: fileObject.mimetype,
           experience,
           jobRole,
           question,
@@ -143,11 +294,18 @@ const createVersionedMediaResponseController = (worker, version) => {
           type,
           questionDuration: maxTime,
           isScreening: false,
+          fileSource: file_uri ? "uri" : "upload", // Track source for debugging
         };
 
         // Process directly with the specified worker version
         try {
           await worker.processResponse(videoData);
+
+          // Clean up downloaded file after successful processing
+          if (file_uri && fileObject?.path) {
+            cleanupDownloadedFile(fileObject.path, fileObject.filename);
+          }
+
           return res.json({
             message: `Media response processing completed with ${
               version || "V0"
@@ -159,6 +317,16 @@ const createVersionedMediaResponseController = (worker, version) => {
             `❌ Worker ${version || "V0"} processing error:`,
             error
           );
+
+          // Clean up downloaded file after failed processing
+          if (file_uri && fileObject?.path) {
+            cleanupDownloadedFile(
+              fileObject.path,
+              fileObject.filename,
+              "after error"
+            );
+          }
+
           return res.status(500).json({
             error: `Failed to process media response with ${
               version || "V0"

@@ -31,11 +31,11 @@ const { Kafka } = require("kafkajs");
 const fs = require("fs").promises;
 const path = require("path");
 const dotenv = require("dotenv");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const {
-  GoogleAIFileManager,
-  FileState,
-} = require("@google/generative-ai/server");
+  GoogleGenAI,
+  createUserContent,
+  createPartFromUri,
+} = require("@google/genai");
 const winston = require("winston");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
@@ -235,14 +235,12 @@ const kafka = new Kafka({
 
 /**
  * Advanced Google Generative AI configuration
- * V2 uses optimized model parameters and enhanced context handling
- * @type {GoogleGenerativeAI}
+ * V2 uses the simplified SDK with official patterns
+ * @type {GoogleGenAI}
  */
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro-preview-03-25",
+const client = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
 });
-const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 
 // Custom error classes
 class FileError extends Error {
@@ -281,7 +279,10 @@ const validateFile = async (filePath) => {
   }
 };
 
-const pollFileStatus = async (fileManager, fileName) => {
+const pollFileStatus = async (client, fileName) => {
+  let lastKnownState = null;
+  let consecutiveErrors = 0;
+
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
     try {
       logger.info(
@@ -289,10 +290,16 @@ const pollFileStatus = async (fileManager, fileName) => {
         {
           fileName,
           attempt: attempt + 1,
+          lastKnownState,
+          consecutiveErrors,
         }
       );
 
-      const file = await fileManager.getFile(fileName);
+      const file = await client.files.get({ name: fileName });
+
+      // Reset consecutive error counter on successful call
+      consecutiveErrors = 0;
+      lastKnownState = file.state;
 
       logger.info(`V2: File status check result`, {
         fileName,
@@ -300,10 +307,10 @@ const pollFileStatus = async (fileManager, fileName) => {
         attempt: attempt + 1,
       });
 
-      if (file.state === FileState.ACTIVE) return file;
-      if (file.state === FileState.FAILED)
+      if (file.state === "ACTIVE") return file;
+      if (file.state === "FAILED")
         throw new FileError("File processing failed");
-      if (file.state !== FileState.PROCESSING)
+      if (file.state !== "PROCESSING")
         throw new FileError(`Unexpected file state: ${file.state}`);
 
       const delay = Math.min(1000 * Math.pow(2, attempt), 16000);
@@ -314,25 +321,189 @@ const pollFileStatus = async (fileManager, fileName) => {
       });
       await new Promise((res) => setTimeout(res, delay));
     } catch (error) {
+      consecutiveErrors++;
+
       logger.warn(`V2: File status polling failed - attempt ${attempt + 1}`, {
         fileName,
         error: error.message,
         attempt: attempt + 1,
+        consecutiveErrors,
+        lastKnownState,
         isNetworkError: error.message.includes("fetch failed"),
+        is500Error: error.message.includes("500 Internal Server Error"),
+        isJSONError: error.message.includes(
+          "Failed to convert server response to JSON"
+        ),
       });
 
-      // If it's a network error and we have more attempts, retry with longer delay
+      // Special handling for audio/video URI-based polling issues
+      const isUriPollingError =
+        error.message.includes("Failed to convert server response to JSON") ||
+        error.message.includes("500 Internal Server Error") ||
+        error.message.includes("502 Bad Gateway") ||
+        error.message.includes("503 Service Unavailable");
+
+      // Enhanced logic for audio/video files with URI polling issues
+      const shouldTryOptimisticProcessing =
+        isUriPollingError &&
+        (consecutiveErrors >= 2 || // Reduced threshold for faster recovery
+          (consecutiveErrors >= 1 &&
+            lastKnownState === "PROCESSING" &&
+            attempt >= 3));
+
+      if (shouldTryOptimisticProcessing) {
+        logger.warn(
+          `V2: Detected systematic URI polling issues for audio/video file, implementing optimistic processing`,
+          {
+            fileName,
+            consecutiveErrors,
+            lastKnownState,
+            attempt: attempt + 1,
+            strategy: "optimistic_processing_for_media",
+            triggerCondition:
+              consecutiveErrors >= 2
+                ? "consecutive_errors"
+                : "processing_timeout",
+          }
+        );
+
+        // Calculate adaptive delay based on file type and processing complexity
+        const isAudioFile =
+          fileName.toLowerCase().includes("audio") ||
+          fileName.toLowerCase().endsWith(".wav") ||
+          fileName.toLowerCase().endsWith(".mp3") ||
+          fileName.toLowerCase().endsWith(".aac");
+
+        // Audio files generally process faster than video
+        const baseDelay = isAudioFile ? 8000 : 15000;
+        const mediaProcessingDelay = Math.min(
+          baseDelay + attempt * (isAudioFile ? 3000 : 5000),
+          isAudioFile ? 30000 : 45000
+        );
+
+        logger.info(
+          `V2: Extended wait for ${
+            isAudioFile ? "audio" : "video"
+          } processing: ${mediaProcessingDelay}ms`,
+          {
+            fileName,
+            fileType: isAudioFile ? "audio" : "video",
+            reason: "media_processing_optimization",
+          }
+        );
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, mediaProcessingDelay)
+        );
+
+        // Try one more status check with enhanced error handling
+        try {
+          logger.info(
+            "V2: Attempting final status check before optimistic processing",
+            {
+              fileName,
+              attempt: "final_check",
+            }
+          );
+
+          const finalFile = await client.files.get({ name: fileName });
+
+          if (finalFile.state === "ACTIVE") {
+            logger.info("V2: Media file became active during extended wait!", {
+              fileName,
+              state: finalFile.state,
+              processingTime: `~${mediaProcessingDelay}ms`,
+            });
+            return finalFile;
+          } else if (finalFile.state === "FAILED") {
+            throw new FileError(`Media file processing failed: ${fileName}`);
+          }
+
+          // Update last known state for optimistic processing
+          lastKnownState = finalFile.state;
+          logger.info(
+            "V2: File still processing after extended wait, proceeding optimistically",
+            {
+              fileName,
+              currentState: finalFile.state,
+            }
+          );
+        } catch (statusError) {
+          logger.warn(
+            "V2: Final status check failed, proceeding with optimistic processing",
+            {
+              fileName,
+              error: statusError.message,
+              strategy: "optimistic_media_processing",
+              errorType: statusError.message.includes("500")
+                ? "server_error"
+                : "other",
+            }
+          );
+        }
+
+        // Enhanced optimistic processing with better URI construction
+        logger.info(
+          "V2: Implementing optimistic media processing due to Google AI polling issues",
+          {
+            fileName,
+            lastKnownState,
+            consecutiveErrors,
+            fileType: isAudioFile ? "audio" : "video",
+            reasoning:
+              "Google AI has systematic issues with media file URI polling - proceeding with analysis attempt",
+          }
+        );
+
+        // Detect proper MIME type from filename with enhanced logic
+        let optimisticMimeType = "video/webm"; // default
+        const lowerFileName = fileName.toLowerCase();
+
+        if (lowerFileName.includes(".webm")) {
+          optimisticMimeType = isAudioFile ? "audio/webm" : "video/webm";
+        } else if (lowerFileName.includes(".mp4")) {
+          optimisticMimeType = "video/mp4";
+        } else if (lowerFileName.includes(".wav")) {
+          optimisticMimeType = "audio/wav";
+        } else if (lowerFileName.includes(".mp3")) {
+          optimisticMimeType = "audio/mp3";
+        } else if (lowerFileName.includes(".aac")) {
+          optimisticMimeType = "audio/aac";
+        } else if (lowerFileName.includes(".mov")) {
+          optimisticMimeType = "video/quicktime";
+        }
+
+        return {
+          name: fileName,
+          state: "OPTIMISTIC_ACTIVE", // Special state to indicate this is an optimistic processing attempt
+          uri: `https://generativelanguage.googleapis.com/v1beta/${fileName}`,
+          mimeType: optimisticMimeType,
+          optimisticProcessing: true,
+          originalLastState: lastKnownState || "UNKNOWN",
+          processingStrategy: "google_ai_uri_polling_workaround",
+          fileType: isAudioFile ? "audio" : "video",
+          consecutiveErrors,
+          totalAttempts: attempt + 1,
+        };
+      }
+
+      // Standard retry logic for other errors
       if (
-        error.message.includes("fetch failed") &&
+        (error.message.includes("fetch failed") ||
+          error.message.includes("500 Internal Server Error")) &&
         attempt < MAX_POLL_ATTEMPTS - 1
       ) {
         const networkDelay = Math.min(3000 * Math.pow(2, attempt), 30000);
         logger.info(
-          `V2: Network error detected, retrying after ${networkDelay}ms`,
+          `V2: API error detected, retrying after ${networkDelay}ms`,
           {
             fileName,
             attempt: attempt + 1,
             delay: networkDelay,
+            consecutiveErrors,
+            errorType: error.message.includes("500")
+              ? "500_error"
+              : "network_error",
           }
         );
         await new Promise((res) => setTimeout(res, networkDelay));
@@ -341,6 +512,60 @@ const pollFileStatus = async (fileManager, fileName) => {
 
       // If it's the last attempt or not a network error, throw
       if (attempt === MAX_POLL_ATTEMPTS - 1) {
+        // V2: Smart fallback - if all polling attempts failed with 500 errors,
+        // wait longer and try one final status check before proceeding
+        if (error.message.includes("500 Internal Server Error")) {
+          logger.warn(
+            "V2: All polling attempts failed with 500 errors, attempting extended wait fallback",
+            {
+              fileName,
+              totalAttempts: MAX_POLL_ATTEMPTS,
+              fallbackReason: "Google AI API systematic 500 errors",
+              waitingBeforeFallback: "60 seconds",
+            }
+          );
+
+          // Wait significantly longer to give Google AI time to process
+          await new Promise((resolve) => setTimeout(resolve, 60000));
+
+          // Try one final status check
+          try {
+            const finalFile = await client.files.get({ name: fileName });
+            if (finalFile.state === "ACTIVE") {
+              logger.info(
+                "V2: Final status check successful - file is active",
+                {
+                  fileName,
+                  state: finalFile.state,
+                }
+              );
+              return finalFile;
+            } else if (finalFile.state === "FAILED") {
+              throw new FileError(
+                `File processing failed during extended wait: ${fileName}`
+              );
+            } else {
+              logger.warn("V2: File still not ready after extended wait", {
+                fileName,
+                state: finalFile.state,
+                action: "proceeding_with_risk",
+              });
+              // Return the actual file object even if not ACTIVE - let the analysis attempt handle it
+              return finalFile;
+            }
+          } catch (finalCheckError) {
+            // If even the final check fails, throw the original error
+            logger.error("V2: Final status check also failed", {
+              fileName,
+              error: finalCheckError.message,
+              action: "throwing_original_error",
+            });
+            throw new FileError(
+              `File status polling failed after extended attempts: ${error.message}`
+            );
+          }
+        }
+
         throw new FileError(
           `File status polling failed after ${MAX_POLL_ATTEMPTS} attempts: ${error.message}`
         );
@@ -350,9 +575,31 @@ const pollFileStatus = async (fileManager, fileName) => {
       throw error;
     }
   }
-  throw new FileError(
-    `File processing timed out after ${MAX_POLL_ATTEMPTS} attempts`
-  );
+
+  // V2: Final fallback if all attempts exhausted without 500 errors
+  logger.warn("V2: File processing timed out, attempting one final check", {
+    fileName,
+    totalAttempts: MAX_POLL_ATTEMPTS,
+    fallbackReason: "Polling timeout - making final verification",
+  });
+
+  // Try one last status check before giving up
+  try {
+    const finalFile = await client.files.get({ name: fileName });
+    logger.info("V2: Final verification successful", {
+      fileName,
+      state: finalFile.state,
+    });
+    return finalFile;
+  } catch (finalError) {
+    logger.error("V2: Final verification failed, throwing error", {
+      fileName,
+      error: finalError.message,
+    });
+    throw new FileError(
+      `File processing failed after all attempts: ${finalError.message}`
+    );
+  }
 };
 
 /**
@@ -362,8 +609,10 @@ const pollFileStatus = async (fileManager, fileName) => {
 const checkGoogleAIConnectivity = async () => {
   try {
     // Simple connectivity check - try to list files (should work even if no files exist)
-    const testFileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
-    await testFileManager.listFiles();
+    const testClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
+    await testClient.files.list();
     logger.info("V2: Google AI API connectivity check passed");
     return true;
   } catch (error) {
@@ -376,78 +625,108 @@ const checkGoogleAIConnectivity = async () => {
   }
 };
 
-const uploadFile = async (fileManager, filePath, fileName, mimeType) => {
-  const maxUploadRetries = 3;
-  let lastError;
+/**
+ * Enhanced MIME type detection specifically for audio/video files
+ * Handles edge cases with WebM files that can be either audio or video
+ */
+const detectOptimizedMimeType = (
+  fileName,
+  providedMimeType,
+  fileContent = null
+) => {
+  const lowerFileName = fileName.toLowerCase();
 
-  // V2: Check connectivity before attempting upload
-  const isConnected = await checkGoogleAIConnectivity();
-  if (!isConnected) {
-    throw new FileError(
-      "Google AI API is not reachable. Check network connectivity and API key."
-    );
+  // Use provided MIME type if it's specific and valid
+  if (
+    providedMimeType &&
+    !providedMimeType.includes("application/octet-stream") &&
+    !providedMimeType.includes("multipart/form-data")
+  ) {
+    logger.info("V2: Using provided MIME type", {
+      fileName,
+      mimeType: providedMimeType,
+    });
+    return providedMimeType;
   }
 
-  for (let attempt = 0; attempt < maxUploadRetries; attempt++) {
-    try {
-      logger.info(
-        `V2: Uploading file - attempt ${attempt + 1}/${maxUploadRetries}`,
-        {
-          fileName,
-          mimeType,
-          attempt: attempt + 1,
-        }
-      );
+  // Enhanced WebM detection - can be audio or video
+  if (lowerFileName.includes(".webm")) {
+    // Default to video/webm for WebM files unless specifically identified as audio
+    const detectedType = "video/webm";
+    logger.info("V2: Detected WebM file, defaulting to video", {
+      fileName,
+      detectedType,
+      note: "WebM format supports both audio and video - defaulting to video for broader compatibility",
+    });
+    return detectedType;
+  }
 
-      const response = await fileManager.uploadFile(filePath, {
-        mimeType,
+  // Specific audio formats
+  if (lowerFileName.includes(".wav")) return "audio/wav";
+  if (lowerFileName.includes(".mp3")) return "audio/mp3";
+  if (lowerFileName.includes(".aac")) return "audio/aac";
+  if (lowerFileName.includes(".ogg")) return "audio/ogg";
+  if (lowerFileName.includes(".m4a")) return "audio/mp4";
+
+  // Specific video formats
+  if (lowerFileName.includes(".mp4")) return "video/mp4";
+  if (lowerFileName.includes(".avi")) return "video/x-msvideo";
+  if (lowerFileName.includes(".mov")) return "video/quicktime";
+  if (lowerFileName.includes(".wmv")) return "video/x-ms-wmv";
+
+  // Default fallback
+  logger.warn("V2: Could not determine specific MIME type, using default", {
+    fileName,
+    fallback: "video/webm",
+  });
+  return "video/webm";
+};
+
+/**
+ * Simplified file upload using official Google AI SDK patterns
+ * Based on https://ai.google.dev/gemini-api/docs/video-understanding#javascript
+ * @param {GoogleGenAI} client - Google AI client
+ * @param {string} filePath - Path to the file to upload
+ * @param {string} fileName - Display name for the file
+ * @param {string} mimeType - MIME type of the file
+ * @returns {Promise<Object>} Uploaded file object with uri and mimeType
+ */
+const uploadFile = async (client, filePath, fileName, mimeType) => {
+  try {
+    logger.info("V2: Starting simplified file upload", {
+      fileName,
+      filePath,
+      mimeType,
+      fileExists: require("fs").existsSync(filePath),
+    });
+
+    // Use the official SDK pattern for file upload
+    // The SDK handles polling and waiting internally
+    const uploadedFile = await client.files.upload({
+      file: filePath,
+      config: {
+        mimeType: mimeType,
         displayName: fileName,
-      });
+      },
+    });
 
-      logger.info(`V2: File uploaded successfully`, {
-        fileName,
-        fileId: response.file.name,
-        uri: response.file.uri,
-      });
+    logger.info("V2: File uploaded successfully", {
+      fileName,
+      fileId: uploadedFile.name,
+      uri: uploadedFile.uri,
+      mimeType: uploadedFile.mimeType,
+    });
 
-      return response.file;
-    } catch (error) {
-      lastError = error;
-      logger.warn(`V2: File upload failed - attempt ${attempt + 1}`, {
-        fileName,
-        error: error.message,
-        attempt: attempt + 1,
-        isNetworkError: error.message.includes("fetch failed"),
-      });
-
-      // If it's a network error and we have more attempts, retry with delay
-      if (
-        error.message.includes("fetch failed") &&
-        attempt < maxUploadRetries - 1
-      ) {
-        const uploadDelay = Math.min(2000 * Math.pow(2, attempt), 10000);
-        logger.info(
-          `V2: Upload network error, retrying after ${uploadDelay}ms`,
-          {
-            fileName,
-            attempt: attempt + 1,
-            delay: uploadDelay,
-          }
-        );
-        await new Promise((res) => setTimeout(res, uploadDelay));
-        continue;
-      }
-
-      // If it's the last attempt, throw the error
-      if (attempt === maxUploadRetries - 1) {
-        throw new FileError(
-          `File upload failed after ${maxUploadRetries} attempts: ${error.message}`
-        );
-      }
-    }
+    return uploadedFile;
+  } catch (error) {
+    logger.error("V2: File upload failed", {
+      fileName,
+      filePath,
+      mimeType,
+      error: error.message,
+    });
+    throw new FileError(`File upload failed: ${error.message}`);
   }
-
-  throw new FileError(`File upload failed: ${lastError.message}`);
 };
 
 /**
@@ -989,6 +1268,237 @@ Overall Assessment: ${matchQuality.toUpperCase()} match with ${confidence} confi
     considerationFactors,
     detailedAnalysis,
   };
+};
+
+/**
+ * Generate text-only fallback analysis for media files that couldn't be processed
+ * Used when Google AI API has systematic URI issues and optimistic processing fails
+ * @param {Object} responseData - Response data
+ * @param {string} normalizedType - Response type (video/audio)
+ * @returns {Object} Basic analysis object for failed media processing
+ */
+const generateTextOnlyFallbackAnalysis = (responseData, normalizedType) => {
+  logger.info(
+    "V2: Generating text-only fallback analysis for failed media processing",
+    {
+      fileName: responseData.fileName,
+      type: normalizedType,
+      experience: responseData.experience,
+    }
+  );
+
+  return {
+    transcription:
+      "Media file could not be processed due to Google AI API systematic errors. Analysis based on available metadata only.",
+    communication:
+      "Unable to assess communication due to media processing failure. Google AI API experienced systematic URI access issues.",
+    communicationRating: "0.0",
+    cheatingIndicators: [
+      "No integrity assessment possible - media file processing failed due to Google AI API issues",
+    ],
+    isCheatingDetected: false,
+    cheatingConfidence: 0,
+    contextualFactors: [
+      "Media analysis failed due to Google AI API systematic errors",
+      "Optimistic processing approach was attempted but unsuccessful",
+      "Assessment limited to available metadata and context",
+    ],
+    behavioralAnalysis: {
+      eyeMovementPattern: "Not assessed",
+      speakingTone: "Not assessed",
+      responseDelivery: "Not assessed",
+      timingPatterns: "Not assessed",
+      suspiciousIndicators: [
+        "Media processing failed - no behavioral analysis possible",
+      ],
+      behavioralTimestamps: {
+        eyeMovementEvents: [],
+        speakingToneEvents: [],
+        responseDeliveryEvents: [],
+        timingPatternEvents: [],
+        suspiciousEvents: [],
+        totalSuspiciousTime: 0,
+        peakSuspiciousTimestamp: 0,
+        behaviorDensity: 0,
+      },
+    },
+    technicalDepth: {
+      rating: "0.0",
+      asPerExplanation:
+        "Unable to assess technical depth - media file processing failed due to Google AI API systematic errors",
+      experienceAdjusted: false,
+    },
+    technicalDepthAsPerExperience: {
+      rating: "0.0",
+      asPerExperience:
+        "Unable to assess relative to experience - media analysis unavailable",
+    },
+    overallContentQuality: `Media processing failed due to Google AI API systematic errors. File upload succeeded but status polling encountered persistent 500 errors and URI access issues. This appears to be a Google AI infrastructure problem rather than a candidate issue. Recommend manual review or re-attempt when Google AI service is stable.`,
+    overallRating: "0.0",
+    correctPercentage: "0%",
+    detailedSummary: `Assessment incomplete due to Google AI API technical difficulties. The candidate's ${normalizedType} response could not be analyzed because Google AI experienced systematic errors during file processing (persistent 500 errors and URI access failures). This is not a reflection of the candidate's performance but rather a technical limitation. Recommend: 1) Manual review of the media file, 2) Re-attempt analysis when Google AI service is stable, or 3) Alternative assessment method.`,
+    answerRating: {
+      rating: "0.0",
+      reasonForDeduction: [
+        "Media file processing failed due to Google AI API systematic errors",
+        "Unable to analyze content due to technical limitations",
+      ],
+    },
+    answerSummary: ["Media analysis unavailable due to Google AI API issues"],
+    answerImprovementSuggestions: [
+      "Re-attempt analysis when Google AI service is stable",
+      "Consider alternative assessment methods",
+    ],
+    relevanceAssessment: {
+      score: 0.0,
+      explanation: "Unable to assess relevance - media processing failed",
+    },
+    behavioralInsights: [
+      "Media processing technical failure - no behavioral analysis possible",
+    ],
+    responseQuality: "low",
+    backgroundNoise: {
+      level: "unknown",
+      description: "Unable to assess audio quality - media processing failed",
+      contextualImpact:
+        "Significant - Unable to evaluate candidate due to technical limitations",
+    },
+    confidenceLevel: "0.0",
+    responseCoherence: "0.0",
+    environmentalSuitability: "0.0",
+    answerTime: {
+      totalDurationSeconds: parseInt(responseData.questionDuration) || 0,
+      effectiveAnswerTimeSeconds: 0,
+      effectiveAnswerTimePercentage: "0%",
+    },
+    answerEffectiveness: {
+      rating: "0.0",
+      relevanceBreakdown: {
+        relevantTimeSeconds: 0,
+        irrelevantTimeSeconds: 0,
+        relevanceExplanation:
+          "Unable to assess due to media processing failure",
+      },
+    },
+    // Add marker for failed processing
+    processingFailed: true,
+    failureReason:
+      "Google AI API systematic errors during media file URI access",
+    technicalNotes:
+      "File uploaded successfully but status polling failed with persistent 500 errors. This indicates Google AI infrastructure issues rather than candidate problems.",
+  };
+};
+
+/**
+ * Generates a fallback prompt for V2 processing when optimistic file processing fails
+ * @param {Object} responseData - Response data
+ * @param {string} type - Response type
+ * @param {Object} context - Processing context
+ * @param {Object} fallbackInfo - Information about the fallback scenario
+ * @returns {string} Generated fallback prompt
+ */
+const generateV2FallbackPrompt = (
+  responseData,
+  type,
+  context,
+  fallbackInfo
+) => {
+  const isAudio = type === "audio";
+  const isVideo = type === "video";
+
+  return `# Advanced Candidate Analysis (V2) - Fallback Mode
+
+## Context & Situation
+You are analyzing a candidate's ${type} response where the media file processing encountered technical difficulties. 
+
+**Technical Context:**
+- File processing failed: ${fallbackInfo.originalError}
+- Attempted optimistic processing: ${fallbackInfo.attemptedOptimisticProcessing}
+- Fallback to metadata-based analysis
+- This is still a comprehensive evaluation using available information
+
+## Available Information
+**Question:** ${responseData.question}
+**Job Role:** ${responseData.jobRole} 
+**Experience Level:** ${responseData.experience} years
+**Skill Area:** ${responseData.skill}
+**Expected Duration:** ${responseData.questionDuration} seconds
+**Response Type:** ${type.toUpperCase()}
+${responseData.textAnswer ? `**Text Content:** ${responseData.textAnswer}` : ""}
+
+## Analysis Instructions
+Since ${
+    isAudio ? "audio" : isVideo ? "video" : "media"
+  } processing failed, provide a thorough analysis based on:
+
+1. **Question Alignment**: Evaluate expected vs actual response scope
+2. **Experience Appropriateness**: Does the question match the candidate's ${
+    responseData.experience
+  }-year experience level?
+3. **Technical Depth**: Expected technical complexity for ${responseData.skill}
+4. **Time Allocation**: Analysis of ${
+    responseData.questionDuration
+  }s duration appropriateness
+5. **Context Analysis**: Job role relevance for ${responseData.jobRole}
+
+## Special Considerations for ${type.toUpperCase()} Analysis
+${
+  isAudio
+    ? `
+- Audio responses typically allow for tone and communication style assessment
+- Speaking pace and clarity would normally be evaluated
+- Technical explanation delivery assessment expected
+`
+    : isVideo
+    ? `
+- Video responses usually include visual communication and presentation skills
+- Body language and professional demeanor assessment expected  
+- Visual aids or whiteboard usage evaluation planned
+`
+    : ""
+}
+
+**Important**: Flag this as a technical limitation analysis, not a candidate limitation.
+
+## Required JSON Response Format
+Provide a comprehensive analysis in this exact JSON structure:
+
+\`\`\`json
+{
+  "technicalScore": 0.0,
+  "communicationScore": 0.0, 
+  "professionalismScore": 0.0,
+  "overallScore": 0.0,
+  "relevanceScore": 0.0,
+  "isCheatingDetected": false,
+  "cheatingIndicators": {
+    "suspiciousPatterns": [],
+    "confidenceLevel": "low",
+    "riskFactors": []
+  },
+  "detailedAnalysis": {
+    "strengths": ["Analysis based on available metadata and context"],
+    "areasForImprovement": ["Media content could not be processed due to technical issues"],
+    "technicalAccuracy": "Unable to assess due to file processing limitations",
+    "communicationClarity": "Unable to assess ${
+      isAudio ? "audio" : isVideo ? "video" : "media"
+    } content",
+    "professionalDemeanor": "Unable to assess from ${type} due to technical constraints"
+  },
+  "recommendations": [
+    "Re-attempt ${type} analysis with alternative file format if possible",
+    "Consider supplementary assessment methods"
+  ],
+  "processingNotes": {
+    "technicalLimitation": true,
+    "fallbackMode": "metadata_analysis",
+    "originalError": "${fallbackInfo.originalError}",
+    "recommendReprocessing": true
+  }
+}
+\`\`\`
+
+**Critical**: This analysis reflects technical processing limitations, not candidate performance deficiencies.`;
 };
 
 /**
@@ -3317,8 +3827,25 @@ const processResponse = async (responseData) => {
           "Valid media file required for comprehensive analysis"
         );
       }
-      mediaPath = path.join(UPLOADS_DIR, responseData.fileName);
-      await ensureDirectory(UPLOADS_DIR);
+
+      // V2: Use provided videoPath if available (for URI downloads), otherwise construct path
+      if (responseData.videoPath) {
+        mediaPath = responseData.videoPath;
+        logger.info("V2: Using provided video path", {
+          videoPath: mediaPath,
+          fileName: responseData.fileName,
+          source: responseData.fileSource || "unknown",
+        });
+      } else {
+        mediaPath = path.join(UPLOADS_DIR, responseData.fileName);
+        logger.info("V2: Constructed video path from UPLOADS_DIR", {
+          videoPath: mediaPath,
+          fileName: responseData.fileName,
+          uploadsDir: UPLOADS_DIR,
+        });
+      }
+
+      await ensureDirectory(path.dirname(mediaPath));
       await validateFile(mediaPath);
     } else if (!responseData.textAnswer) {
       throw new ProcessingError(
@@ -3437,7 +3964,7 @@ const processResponse = async (responseData) => {
 
       try {
         const file = await uploadFile(
-          fileManager,
+          client,
           mediaPath,
           responseData.fileName,
           responseData.mimetype
@@ -3450,14 +3977,53 @@ const processResponse = async (responseData) => {
           fileUri: file.uri,
         });
 
-        await pollFileStatus(fileManager, uploadedFileName);
-        fileInput = [
-          { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
-        ];
+        const polledFile = await pollFileStatus(client, uploadedFileName);
+
+        // Handle optimistic processing mode for media files with URI issues
+        if (polledFile.optimisticProcessing) {
+          logger.warn(
+            "V2: Using optimistic processing due to Google AI URI polling issues",
+            {
+              fileName: responseData.fileName,
+              fileId: uploadedFileName,
+              originalLastState: polledFile.originalLastState,
+              strategy: "optimistic_media_processing",
+            }
+          );
+
+          // For optimistic processing, construct file input with special handling
+          fileInput = [
+            {
+              fileData: {
+                mimeType: polledFile.mimeType,
+                fileUri: polledFile.uri,
+              },
+            },
+          ];
+
+          // Add context about optimistic processing to the prompt
+          processingContext.optimisticProcessing = {
+            enabled: true,
+            reason: "Google AI URI polling systematic errors",
+            lastKnownState: polledFile.originalLastState,
+            fileName: uploadedFileName,
+          };
+        } else {
+          // Standard processing for files that polled successfully
+          fileInput = [
+            {
+              fileData: {
+                mimeType: polledFile.mimeType,
+                fileUri: polledFile.uri,
+              },
+            },
+          ];
+        }
 
         logger.info("V2: File processing completed successfully", {
           fileName: responseData.fileName,
           fileId: uploadedFileName,
+          optimisticProcessing: !!polledFile.optimisticProcessing,
         });
       } catch (error) {
         logger.error("V2: File processing failed", {
@@ -3495,13 +4061,26 @@ const processResponse = async (responseData) => {
           contextualFactors: Object.keys(processingContext).length,
           environmentConfig: !!envConfig.ai?.enhancedLogging,
           balancedApproach: true,
+          optimisticProcessing:
+            !!processingContext.optimisticProcessing?.enabled,
+          fileInputPresent: fileInput.length > 0,
+          hasOptimisticFile: fileInput.some(
+            (input) => input.optimisticProcessing
+          ),
         });
 
-        const result = await model.generateContent([
-          ...fileInput,
-          { text: prompt },
-        ]);
-        const aiResponse = result.response.text();
+        // Enhanced error handling for optimistic processing
+        let result;
+        try {
+          result = await client.models.generateContent({
+            model: "gemini-2.5-pro",
+            contents: [...fileInput, { text: prompt }],
+          });
+        } catch (aiError) {
+          throw aiError;
+        }
+
+        const aiResponse = result.text;
 
         // V2: Enhanced JSON parsing with better error handling
         const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
@@ -3518,7 +4097,24 @@ const processResponse = async (responseData) => {
           );
         }
 
-        const parsedAnalysis = JSON.parse(jsonMatch[1].trim());
+        let parsedAnalysis;
+        try {
+          parsedAnalysis = JSON.parse(jsonMatch[1].trim());
+        } catch (parseError) {
+          logger.error("V2: JSON parsing failed", {
+            error: parseError.message,
+            jsonContent: jsonMatch[1].substring(0, 500) + "...",
+            attempt,
+          });
+          throw new ProcessingError(
+            `AI response JSON parsing failed: ${parseError.message}`
+          );
+        }
+
+        // V2: Validate and sanitize parsed analysis structure
+        if (!parsedAnalysis || typeof parsedAnalysis !== "object") {
+          throw new ProcessingError("AI response must be a valid JSON object");
+        }
 
         // V2: Debug log to check AI response completeness
         logger.info("V2: AI response completeness check", {
@@ -3551,6 +4147,35 @@ const processResponse = async (responseData) => {
             candidateAnswerLength:
               processingContext.candidateAnswer?.length || 0,
           });
+        }
+
+        // V2: Sanitize AI response arrays to prevent type errors
+        if (
+          parsedAnalysis.cheatingIndicators?.suspiciousPatterns &&
+          Array.isArray(parsedAnalysis.cheatingIndicators.suspiciousPatterns)
+        ) {
+          parsedAnalysis.cheatingIndicators.suspiciousPatterns =
+            parsedAnalysis.cheatingIndicators.suspiciousPatterns
+              .filter((item) => item != null && typeof item === "string")
+              .map((item) => String(item));
+
+          logger.info("V2: Sanitized suspicious patterns", {
+            originalCount: (
+              parsedAnalysis.cheatingIndicators?.suspiciousPatterns || []
+            ).length,
+            sanitizedCount:
+              parsedAnalysis.cheatingIndicators.suspiciousPatterns.length,
+          });
+        }
+
+        if (
+          parsedAnalysis.cheatingIndicators?.riskFactors &&
+          Array.isArray(parsedAnalysis.cheatingIndicators.riskFactors)
+        ) {
+          parsedAnalysis.cheatingIndicators.riskFactors =
+            parsedAnalysis.cheatingIndicators.riskFactors
+              .filter((item) => item != null && typeof item === "string")
+              .map((item) => String(item));
         }
 
         // V2: Transform with context for adaptive processing
@@ -3626,6 +4251,22 @@ const processResponse = async (responseData) => {
               ?.suspiciousEvents || [];
           const suspiciousIndicators =
             transformedAnalysis.behavioralAnalysis?.suspiciousIndicators || [];
+
+          // V2: Debug suspicious indicators structure for troubleshooting
+          logger.info("V2: Suspicious indicators analysis", {
+            indicatorsCount: suspiciousIndicators.length,
+            indicatorsTypes: suspiciousIndicators.map((ind) => typeof ind),
+            firstIndicator: suspiciousIndicators[0]
+              ? {
+                  value: suspiciousIndicators[0],
+                  type: typeof suspiciousIndicators[0],
+                }
+              : null,
+            behavioralAnalysisPresent: !!transformedAnalysis.behavioralAnalysis,
+            behavioralAnalysisKeys: transformedAnalysis.behavioralAnalysis
+              ? Object.keys(transformedAnalysis.behavioralAnalysis)
+              : [],
+          });
           const totalSuspiciousTime =
             transformedAnalysis.behavioralAnalysis?.behavioralTimestamps
               ?.totalSuspiciousTime || 0;
@@ -3663,6 +4304,19 @@ const processResponse = async (responseData) => {
           // Check for non-environmental suspicious indicators
           const genuineSuspiciousIndicators = suspiciousIndicators.filter(
             (indicator) => {
+              // Ensure indicator is a string before processing
+              if (typeof indicator !== "string") {
+                logger.warn(
+                  "V2: Non-string indicator found in suspiciousIndicators",
+                  {
+                    indicator,
+                    type: typeof indicator,
+                    skipping: true,
+                  }
+                );
+                return false;
+              }
+
               const lowerIndicator = indicator.toLowerCase();
               return (
                 !lowerIndicator.includes("blue light") &&
@@ -3971,12 +4625,65 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           error: error.message,
           contextAvailable: !!processingContext.responseQuality,
           environmentConfig: envConfig.ai?.balancedProcessing || false,
+          optimisticProcessing:
+            !!processingContext.optimisticProcessing?.enabled,
+          errorType: error.message.includes("File is not in an ACTIVE state")
+            ? "file_not_active"
+            : error.message.includes("400 Bad Request")
+            ? "bad_request"
+            : error.message.includes("500 Internal Server Error")
+            ? "server_error"
+            : "unknown",
         });
 
+        // Special handling for optimistic processing failures
+        if (processingContext.optimisticProcessing?.enabled) {
+          logger.warn("V2: Analysis failed during optimistic processing mode", {
+            fileName: processingContext.optimisticProcessing.fileName,
+            lastKnownState:
+              processingContext.optimisticProcessing.lastKnownState,
+            attempt,
+            error: error.message,
+          });
+
+          // If this is a "File is not in an ACTIVE state" error during optimistic processing,
+          // it means our optimistic approach didn't work - try a text-only analysis fallback
+          if (
+            error.message.includes("File is not in an ACTIVE state") &&
+            attempt === maxRetries
+          ) {
+            logger.info(
+              "V2: Implementing text-only fallback for failed optimistic processing",
+              {
+                fileName: processingContext.optimisticProcessing.fileName,
+                strategy: "text_only_analysis_fallback",
+              }
+            );
+
+            // Generate a text-only analysis for media files that couldn't be processed
+            const textOnlyAnalysis = generateTextOnlyFallbackAnalysis(
+              responseData,
+              normalizedType
+            );
+
+            logger.info("V2: Text-only fallback analysis completed", {
+              fileName: responseData.fileName,
+              analysis: "basic_text_analysis",
+              cheatingDetected: textOnlyAnalysis.isCheatingDetected,
+            });
+
+            transformedAnalysis = textOnlyAnalysis;
+            break; // Exit the retry loop with fallback analysis
+          }
+        }
+
         if (attempt === maxRetries) {
-          throw new ProcessingError(
-            `V2 contextual analysis failed after ${maxRetries} attempts: ${error.message}`
-          );
+          // If we've exhausted retries and optimistic processing failed, provide guidance
+          const errorMessage = processingContext.optimisticProcessing?.enabled
+            ? `V2 contextual analysis failed after ${maxRetries} attempts during optimistic processing. Google AI API may be experiencing systematic issues with media file URI access. Original error: ${error.message}`
+            : `V2 contextual analysis failed after ${maxRetries} attempts: ${error.message}`;
+
+          throw new ProcessingError(errorMessage);
         }
 
         // V2: Smart retry with exponential backoff (if enabled)
@@ -4370,8 +5077,8 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       );
     }
     if (uploadedFileName) {
-      await fileManager
-        .deleteFile(uploadedFileName)
+      await client.files
+        .delete({ name: uploadedFileName })
         .catch((err) =>
           logger.warn(
             `V2: Failed to delete uploaded file: ${uploadedFileName}`,
@@ -4651,8 +5358,11 @@ const processScreening = async (screeningData) => {
         ],
       };
     } else {
-      const result = await model.generateContent([{ text: prompt }]);
-      const aiResponse = result.response.text();
+      const result = await client.models.generateContent({
+        model: "gemini-2.5-pro",
+        contents: [{ text: prompt }],
+      });
+      const aiResponse = result.text;
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
         null,
         aiResponse.slice(
@@ -4969,6 +5679,16 @@ const validateGenuineCheatingIndicators = (behavioralIndicators = []) => {
   const filteredOutIndicators = [];
 
   behavioralIndicators.forEach((indicator) => {
+    // Ensure indicator is a string before processing
+    if (typeof indicator !== "string") {
+      logger.warn("V2: Non-string indicator found in behavioralIndicators", {
+        indicator,
+        type: typeof indicator,
+        skipping: true,
+      });
+      return; // Skip this indicator
+    }
+
     const lowerIndicator = indicator.toLowerCase();
 
     // Check if this indicator represents normal behavior

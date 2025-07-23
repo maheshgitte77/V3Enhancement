@@ -18,7 +18,7 @@
  * @requires fs
  * @requires path
  * @requires dotenv
- * @requires @google/generative-ai
+ * @requires @google/genai
  * @requires winston
  * @requires ../model/CandidateAnswerAiResponse
  * @requires ../model/CandidateScreeningResult
@@ -32,11 +32,7 @@ const { Kafka } = require("kafkajs");
 const fs = require("fs").promises;
 const path = require("path");
 const dotenv = require("dotenv");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const {
-  GoogleAIFileManager,
-  FileState,
-} = require("@google/generative-ai/server");
+const { GoogleGenAI } = require("@google/genai");
 const winston = require("winston");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
@@ -109,7 +105,7 @@ const kafka = new Kafka({
 /**
  * Google Generative AI configuration
  * V1 uses enhanced model parameters for better analysis
- * @type {GoogleGenerativeAI}
+ * @type {genai.Client}
  */
 const validateGoogleAIConfig = () => {
   if (!process.env.GEMINI_API_KEY) {
@@ -137,11 +133,9 @@ const validateGoogleAIConfig = () => {
 // Validate configuration at startup
 validateGoogleAIConfig();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro-preview-03-25",
+const client = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
 });
-const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 
 // Custom error classes
 class FileError extends Error {
@@ -180,14 +174,14 @@ const validateFile = async (filePath) => {
   }
 };
 
-const pollFileStatus = async (fileManager, fileName) => {
+const pollFileStatus = async (client, fileName) => {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
     try {
-      const file = await fileManager.getFile(fileName);
-      if (file.state === FileState.ACTIVE) return file;
-      if (file.state === FileState.FAILED)
+      const file = await client.files.get({ name: fileName });
+      if (file.state === "ACTIVE") return file;
+      if (file.state === "FAILED")
         throw new FileError("File processing failed");
-      if (file.state !== FileState.PROCESSING)
+      if (file.state !== "PROCESSING")
         throw new FileError(`Unexpected file state: ${file.state}`);
       const delay = Math.min(1000 * Math.pow(2, attempt), 16000);
       await new Promise((res) => setTimeout(res, delay));
@@ -230,7 +224,7 @@ const pollFileStatus = async (fileManager, fileName) => {
   );
 };
 
-const uploadFile = async (fileManager, filePath, fileName, mimeType) => {
+const uploadFile = async (client, filePath, fileName, mimeType) => {
   try {
     logger.info("V1: Starting file upload", { fileName, mimeType });
 
@@ -246,16 +240,17 @@ const uploadFile = async (fileManager, filePath, fileName, mimeType) => {
       apiKeyPrefix: process.env.GEMINI_API_KEY?.substring(0, 8) || "none",
     });
 
-    const response = await fileManager.uploadFile(filePath, {
+    const response = await client.files.upload({
+      file: filePath,
       mimeType,
       displayName: fileName,
     });
     logger.info("V1: File upload successful", {
-      fileName: response.file.name,
-      uri: response.file.uri,
-      state: response.file.state,
+      fileName: response.name,
+      uri: response.uri,
+      state: response.state,
     });
-    return response.file;
+    return response;
   } catch (error) {
     logger.error("V1: File upload failed", {
       fileName,
@@ -1023,12 +1018,29 @@ const processResponse = async (responseData) => {
         });
         throw new FileError("Valid file name is required for media responses");
       }
-      mediaPath = path.join(UPLOADS_DIR, responseData.fileName);
+
+      // V1: Use provided videoPath if available (for URI downloads), otherwise construct path
+      if (responseData.videoPath) {
+        mediaPath = responseData.videoPath;
+        logger.info("V1: Using provided video path", {
+          videoPath: mediaPath,
+          fileName: responseData.fileName,
+          source: responseData.fileSource || "unknown",
+        });
+      } else {
+        mediaPath = path.join(UPLOADS_DIR, responseData.fileName);
+        logger.info("V1: Constructed video path from UPLOADS_DIR", {
+          videoPath: mediaPath,
+          fileName: responseData.fileName,
+          uploadsDir: UPLOADS_DIR,
+        });
+      }
+
       logger.info("V1: Validating media file", {
         fileName: responseData.fileName,
         mediaPath,
       });
-      await ensureDirectory(UPLOADS_DIR);
+      await ensureDirectory(path.dirname(mediaPath));
       await validateFile(mediaPath);
       logger.info("V1: Media file validation successful");
     } else if (!responseData.textAnswer) {
@@ -1062,7 +1074,7 @@ const processResponse = async (responseData) => {
         }
 
         const file = await uploadFile(
-          fileManager,
+          client,
           mediaPath,
           responseData.fileName,
           responseData.mimetype
@@ -1071,7 +1083,7 @@ const processResponse = async (responseData) => {
         logger.info("V1: File uploaded successfully, polling status", {
           uploadedFileName,
         });
-        await pollFileStatus(fileManager, uploadedFileName);
+        await pollFileStatus(client, uploadedFileName);
         fileInput = [
           { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
         ];
@@ -1121,11 +1133,11 @@ const processResponse = async (responseData) => {
           `V1: Starting AI analysis attempt ${attempt}/${MAX_RETRIES}`
         );
 
-        const result = await model.generateContent([
-          ...fileInput,
-          { text: prompt },
-        ]);
-        const aiResponse = result.response.text();
+        const result = await client.models.generateContent({
+          model: "gemini-2.5-pro",
+          contents: [...fileInput, { text: prompt }],
+        });
+        const aiResponse = result.text;
         logger.info("V1: Received AI response, parsing JSON");
 
         // V1: Enhanced JSON parsing
@@ -1501,8 +1513,8 @@ const processResponse = async (responseData) => {
         );
     }
     if (uploadedFileName) {
-      await fileManager
-        .deleteFile(uploadedFileName)
+      await client.files
+        .delete({ name: uploadedFileName })
         .catch((err) =>
           logger.warn(
             `Failed to delete uploaded file: ${uploadedFileName}, ${err.message}`
@@ -1768,8 +1780,11 @@ const processScreening = async (screeningData) => {
         ],
       };
     } else {
-      const result = await model.generateContent([{ text: prompt }]);
-      const aiResponse = result.response.text();
+      const result = await client.models.generateContent({
+        model: "gemini-2.5-pro",
+        contents: [{ text: prompt }],
+      });
+      const aiResponse = result.text;
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
         null,
         aiResponse.slice(

@@ -51,6 +51,7 @@ const uploadNone = upload.none();
  * @param {string} req.body.skillName - Skill being assessed
  * @param {string} req.body.type - Response type
  * @param {number} req.body.maxTime - Maximum time allowed
+ * @param {string} [req.body.file_uri] - **NEW**: Optional file URI for remote file processing (alternative to file upload)
  */
 router.post("/analyzeMediaResponse", analyzeMediaResponse);
 
@@ -89,6 +90,7 @@ router.post("/analyzeScreening", analyzeScreening);
  * @description Analyze media responses (video/audio) using V1 implementation (Conservative & Candidate-Friendly)
  * @access Public
  * @param {Object} req.body - Request body (same as V0)
+ * @param {string} [req.body.file_uri] - **NEW**: Optional file URI for remote file processing (alternative to file upload)
  */
 router.post("/analyzeMediaResponse/v1", analyzeMediaResponseV1);
 
@@ -127,6 +129,7 @@ router.post("/analyzeScreening/v1", analyzeScreeningV1);
  * @description Analyze media responses (video/audio) using V2 implementation (Balanced & Context-Aware)
  * @access Public
  * @param {Object} req.body - Request body (same as V0)
+ * @param {string} [req.body.file_uri] - **NEW**: Optional file URI for remote file processing (alternative to file upload)
  */
 router.post("/analyzeMediaResponse/v2", analyzeMediaResponseV2);
 
