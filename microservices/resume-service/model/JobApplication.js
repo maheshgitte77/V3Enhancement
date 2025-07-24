@@ -224,6 +224,7 @@ const JobApplicationSchema = new mongoose.Schema(
       enum: [
         "Uploaded",
         "Applied",
+        "Referral"
       ],
       default: "Uploaded",
     },
@@ -271,6 +272,12 @@ const JobApplicationSchema = new mongoose.Schema(
       email: String,
       mobile: String,
       code: String,
+    },
+    InvitedOn: {
+      type: Date,
+    },
+    ExpiredOn: {
+      type: Date,
     },
   },
   {

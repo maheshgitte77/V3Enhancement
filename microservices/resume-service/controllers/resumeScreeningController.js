@@ -103,12 +103,13 @@ const analyzeResumes = async (req, res) => {
         .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1 } });
       const clientCoolingPeriod = client?.coolingPeriod;
       const hasValidReferral =
-        referralDetails &&
-        Object.values(referralDetails).every(
-          (val) => typeof val === "string" && val.trim() !== ""
+        !!(
+          referralDetails &&
+          referralDetails?.name?.trim() &&
+          referralDetails?.email?.trim()
         );
 
-      const type = hasValidReferral ? "Referral" : "Uploaded";
+      const candidateType = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
       const isLive = live ? live : false;
 
@@ -179,7 +180,7 @@ const analyzeResumes = async (req, res) => {
             createRecord,
             expectedSalary,
             currentSalary,
-            type,
+            candidateType,
             // addedBy: addedBy || null,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
@@ -192,7 +193,7 @@ const analyzeResumes = async (req, res) => {
 
       if (isLive || validFiles.length === 1) {
         req.pendingRequests.set(requestId, {
-          res: validFiles.length === 1 ? res : { json: () => {} },
+          res: validFiles.length === 1 ? res : { json: () => { } },
           expectedResponses: validFiles.length,
           jobId: jobId,
           requestBy: addedBy || null,
@@ -241,6 +242,8 @@ const addToJobApplication = async (req, res) => {
         .status(400)
         .json({ error: "jobId and emails array are required" });
     }
+    const InvitedOn = new Date(); // current date
+    const ExpiredOn = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // +3 days
 
     const redisKey = `request:${requestId}:jobData`;
     let jobDataList = await redis.get(redisKey);
@@ -262,6 +265,8 @@ const addToJobApplication = async (req, res) => {
         recordsToAdd.push({
           ...matchingRecord,
           status: "Added",
+          InvitedOn,
+          ExpiredOn,
         });
       } else {
         notFoundEmails.push(email);
@@ -278,6 +283,8 @@ const addToJobApplication = async (req, res) => {
           ...analysis,
           jobId,
           status: "Added",
+          ExpiredOn,
+          InvitedOn
         };
         recordsToAdd.push(jobData);
       }
@@ -312,6 +319,22 @@ const addToJobApplication = async (req, res) => {
         { _id: new ObjectId(jobId) },
         { $set: { activeRequestId: "", requestStatus: "Completed" } }
       );
+
+    // Prepare candidate list for notification API
+    const candidateList = recordsToAdd.map((candidate) => ({
+      email: candidate.email,
+      name: candidate.name,
+    }));
+    
+    // Notify external service
+    await axios.post(
+      `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
+      {
+        jobId,
+        expiryDate: ExpiredOn,
+        candidateList,
+      }
+    );
 
     res.status(200).json({
       message: "Successfully added records to JobApplication",

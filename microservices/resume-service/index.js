@@ -110,29 +110,36 @@ const createConsumerInstance = async (id) => {
           if (
             requestInfo &&
             responseCache.get(requestId).length ===
-              requestInfo.expectedResponses
+            requestInfo.expectedResponses
           ) {
+
             io.emit(`completion:${requestId}`, {
               requestId,
               message: "All resumes processed",
               jobId: requestInfo.jobId,
               responses: responseCache.get(requestId),
             });
-            if (requestInfo.expectedResponses > 1) {
-              axios.post(
-                `${process.env.NOTIFICATION_SER_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
-              );
 
-              const db = mongoose.connection.db;
-              await db.collection("jobs").updateOne(
-                { _id: new ObjectId(requestInfo.jobId) },
-                {
-                  $set: {
-                    activeRequestId: requestId,
-                    requestStatus: "Completed",
-                  },
-                }
-              );
+            if (requestInfo.expectedResponses > 1) {
+              try {
+                await axios.post(
+                  `${process.env.NOTIFICATION_SER_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
+                );
+
+                const db = mongoose.connection.db;
+                await db.collection("jobs").updateOne(
+                  { _id: new ObjectId(requestInfo.jobId) },
+                  {
+                    $set: {
+                      activeRequestId: requestId,
+                      requestStatus: "Completed",
+                    },
+                  }
+                );
+
+              } catch (error) {
+                console.error("Error while completing request:", error);
+              }
             }
             requestInfo.res.json({
               requestId,
