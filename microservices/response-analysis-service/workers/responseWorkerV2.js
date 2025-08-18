@@ -1932,9 +1932,18 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 
 **CRITICAL: If you detect 2+ subtle indicators, consider flagging even if behavioral patterns appear "natural" - sophisticated cheaters can mask obvious signs!**
 
+**TRANSCRIPTION INSTRUCTIONS - CRITICAL:**
+- ONLY transcribe the CANDIDATE'S voice - the primary speaker answering the question
+- IGNORE all background voices, conversations, whispers, or secondary speakers
+- EXCLUDE environmental sounds, background music, or ambient noise
+- DO NOT include interviewer prompts, coaching voices, or off-camera conversations
+- Focus solely on the main candidate's spoken response to the interview question
+- If multiple people are speaking, transcribe ONLY the primary candidate's words
+- Mark unclear candidate speech as "[inaudible]" rather than guessing from background voices
+
 **Response JSON Format:**
 {
-  "transcription": "[Complete word-for-word transcription of the candidate's response]",
+  "transcription": "[CANDIDATE VOICE ONLY - Complete word-for-word transcription of ONLY what the candidate said, excluding all background voices, whispers, coaching, or secondary speakers]",
       "communication": "[HR-friendly assessment: Professional presentation, clarity, confidence level, speaking pace. DO NOT mention reading, cheating, or integrity concerns - these are handled separately]",
   "communicationRating": "<String, 0.0–5.0>",
   "cheatingIndicators": ["[ONLY include if genuine cheating evidence exists with HIGH CONFIDENCE (80%+) - e.g., 'Sustained downward reading pattern with 90% confidence at 0:08', 'Monotone delivery indicating script reading with 85% confidence'. NEVER flag normal behaviors like touching face, brief pauses, natural gestures. If no genuine cheating detected, use: 'No integrity concerns detected - candidate followed proper interview guidelines']"],
