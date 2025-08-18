@@ -8,6 +8,11 @@ const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
+const CandidateSchema = require("../model/Candidate");
+
+// Bind Candidate model from schema (avoid OverwriteModelError on hot reloads)
+const Candidate =
+  mongoose.models.Candidate || mongoose.model("Candidate", CandidateSchema);
 
 const supportedExtensions = new Set([
   "pdf",
@@ -310,6 +315,120 @@ const addToJobApplication = async (req, res) => {
       await JobApplication.bulkWrite(bulkOps);
     }
 
+
+    try {
+      // Also upsert into Candidate collection
+      const candidateBulkOps = recordsToAdd
+        .filter((r) => r?.email)
+        .map((record) => {
+          const toArray = (val) =>
+            Array.isArray(val)
+              ? val
+              : typeof val === "string"
+                ? val
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                : undefined;
+
+          const safeDate = (val) => {
+            if (!val) return undefined;
+            const d = new Date(val);
+            return isNaN(d.getTime()) ? undefined : d;
+          };
+
+          const normalizeSalary = (val, currencyFallback) => {
+            if (val === undefined || val === null || val === "") return undefined;
+            if (typeof val === "object") {
+              const obj = {};
+              if (typeof val.currency === "string") obj.currency = val.currency;
+              if (typeof val.salary === "number") obj.salary = val.salary;
+              return Object.keys(obj).length ? obj : undefined;
+            }
+            const num = Number(val);
+            if (isNaN(num)) return undefined;
+            return { currency: currencyFallback || "INR", salary: num };
+          };
+
+          const experience = record.experience && typeof record.experience === "object"
+            ? {
+              years: Number(record.experience.years) || undefined,
+              months: Number(record.experience.months) || undefined,
+            }
+            : undefined;
+
+          const candidateDoc = {
+            name: record.name,
+            email: record.email?.toLowerCase(),
+            mobile: record.mobile,
+            gender: record.gender,
+            dateOfBirth: safeDate(record.dateOfBirth),
+            address: record.address,
+            city: record.city,
+            state: record.state,
+            country: record.country,
+            zipCode: record.zipCode,
+            experience,
+            portfolio: record.portfolio,
+            resumeFileId: record.resumeFileId,
+            profilePictureFileId: record.profilePictureFileId,
+            skills: record.skills,
+            additionalSkills: record.additionalSkills,
+            educationDetails: record.educationDetails,
+            workExperience: record.workExperience,
+            certifications: record.certifications,
+            projects: record.projects,
+            languages: record.languages,
+            interests: record.interests,
+            hobbies: record.hobbies,
+            preferredLocations: toArray(record.preferredLocations) || record.preferredLocations,
+            preferredJobType: toArray(record.preferredJobType) || record.preferredJobType,
+            preferredWorkStyle: toArray(record.preferredWorkStyle) || record.preferredWorkStyle,
+            preferredWorkShift: toArray(record.preferredWorkShift) || record.preferredWorkShift,
+            preferredJobRole: toArray(record.preferredJobRole) || record.preferredJobRole,
+            preferredSalary: normalizeSalary(
+              record.preferredSalary ?? record.expectedSalary,
+              record.currency
+            ),
+            currentSalary: normalizeSalary(record.currentSalary, record.currency),
+            willingnessToRelocate: record.willingnessToRelocate,
+            workAuthorization: record.workAuthorization,
+            offersInHand: record.offersInHand,
+            noticePeriod:
+              record.noticePeriod === undefined || record.noticePeriod === null || record.noticePeriod === ""
+                ? undefined
+                : Number(record.noticePeriod),
+            expectedJoiningDate: safeDate(record.expectedJoiningDate),
+            servingNoticePeriod: record.servingNoticePeriod,
+            preferredCompanySize: record.preferredCompanySize,
+            preferredCompanyType: record.preferredCompanyType,
+            socials: record.socials,
+            resumeSummary: record.resumeSummary,
+            source: record.candidateType || record.source,
+          };
+
+          // Remove undefined fields to keep insert clean
+          Object.keys(candidateDoc).forEach((k) => {
+            if (candidateDoc[k] === undefined) delete candidateDoc[k];
+          });
+
+          return {
+            updateOne: {
+              filter: { email: candidateDoc.email },
+              // Don't overwrite existing candidate profiles; create if missing
+              update: { $setOnInsert: candidateDoc },
+              upsert: true,
+            },
+          };
+        });
+
+      if (candidateBulkOps.length > 0) {
+        await Candidate.bulkWrite(candidateBulkOps);
+      }
+    } catch (error) {
+      console.error("Error adding to Candidate collection:", error.message, error.stack);
+    }
+
     await redis.del(redisKey);
     // Use existing mongoose connection for schemaless operations
     const db = mongoose.connection.db;
@@ -325,17 +444,19 @@ const addToJobApplication = async (req, res) => {
       email: candidate.email,
       name: candidate.name,
     }));
-    
-    // Notify external service
-    await axios.post(
-      `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
-      {
-        jobId,
-        expiryDate: ExpiredOn,
-        candidateList,
-      }
-    );
-
+    try {
+      // Notify external service
+      await axios.post(
+        `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
+        {
+          jobId,
+          expiryDate: ExpiredOn,
+          candidateList,
+        }
+      );
+    } catch (error) {
+      console.error("Error notifying external service:", error.message, error.stack);
+    }
     res.status(200).json({
       message: "Successfully added records to JobApplication",
       addedRecords: recordsToAdd.length,
