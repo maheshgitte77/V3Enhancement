@@ -4,63 +4,28 @@
  * including video, audio, subjective text, and MCQ answers.
  *
  * V2 Update: Enhanced with contextual analysis fields, behavioral insights,
- * relevance assessment, and adaptive scoring capabilities.
+ * relevance assessment, and TYPE-SPECIFIC data storage.
  *
  * @module CandidateAnswerAiResponse
  * @requires mongoose
- * @version 2.0.0
+ * @version 2.1.0 - Type-Specific Data Storage
  */
 
 const mongoose = require("mongoose");
 
 /**
- * Schema definition for CandidateAnswerAiResponse
+ * Schema definition for CandidateAnswerAiResponse with Type-Specific Fields
  * @type {mongoose.Schema}
  *
- * @property {string} type - Type of response (video/audio/subjective/mcq)
- * @property {string} question - The question that was asked
- * @property {ObjectId} candidateScreeningId - Reference to the screening session
- * @property {ObjectId} jobApplicationId - Reference to the job application
- * @property {string} questionId - Unique identifier for the question
- * @property {string} [answerFileId] - File ID for video/audio responses
- * @property {string} status - Analysis status (Pending/Analyzed/Error)
- * @property {string} [transcription] - Text transcription of audio/video
- * @property {string} [communication] - Communication assessment
- * @property {boolean} [isCheatingDetected] - Whether cheating was detected
- * @property {string[]} [cheatingIndicators] - List of detected cheating indicators
- * @property {boolean} [isCopiedFromAITool] - Whether content was AI-generated
- * @property {boolean} [isCopiedFromAnyWebsite] - Whether content was copied from web
- * @property {string} [percentOfAnswerMatchWithAiModel] - AI content match percentage
- * @property {Object} technicalDepth - Technical depth assessment
- * @property {Object} technicalDepthAsPerExperience - Experience-based technical assessment
- * @property {Object} languageDetection - Language analysis results
- * @property {string} overallContentQuality - Overall quality assessment
- * @property {string} [detailedSummary] - Detailed analysis summary
- * @property {string} [overallRating] - Overall rating score
- * @property {string} [communicationRating] - Communication rating
- * @property {string} [correctPercentage] - Percentage of correct content
- * @property {Object} answerRating - Detailed answer rating
- * @property {string[]} [answerSummary] - Summary points of the answer
- * @property {string[]} [answerImprovementSuggestions] - Improvement suggestions
- * @property {Object} answerTime - Time-related metrics
- * @property {Object} answerEffectiveness - Effectiveness metrics
- * @property {Object} backgroundNoise - Background noise analysis
- * @property {string} [confidenceLevel] - Confidence level rating
- * @property {string} [responseCoherence] - Response coherence rating
- * @property {string} [environmentalSuitability] - Environmental conditions rating
- * @property {boolean} [multipleVoicesDetected] - Whether multiple voices were detected
- * @property {number} [cheatingConfidence] - V2: Confidence score for cheating detection (0-100)
- * @property {string[]} [contextualFactors] - V2: Factors considered in contextual analysis
- * @property {Object} [relevanceAssessment] - V2: Intelligent relevance assessment
- * @property {string[]} [behavioralInsights] - V2: Behavioral pattern insights
- * @property {string} [responseQuality] - V2: Overall response quality (high/medium/low)
- * @property {boolean} [baseAnswerProvided] - V2: Whether a base answer was provided for comparison
- * @property {Object} [baseAnswerComparison] - V2: Comprehensive base answer comparison analysis
- * @property {Object} metrics - Type-specific metrics (video/audio/subjective/mcq)
- * @property {Object} behavioralAnalysis - V2: Enhanced behavioral analysis for cheating detection
+ * Key Changes in V2.1:
+ * - Removed nested metrics structure
+ * - Added type-specific fields directly to root level
+ * - Only relevant fields populated based on response type
+ * - Conditional field validation based on type
  */
 const CandidateAnswerAiResponseSchema = new mongoose.Schema(
   {
+    // ===== COMMON FIELDS (All Types) =====
     type: {
       type: String,
       enum: ["video", "audio", "subjective", "mcq"],
@@ -88,7 +53,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     answerFileId: {
       type: String,
       required: function () {
-        return ["video"].includes(this.type);
+        return ["video", "audio"].includes(this.type);
       },
     },
     status: {
@@ -97,32 +62,42 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       required: true,
       default: "Pending",
     },
+
+    // ===== ANALYSIS RESULTS (All Types) =====
     transcription: {
       type: String,
+      required: function () {
+        return ["video", "audio"].includes(this.type);
+      },
     },
     communication: {
       type: String,
+      required: true,
     },
     isCheatingDetected: {
       type: Boolean,
+      default: false,
     },
     cheatingIndicators: {
       type: [String],
       default: [],
     },
-    isCopiedFromAITool: {
-      type: Boolean,
+    cheatingConfidence: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
     },
-    isCopiedFromAnyWebsite: {
-      type: Boolean,
+    contextualFactors: {
+      type: [String],
+      default: [],
     },
-    percentOfAnswerMatchWithAiModel: {
-      type: String,
-    },
+
+    // ===== TECHNICAL ASSESSMENT (All Types) =====
     technicalDepth: {
       rating: { type: String },
       asPerExplanation: { type: String },
-      experienceAdjusted: { type: Boolean, default: false }, // V2: Experience-based adjustment flag
+      experienceAdjusted: { type: Boolean, default: false },
     },
     technicalDepthAsPerExperience: {
       rating: { type: String },
@@ -159,7 +134,8 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     answerImprovementSuggestions: {
       type: [String],
     },
-    // Added missing fields
+
+    // ===== TIME & EFFECTIVENESS (All Types) =====
     answerTime: {
       totalDurationSeconds: { type: Number },
       effectiveAnswerTimeSeconds: { type: Number },
@@ -173,27 +149,29 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
         relevanceExplanation: { type: String },
       },
     },
+
+    // ===== BACKGROUND ENVIRONMENT =====
     backgroundNoise: {
       level: { type: String },
       description: { type: String },
-      contextualImpact: { type: String }, // V2: Contextual analysis of noise impact
+      contextualImpact: { type: String },
     },
     confidenceLevel: { type: String },
     responseCoherence: { type: String },
     environmentalSuitability: { type: String },
-    multipleVoicesDetected: { type: Boolean },
 
-    // V2-specific fields for enhanced contextual analysis
-    cheatingConfidence: {
-      type: Number,
-      min: 0,
-      max: 100,
-      default: 0,
+    // ===== AI DETECTION (All Types) =====
+    isCopiedFromAITool: {
+      type: Boolean,
     },
-    contextualFactors: {
-      type: [String],
-      default: [],
+    isCopiedFromAnyWebsite: {
+      type: Boolean,
     },
+    percentOfAnswerMatchWithAiModel: {
+      type: String,
+    },
+
+    // ===== V2 CONTEXTUAL FIELDS =====
     relevanceAssessment: {
       score: { type: Number, min: 0, max: 1, default: 0 },
       explanation: { type: String, default: "" },
@@ -204,122 +182,179 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     },
     responseQuality: {
       type: String,
-      enum: ["low", "medium", "high"],
       default: "low",
     },
-    // V2: Enhanced behavioral analysis for cheating detection
+
+    // ===== TYPE-SPECIFIC FIELDS =====
+
+    // VIDEO-SPECIFIC FIELDS (optional - flag analysis system is primary source)
+    isLipSync: {
+      type: Boolean,
+      default: function () {
+        return this.type === "video" ? false : undefined;
+      },
+    },
+    isOnlyOnePersonInVideo: {
+      type: Boolean,
+      default: function () {
+        return this.type === "video" ? true : undefined;
+      },
+    },
+    facialExpressions: {
+      type: String,
+      default: function () {
+        return this.type === "video"
+          ? "See flag analysis for details"
+          : undefined;
+      },
+    },
+    eyeMovement: {
+      type: String,
+      default: function () {
+        return this.type === "video"
+          ? "See flag analysis for details"
+          : undefined;
+      },
+    },
+
+    // AUDIO-SPECIFIC FIELDS (optional - flag analysis system is primary source)
+    isOnlyOneVoiceInAudio: {
+      type: Boolean,
+      default: function () {
+        return this.type === "audio" ? true : undefined;
+      },
+    },
+    voiceClarity: {
+      type: String,
+      default: function () {
+        return this.type === "audio"
+          ? "See flag analysis for details"
+          : undefined;
+      },
+    },
+    multipleVoicesDetected: {
+      type: Boolean,
+      default: function () {
+        return this.type === "audio" ? false : undefined;
+      },
+    },
+
+    // SUBJECTIVE-SPECIFIC FIELDS (only for subjective type)
+    textLength: {
+      type: Number,
+      required: function () {
+        return this.type === "subjective";
+      },
+    },
+    wordCount: {
+      type: Number,
+      required: function () {
+        return this.type === "subjective";
+      },
+    },
+    relevanceScore: {
+      type: Number,
+      min: 0,
+      max: 1,
+      required: function () {
+        return this.type === "subjective";
+      },
+    },
+
+    // MCQ-SPECIFIC FIELDS (only for mcq type)
+    selectedOption: {
+      type: String,
+      required: function () {
+        return this.type === "mcq";
+      },
+    },
+
+    // COMMON CONTEXTUAL FIELDS (all types)
+    contextualQuality: {
+      type: String,
+      default: "medium",
+    },
+    behavioralInsightsCount: {
+      type: Number,
+      default: 0,
+    },
+
+    // ===== TYPE-SPECIFIC BEHAVIORAL ANALYSIS =====
     behavioralAnalysis: {
-      // Video/Audio behavioral analysis fields
+      // VIDEO/AUDIO BEHAVIORAL FIELDS
       eyeMovementPattern: {
         type: String,
-        enum: [
-          "Natural camera engagement",
-          "Frequent downward glances",
-          "Reading pattern detected",
-          "Avoiding eye contact",
-          "Mixed patterns observed",
-          "Not assessed",
-        ],
-        default: "Not assessed",
+        default: function () {
+          return this.type === "video" ? "Not assessed" : undefined;
+        },
       },
       speakingTone: {
         type: String,
-        enum: [
-          "Conversational and natural",
-          "Monotone delivery",
-          "Robotic rhythm",
-          "Reading cadence detected",
-          "Mixed delivery patterns",
-          "Not assessed",
-        ],
-        default: "Not assessed",
+        default: function () {
+          return ["video", "audio"].includes(this.type)
+            ? "Not assessed"
+            : undefined;
+        },
       },
       responseDelivery: {
         type: String,
-        enum: [
-          "Spontaneous and fluid",
-          "Structured presentation",
-          "Verbatim reading style",
-          "Mixed delivery patterns",
-          "Not assessed",
-        ],
-        default: "Not assessed",
+        default: function () {
+          return ["video", "audio"].includes(this.type)
+            ? "Not assessed"
+            : undefined;
+        },
       },
       timingPatterns: {
         type: String,
-        enum: [
-          "Natural response flow",
-          "Unnatural pauses before answers",
-          "Consistent delay patterns",
-          "Rushed after pauses",
-          "Mixed timing patterns",
-          "Not assessed",
-        ],
-        default: "Not assessed",
+        default: function () {
+          return ["video", "audio"].includes(this.type)
+            ? "Not assessed"
+            : undefined;
+        },
       },
 
-      // Subjective (typing-based) behavioral analysis fields
+      // SUBJECTIVE BEHAVIORAL FIELDS
       typingPattern: {
         type: String,
-        enum: [
-          "Normal typing patterns",
-          "Slow and deliberate typing",
-          "Steady typing pace",
-          "Very fast typing observed",
-          "Suspicious typing patterns",
-          "Irregular typing speed detected",
-          "No typing data available",
-        ],
+        default: function () {
+          return this.type === "subjective" ? "Not assessed" : undefined;
+        },
       },
       inputBehavior: {
         type: String,
-        enum: [
-          "Original typing detected",
-          "Some copy-paste usage",
-          "Concerning input patterns",
-          "Multiple paste operations",
-          "Moderate copy-paste usage",
-          "Heavy copy-paste detected",
-          "Unable to analyze",
-        ],
+        default: function () {
+          return this.type === "subjective" ? "Not assessed" : undefined;
+        },
       },
       compositionStyle: {
         type: String,
-        enum: [
-          "Natural composition flow",
-          "Continuous writing style",
-          "Thoughtful composition style",
-          "Non-natural composition",
-          "Frequent thinking pauses",
-          "Extended research pauses",
-          "Not assessed",
-        ],
+        default: function () {
+          return this.type === "subjective" ? "Not assessed" : undefined;
+        },
       },
       focusConsistency: {
         type: String,
-        enum: [
-          "Maintained focus throughout",
-          "Mostly consistent focus",
-          "Occasional focus loss",
-          "Poor focus consistency",
-          "Frequent external interactions",
-          "Unknown",
-        ],
+        default: function () {
+          return this.type === "subjective" ? "Not assessed" : undefined;
+        },
       },
+
+      // COMMON BEHAVIORAL FIELDS
       suspiciousIndicators: {
         type: [String],
         default: [],
       },
-      // V2: Timestamp tracking for behavioral observations
+
+      // TYPE-SPECIFIC BEHAVIORAL TIMESTAMPS
       behavioralTimestamps: {
         // Video/Audio behavioral events
         eyeMovementEvents: [
           {
-            timestamp: { type: Number, min: 0 }, // seconds from start
-            duration: { type: Number, min: 0 }, // duration in seconds
-            behavior: { type: String }, // specific behavior observed
-            confidence: { type: Number, min: 0, max: 100 }, // confidence in detection
-            description: { type: String }, // detailed description
+            timestamp: { type: Number, min: 0 },
+            duration: { type: Number, min: 0 },
+            behavior: { type: String },
+            confidence: { type: Number, min: 0, max: 100 },
+            description: { type: String },
           },
         ],
         speakingToneEvents: [
@@ -367,10 +402,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
             behavior: { type: String },
             confidence: { type: Number, min: 0, max: 100 },
             description: { type: String },
-            category: {
-              type: String,
-              enum: ["input", "paste", "copy", "speed", "research"],
-            },
+            category: { type: String },
           },
         ],
         compositionEvents: [
@@ -391,6 +423,8 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
             description: { type: String },
           },
         ],
+
+        // Common suspicious events (all types)
         suspiciousEvents: [
           {
             timestamp: { type: Number, min: 0 },
@@ -398,30 +432,34 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
             behavior: { type: String },
             confidence: { type: Number, min: 0, max: 100 },
             description: { type: String },
-            category: {
-              type: String,
-              enum: [
-                "cheating",
-                "technical",
-                "environmental",
-                "behavioral",
-                "input",
-                "paste",
-                "copy",
-                "speed",
-                "research",
-              ],
-            },
+            category: { type: String },
           },
         ],
+
         // Summary statistics
-        totalSuspiciousTime: { type: Number, default: 0 }, // total seconds of suspicious behavior
-        peakSuspiciousTimestamp: { type: Number, default: 0 }, // timestamp of highest confidence event
-        behaviorDensity: { type: Number, default: 0 }, // suspicious events per minute
+        totalSuspiciousTime: { type: Number, default: 0 },
+        peakSuspiciousTimestamp: { type: Number, default: 0 },
+        behaviorDensity: { type: Number, default: 0 },
       },
     },
 
-    // V2: Base Answer Comparison for subjective questions
+    // ===== V2.2 OPTIMIZED FLAG ANALYSIS SYSTEM =====
+    flagAnalysis: {
+      flagResults: [
+        {
+          flag: { type: String },
+          detected: { type: Boolean },
+          message: { type: String },
+        },
+      ],
+      totalChecks: { type: Number, default: 0 },
+      flaggedChecks: { type: Number, default: 0 },
+      clearChecks: { type: Number, default: 0 },
+      flagSystemVersion: { type: String, default: "V2.2_OPTIMIZED" },
+      processingTimestamp: { type: Date, default: Date.now },
+    },
+
+    // ===== V2 BASE ANSWER COMPARISON (subjective only) =====
     baseAnswerProvided: {
       type: Boolean,
       default: false,
@@ -440,12 +478,10 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
         },
         quality: {
           type: String,
-          enum: ["excellent", "good", "fair", "poor"],
           default: "poor",
         },
         confidence: {
           type: String,
-          enum: ["high", "medium", "low"],
           default: "low",
         },
       },
@@ -477,15 +513,6 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       },
       matchType: {
         type: String,
-        enum: [
-          "exact_match",
-          "very_similar",
-          "alternative_solution",
-          "partial_match",
-          "related_but_different",
-          "minimal_overlap",
-          "no_comparison",
-        ],
         default: "no_comparison",
       },
       matchDescription: {
@@ -494,7 +521,6 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       },
       analysisConfidence: {
         type: String,
-        enum: ["high", "medium", "low"],
         default: "low",
       },
       considerationFactors: {
@@ -504,34 +530,6 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       detailedAnalysis: {
         type: String,
         default: "",
-      },
-    },
-
-    // Metrics field (already included, kept for completeness)
-    metrics: {
-      video: {
-        isLipSync: { type: Boolean },
-        isOnlyOnePersonInVideo: { type: Boolean },
-        facialExpressions: { type: String },
-        eyeMovement: { type: String },
-        contextualQuality: { type: String }, // V2: Contextual quality assessment
-        behavioralInsights: { type: Number, default: 0 }, // V2: Number of behavioral insights
-      },
-      audio: {
-        isOnlyOneVoiceInAudio: { type: Boolean },
-        voiceClarity: { type: String },
-        contextualQuality: { type: String }, // V2: Contextual quality assessment
-        behavioralInsights: { type: Number, default: 0 }, // V2: Number of behavioral insights
-      },
-      subjective: {
-        textLength: { type: Number },
-        wordCount: { type: Number }, // V2: Word count for text analysis
-        relevanceScore: { type: Number, min: 0, max: 1 }, // V2: Relevance score
-        contextualQuality: { type: String }, // V2: Contextual quality assessment
-        behavioralInsights: { type: Number, default: 0 }, // V2: Number of behavioral insights
-      },
-      mcq: {
-        selectedOption: { type: String },
       },
     },
   },
@@ -549,27 +547,103 @@ CandidateAnswerAiResponseSchema.index({
 });
 
 /**
- * Pre-validation middleware to ensure required metrics are present based on response type
+ * Index for optimizing queries by type and candidateScreeningId
+ */
+CandidateAnswerAiResponseSchema.index({
+  type: 1,
+  candidateScreeningId: 1,
+});
+
+/**
+ * Pre-validation middleware to ensure type-specific fields are properly set
  * @function
  * @name preValidate
  * @memberof CandidateAnswerAiResponseSchema
- * @throws {Error} If required metrics are missing for the response type
  */
 CandidateAnswerAiResponseSchema.pre("validate", function (next) {
   const type = this.type;
-  const metrics = this.metrics || {};
-  if (type === "video" && !metrics.video) {
-    return next(new Error("Video metrics required for video type"));
+
+  // Clean up irrelevant fields based on type
+  if (type === "subjective") {
+    // Remove video/audio specific fields for subjective questions
+    this.isLipSync = undefined;
+    this.isOnlyOnePersonInVideo = undefined;
+    this.facialExpressions = undefined;
+    this.eyeMovement = undefined;
+    this.isOnlyOneVoiceInAudio = undefined;
+    this.voiceClarity = undefined;
+    this.multipleVoicesDetected = undefined;
+    this.transcription = undefined; // No transcription for text
+
+    // Clean up behavioral analysis
+    if (this.behavioralAnalysis) {
+      this.behavioralAnalysis.eyeMovementPattern = undefined;
+      this.behavioralAnalysis.speakingTone = undefined;
+      this.behavioralAnalysis.responseDelivery = undefined;
+      this.behavioralAnalysis.timingPatterns = undefined;
+    }
+  } else if (type === "video") {
+    // Remove subjective/audio specific fields for video questions
+    this.textLength = undefined;
+    this.wordCount = undefined;
+    this.relevanceScore = undefined;
+    this.isOnlyOneVoiceInAudio = undefined;
+    this.voiceClarity = undefined;
+    this.selectedOption = undefined;
+
+    // Clean up behavioral analysis
+    if (this.behavioralAnalysis) {
+      this.behavioralAnalysis.typingPattern = undefined;
+      this.behavioralAnalysis.inputBehavior = undefined;
+      this.behavioralAnalysis.compositionStyle = undefined;
+      this.behavioralAnalysis.focusConsistency = undefined;
+    }
+  } else if (type === "audio") {
+    // Remove subjective/video specific fields for audio questions
+    this.textLength = undefined;
+    this.wordCount = undefined;
+    this.relevanceScore = undefined;
+    this.isLipSync = undefined;
+    this.isOnlyOnePersonInVideo = undefined;
+    this.facialExpressions = undefined;
+    this.eyeMovement = undefined;
+    this.selectedOption = undefined;
+
+    // Clean up behavioral analysis
+    if (this.behavioralAnalysis) {
+      this.behavioralAnalysis.eyeMovementPattern = undefined;
+      this.behavioralAnalysis.typingPattern = undefined;
+      this.behavioralAnalysis.inputBehavior = undefined;
+      this.behavioralAnalysis.compositionStyle = undefined;
+      this.behavioralAnalysis.focusConsistency = undefined;
+    }
+  } else if (type === "mcq") {
+    // Remove all type-specific fields for MCQ questions
+    this.textLength = undefined;
+    this.wordCount = undefined;
+    this.relevanceScore = undefined;
+    this.isLipSync = undefined;
+    this.isOnlyOnePersonInVideo = undefined;
+    this.facialExpressions = undefined;
+    this.eyeMovement = undefined;
+    this.isOnlyOneVoiceInAudio = undefined;
+    this.voiceClarity = undefined;
+    this.multipleVoicesDetected = undefined;
+    this.transcription = undefined;
+
+    // Clean up behavioral analysis
+    if (this.behavioralAnalysis) {
+      this.behavioralAnalysis.eyeMovementPattern = undefined;
+      this.behavioralAnalysis.speakingTone = undefined;
+      this.behavioralAnalysis.responseDelivery = undefined;
+      this.behavioralAnalysis.timingPatterns = undefined;
+      this.behavioralAnalysis.typingPattern = undefined;
+      this.behavioralAnalysis.inputBehavior = undefined;
+      this.behavioralAnalysis.compositionStyle = undefined;
+      this.behavioralAnalysis.focusConsistency = undefined;
+    }
   }
-  if (type === "audio" && !metrics.audio) {
-    return next(new Error("Audio metrics required for audio type"));
-  }
-  if (type === "subjective" && !metrics.subjective) {
-    return next(new Error("Subjective metrics required for subjective type"));
-  }
-  if (type === "mcq" && !metrics.mcq) {
-    return next(new Error("MCQ metrics required for mcq type"));
-  }
+
   next();
 });
 
