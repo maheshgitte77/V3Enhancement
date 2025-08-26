@@ -8,11 +8,8 @@ const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
-const CandidateSchema = require("../model/Candidate");
-
 // Bind Candidate model from schema (avoid OverwriteModelError on hot reloads)
-const Candidate =
-  mongoose.models.Candidate || mongoose.model("Candidate", CandidateSchema);
+const Candidate = require("../model/Candidate");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -319,111 +316,161 @@ const addToJobApplication = async (req, res) => {
     try {
       // Also upsert into Candidate collection
       const candidateBulkOps = recordsToAdd
-        .filter((r) => r?.email)
+        .filter((r) => r?.email && r.email.trim())
         .map((record) => {
-          const toArray = (val) =>
-            Array.isArray(val)
-              ? val
-              : typeof val === "string"
-                ? val
+          try {
+            const toArray = (val) => {
+              if (!val) return undefined;
+              if (Array.isArray(val)) return val;
+              if (typeof val === "string") {
+                return val
                   .split(",")
                   .map((s) => s.trim())
-                  .filter(Boolean)
-                : undefined;
+                  .filter(Boolean);
+              }
+              return undefined;
+            };
 
-          const safeDate = (val) => {
-            if (!val) return undefined;
-            const d = new Date(val);
-            return isNaN(d.getTime()) ? undefined : d;
-          };
+            const safeDate = (val) => {
+              if (!val) return undefined;
+              try {
+                const d = new Date(val);
+                return isNaN(d.getTime()) ? undefined : d;
+              } catch (e) {
+                return undefined;
+              }
+            };
 
-          const normalizeSalary = (val, currencyFallback) => {
-            if (val === undefined || val === null || val === "") return undefined;
-            if (typeof val === "object") {
-              const obj = {};
-              if (typeof val.currency === "string") obj.currency = val.currency;
-              if (typeof val.salary === "number") obj.salary = val.salary;
-              return Object.keys(obj).length ? obj : undefined;
+            const normalizeSalary = (val, currencyFallback) => {
+              if (val === undefined || val === null || val === "") return undefined;
+              try {
+                if (typeof val === "object" && val !== null) {
+                  const obj = {};
+                  if (typeof val.currency === "string" && val.currency.trim()) {
+                    obj.currency = val.currency.trim();
+                  }
+                  if (typeof val.salary === "number" && !isNaN(val.salary)) {
+                    obj.salary = val.salary;
+                  }
+                  return Object.keys(obj).length ? obj : undefined;
+                }
+                const num = Number(val);
+                if (isNaN(num)) return undefined;
+                return { currency: currencyFallback || "INR", salary: num };
+              } catch (e) {
+                return undefined;
+              }
+            };
+
+            const experience = record.experience && typeof record.experience === "object"
+              ? {
+                years: Number(record.experience.years) || undefined,
+                months: Number(record.experience.months) || undefined,
+              }
+              : undefined;
+
+            // Validate and clean the email
+            const email = record.email?.toLowerCase()?.trim();
+            if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+              console.warn(`Invalid email for candidate: ${record.email}`);
+              return null; // Skip this record
             }
-            const num = Number(val);
-            if (isNaN(num)) return undefined;
-            return { currency: currencyFallback || "INR", salary: num };
-          };
 
-          const experience = record.experience && typeof record.experience === "object"
-            ? {
-              years: Number(record.experience.years) || undefined,
-              months: Number(record.experience.months) || undefined,
+            const candidateDoc = {
+              name: record.name?.trim() || undefined,
+              email: email,
+              mobile: record.mobile && typeof record.mobile === "object" ? {
+                countryCode: record.mobile.countryCode?.trim() || "+91",
+                number: record.mobile.number?.trim() || undefined,
+              } : undefined,
+              gender: record.gender?.trim() || undefined,
+              dateOfBirth: safeDate(record.dateOfBirth),
+              address: record.address?.trim() || undefined,
+              city: record.city?.trim() || undefined,
+              state: record.state?.trim() || undefined,
+              country: record.country?.trim() || undefined,
+              zipCode: record.zipCode?.trim() || undefined,
+              experience,
+              portfolio: record.portfolio || undefined,
+              resumeFileId: record.resumeFileId || undefined,
+              profilePictureFileId: record.profilePictureFileId || undefined,
+              skills: Array.isArray(record.skills) ? record.skills : undefined,
+              additionalSkills: Array.isArray(record.additionalSkills) ? record.additionalSkills : undefined,
+              educationDetails: Array.isArray(record.educationDetails) ? record.educationDetails : undefined,
+              workExperience: Array.isArray(record.workExperience) ? record.workExperience : undefined,
+              certifications: Array.isArray(record.certifications) ? record.certifications : undefined,
+              projects: Array.isArray(record.projects) ? record.projects : undefined,
+              languages: Array.isArray(record.languages) ? record.languages : undefined,
+              interests: Array.isArray(record.interests) ? record.interests : undefined,
+              hobbies: Array.isArray(record.hobbies) ? record.hobbies : undefined,
+              preferredLocations: toArray(record.preferredLocations),
+              preferredJobType: toArray(record.preferredJobType),
+              preferredWorkStyle: toArray(record.preferredWorkStyle),
+              preferredWorkShift: toArray(record.preferredWorkShift),
+              preferredJobRole: toArray(record.preferredJobRole),
+              preferredSalary: normalizeSalary(
+                record.preferredSalary ?? record.expectedSalary,
+                record.currency
+              ),
+              currentSalary: normalizeSalary(record.currentSalary, record.currency),
+              willingnessToRelocate: record.willingnessToRelocate?.trim() || undefined,
+              workAuthorization: record.workAuthorization?.trim() || undefined,
+              offersInHand: record.offersInHand?.trim() || undefined,
+              noticePeriod: record.noticePeriod !== undefined && record.noticePeriod !== null && record.noticePeriod !== ""
+                ? Number(record.noticePeriod)
+                : undefined,
+              expectedJoiningDate: safeDate(record.expectedJoiningDate),
+              servingNoticePeriod: record.servingNoticePeriod?.trim() || undefined,
+              preferredCompanySize: record.preferredCompanySize?.trim() || undefined,
+              preferredCompanyType: record.preferredCompanyType?.trim() || undefined,
+              socials: record.socials || undefined,
+              resumeSummary: record.resumeSummary?.trim() || undefined,
+              source: record.candidateType?.trim() || record.source?.trim() || undefined,
+            };
+
+            // Remove undefined and null fields to keep insert clean
+            Object.keys(candidateDoc).forEach((k) => {
+              if (candidateDoc[k] === undefined || candidateDoc[k] === null) {
+                delete candidateDoc[k];
+              }
+            });
+
+            // Ensure we have at least name and email
+            if (!candidateDoc.name || !candidateDoc.email) {
+              console.warn(`Missing required fields for candidate: ${record.email}`);
+              return null; // Skip this record
             }
-            : undefined;
 
-          const candidateDoc = {
-            name: record.name,
-            email: record.email?.toLowerCase(),
-            mobile: record.mobile,
-            gender: record.gender,
-            dateOfBirth: safeDate(record.dateOfBirth),
-            address: record.address,
-            city: record.city,
-            state: record.state,
-            country: record.country,
-            zipCode: record.zipCode,
-            experience,
-            portfolio: record.portfolio,
-            resumeFileId: record.resumeFileId,
-            profilePictureFileId: record.profilePictureFileId,
-            skills: record.skills,
-            additionalSkills: record.additionalSkills,
-            educationDetails: record.educationDetails,
-            workExperience: record.workExperience,
-            certifications: record.certifications,
-            projects: record.projects,
-            languages: record.languages,
-            interests: record.interests,
-            hobbies: record.hobbies,
-            preferredLocations: toArray(record.preferredLocations) || record.preferredLocations,
-            preferredJobType: toArray(record.preferredJobType) || record.preferredJobType,
-            preferredWorkStyle: toArray(record.preferredWorkStyle) || record.preferredWorkStyle,
-            preferredWorkShift: toArray(record.preferredWorkShift) || record.preferredWorkShift,
-            preferredJobRole: toArray(record.preferredJobRole) || record.preferredJobRole,
-            preferredSalary: normalizeSalary(
-              record.preferredSalary ?? record.expectedSalary,
-              record.currency
-            ),
-            currentSalary: normalizeSalary(record.currentSalary, record.currency),
-            willingnessToRelocate: record.willingnessToRelocate,
-            workAuthorization: record.workAuthorization,
-            offersInHand: record.offersInHand,
-            noticePeriod:
-              record.noticePeriod === undefined || record.noticePeriod === null || record.noticePeriod === ""
-                ? undefined
-                : Number(record.noticePeriod),
-            expectedJoiningDate: safeDate(record.expectedJoiningDate),
-            servingNoticePeriod: record.servingNoticePeriod,
-            preferredCompanySize: record.preferredCompanySize,
-            preferredCompanyType: record.preferredCompanyType,
-            socials: record.socials,
-            resumeSummary: record.resumeSummary,
-            source: record.candidateType || record.source,
-          };
-
-          // Remove undefined fields to keep insert clean
-          Object.keys(candidateDoc).forEach((k) => {
-            if (candidateDoc[k] === undefined) delete candidateDoc[k];
-          });
-
-          return {
-            updateOne: {
-              filter: { email: candidateDoc.email },
-              // Don't overwrite existing candidate profiles; create if missing
-              update: { $setOnInsert: candidateDoc },
-              upsert: true,
-            },
-          };
-        });
+            return {
+              updateOne: {
+                filter: { email: candidateDoc.email },
+                // Update existing candidate profiles or create if missing
+                update: { $set: candidateDoc },
+                upsert: true,
+              },
+            };
+          } catch (recordError) {
+            console.error(`Error processing candidate record for ${record.email}:`, recordError.message);
+            return null; // Skip this record
+          }
+        })
+        .filter(Boolean); // Remove null entries
 
       if (candidateBulkOps.length > 0) {
-        await Candidate.bulkWrite(candidateBulkOps);
+        try {
+          const result = await Candidate.bulkWrite(candidateBulkOps);
+          console.log(`Successfully processed ${result.upsertedCount || 0} new candidates and updated ${result.modifiedCount || 0} existing candidates`);
+        } catch (bulkWriteError) {
+          console.error("Error in bulk write operation:", bulkWriteError.message);
+          // Try individual operations as fallback
+          for (const op of candidateBulkOps) {
+            try {
+              await Candidate.bulkWrite([op]);
+            } catch (individualError) {
+              console.error(`Failed to process individual candidate operation:`, individualError.message);
+            }
+          }
+        }
       }
     } catch (error) {
       console.error("Error adding to Candidate collection:", error.message, error.stack);
