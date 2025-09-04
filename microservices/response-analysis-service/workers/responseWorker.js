@@ -1098,6 +1098,42 @@ const processScreening = async (screeningData) => {
       }
     }
 
+    // V0: Collect all unique languages used by candidate across all questions
+    const languagesUsedSet = new Set();
+
+    // Collect languages from AI responses
+    if (aiResponses && aiResponses.length > 0) {
+      aiResponses.forEach((response) => {
+        if (
+          response.languageDetection &&
+          response.languageDetection.languages
+        ) {
+          response.languageDetection.languages.forEach((language) => {
+            if (
+              language &&
+              language.trim() !== "" &&
+              language !== "Processing Failed" &&
+              language !== "Unknown"
+            ) {
+              languagesUsedSet.add(language.trim());
+            }
+          });
+        }
+      });
+    }
+
+    // Convert set to array and ensure we have at least English as default
+    const languagesUsedArray = Array.from(languagesUsedSet);
+    if (languagesUsedArray.length === 0) {
+      languagesUsedArray.push("English");
+    }
+
+    logger.info("V0: Collected languages used by candidate", {
+      candidateScreeningId,
+      languagesUsed: languagesUsedArray,
+      totalResponses: aiResponses.length,
+    });
+
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -1108,6 +1144,7 @@ const processScreening = async (screeningData) => {
           problemSolvingAbility: parsedResponse.problemSolvingAbility,
           fitScorePointers: parsedResponse.fitScorePointers,
           candidateFitScore,
+          languagesUsed: languagesUsedArray,
           updatedAt: new Date(),
         },
       }

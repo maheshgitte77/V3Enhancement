@@ -441,6 +441,12 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    languagesUsed: {
+      type: [String],
+      default: [],
+      description:
+        "Set of all languages detected across all candidate responses",
+    },
   },
   {
     strict: false,
