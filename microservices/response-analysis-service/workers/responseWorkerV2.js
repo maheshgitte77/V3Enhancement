@@ -40,6 +40,7 @@ const winston = require("winston");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
+const { ObjectId } = require("mongoose").Types;
 
 dotenv.config();
 
@@ -1540,12 +1541,18 @@ You are an advanced AI evaluator using BALANCED & CONTEXT-AWARE analysis. Your g
 
 **CRITICAL: READING DETECTION IS PRIMARY FOCUS - DO NOT MISS OBVIOUS CASES**
 Flag cheating when strong evidence exists OR any extended reading patterns (over 3 seconds) with context:
-- **PRIMARY FOCUS**: Detect candidates reading from external sources (phones, notes, screens, papers)
-- **Key Reading Indicators**: ANY sustained downward/off-screen looking (>5 seconds), repeated glances to same location, systematic eye patterns
-- **Reading Eye Patterns**: Looking down/away from camera consistently, alternating between source and camera, eyes tracking text
-- **Reading Speech Patterns**: Word repetitions ("from from", "other other"), hesitations mid-sentence, unnatural pauses
-- **Content vs Delivery Mismatch**: High technical accuracy with poor delivery flow, stuttering on complex terms
-- **Timing Clues**: Long thinking pauses followed by accurate technical delivery
+
+**SPECIAL FOCUS FOR AUDIO/VIDEO QUESTIONS:**
+- **Audio Questions**: Focus on speech patterns, word repetitions, unnatural pauses, reading rhythm vs natural speech
+- **Video Questions**: Focus on eye movement patterns, looking down/away from camera, alternating between source and camera
+- **Both Types**: Look for content-delivery mismatches (high accuracy with poor flow)
+
+- **PRIMARY FOCUS**: Detect candidates reading from external sources (phones, notes, screens, papers, scripts)
+- **Key Reading Indicators**: ANY sustained downward/off-screen looking (>3 seconds), repeated glances to same location, systematic eye patterns
+- **Reading Eye Patterns**: Looking down/away from camera consistently, alternating between source and camera, eyes tracking text, frequent downward glances
+- **Reading Speech Patterns**: Word repetitions ("from from", "other other"), hesitations mid-sentence, unnatural pauses, reading rhythm vs natural speech
+- **Content vs Delivery Mismatch**: High technical accuracy with poor delivery flow, stuttering on complex terms, perfect answers with hesitant delivery
+- **Timing Clues**: Long thinking pauses followed by accurate technical delivery, consistent patterns of pause-then-perfect-answer
 
 **CRITICAL: DO NOT FLAG NORMAL BEHAVIORS:**
 - Brief face touching, nose scratching, chin resting (these are normal human gestures)
@@ -1578,15 +1585,16 @@ Flag cheating when strong evidence exists OR any extended reading patterns (over
 - Content Accuracy: 100% textbook accuracy without understanding demonstration, missing practical application knowledge
 - Response Timing: Long pauses followed by rapid, accurate delivery
 
-**DETECTION CONFIDENCE SCORING (READING-FOCUSED APPROACH):**
-- 95-100%: Device visible OR sustained off-screen looking (>10 seconds) + word repetitions + high technical accuracy with poor delivery
-- 90-94%: Sustained downward/off-screen looking (>8 seconds) + word repetitions ("from from", "other other") + technical accuracy mismatch
-- 80-89%: Extended periods looking away from camera (>6 seconds) + delivery problems with good technical content
-- 70-79%: Consistent "alternating" eye patterns + word repetitions OR high accuracy with hesitations
-- 60-69%: Sustained off-screen looking (>5 seconds) + delivery inconsistencies
-- 50-59%: Moderate off-screen looking patterns with some delivery concerns
-- 40-49%: Brief reading indicators requiring additional validation
-- 20-39%: Minor patterns that could be normal thinking behavior
+**DETECTION CONFIDENCE SCORING (READING-FOCUSED APPROACH - ENHANCED SENSITIVITY):**
+- 95-100%: Device visible OR sustained off-screen looking (>8 seconds) + word repetitions + high technical accuracy with poor delivery
+- 90-94%: Sustained downward/off-screen looking (>6 seconds) + word repetitions ("from from", "other other") + technical accuracy mismatch
+- 80-89%: Extended periods looking away from camera (>5 seconds) + delivery problems with good technical content
+- 70-79%: Consistent "alternating" eye patterns + word repetitions OR high accuracy with hesitations OR continuous looking down (>4 seconds)
+- 60-69%: Sustained off-screen looking (>4 seconds) + delivery inconsistencies OR frequent downward glances
+- 50-59%: Moderate off-screen looking patterns (>3 seconds) with some delivery concerns OR reading rhythm detected
+- 40-49%: Brief but repeated reading indicators (multiple 3+ second patterns) requiring validation
+- 30-39%: Consistent patterns that could indicate reading behavior
+- 20-29%: Minor patterns that could be normal thinking behavior
 - 0-19%: Clear normal interview behavior with natural eye contact
 
 **CRITICAL: Default to 0% confidence unless you have CLEAR, SUSTAINED evidence of actual cheating behavior. Normal human behaviors should NEVER be flagged as cheating.**
@@ -1680,120 +1688,120 @@ ${
 }
 
 ${
-  normalizedType === "subjective" && responseData.typingPatterns
+  normalizedType === "subjective" && responseData.typingAnalysis
     ? `
 **TYPING ANALYSIS DATA PROVIDED (PHASE 1 - ENHANCED FORMAT):**
 ${
-  responseData.typingPatterns.riskScore
+  responseData.typingAnalysis.riskScore
     ? `
 **Frontend Analysis Results:**
-- Overall Risk Score: ${responseData.typingPatterns.riskScore}/100
+- Overall Risk Score: ${responseData.typingAnalysis.riskScore}/100
 - Session Duration: ${Math.round(
-        (responseData.typingPatterns.totalDuration || 0) / 1000
+        (responseData.typingAnalysis.totalDuration || 0) / 1000
       )} seconds
-- Total Characters: ${responseData.typingPatterns.totalCharacters || 0}
-- Keystroke Count: ${responseData.typingPatterns.keystrokeCount || 0}
+- Total Characters: ${responseData.typingAnalysis.totalCharacters || 0}
+- Keystroke Count: ${responseData.typingAnalysis.keystrokeCount || 0}
 
 **Copy-Paste Analysis:**
-- Paste Events: ${responseData.typingPatterns.pasteEventCount || 0}
+- Paste Events: ${responseData.typingAnalysis.pasteEventCount || 0}
 - Paste Percentage: ${
-        responseData.typingPatterns.pasteAnalysis?.pastePercentage || 0
+        responseData.typingAnalysis.pasteAnalysis?.pastePercentage || 0
       }%
 - Risk Level: ${
-        responseData.typingPatterns.pasteAnalysis?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.pasteAnalysis?.riskLevel?.toUpperCase() ||
         "LOW"
       }
 - Has Code Patterns: ${
-        responseData.typingPatterns.pasteAnalysis?.hasCodePatterns
+        responseData.typingAnalysis.pasteAnalysis?.hasCodePatterns
           ? "YES"
           : "NO"
       }
 - Has Formatting: ${
-        responseData.typingPatterns.pasteAnalysis?.hasFormatting ? "YES" : "NO"
+        responseData.typingAnalysis.pasteAnalysis?.hasFormatting ? "YES" : "NO"
       }
 
 **Typing Speed Analysis:**
 - Average Speed: ${
-        responseData.typingPatterns.typingAnalysis?.averageTypingSpeed || 0
+        responseData.typingAnalysis.typingAnalysis?.averageTypingSpeed || 0
       } chars/sec
 - Typing Bursts: ${
-        responseData.typingPatterns.typingAnalysis?.typingBursts || 0
+        responseData.typingAnalysis.typingAnalysis?.typingBursts || 0
       }
 - Speed Risk Level: ${
-        responseData.typingPatterns.typingAnalysis?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.typingAnalysis?.riskLevel?.toUpperCase() ||
         "LOW"
       }
 
 **Focus & Attention Analysis:**
 - Focus Loss Count: ${
-        responseData.typingPatterns.focusAnalysis?.focusLossCount || 0
+        responseData.typingAnalysis.focusAnalysis?.focusLossCount || 0
       }
 - Focus Risk Level: ${
-        responseData.typingPatterns.focusAnalysis?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.focusAnalysis?.riskLevel?.toUpperCase() ||
         "LOW"
       }
 
 **Quality Analysis:**
 - Words per Minute: ${
-        responseData.typingPatterns.qualityAnalysis?.averageWordsPerMinute || 0
+        responseData.typingAnalysis.qualityAnalysis?.averageWordsPerMinute || 0
       }
 - Quality Score: ${
-        responseData.typingPatterns.qualityAnalysis?.qualityScore || 0
+        responseData.typingAnalysis.qualityAnalysis?.qualityScore || 0
       }
 - Quality Risk Level: ${
-        responseData.typingPatterns.qualityAnalysis?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.qualityAnalysis?.riskLevel?.toUpperCase() ||
         "LOW"
       }
 
 **Global Event Analysis (CRITICAL FOR CHEATING DETECTION):**
 - Global Copy Count: ${
-        responseData.typingPatterns.globalEventAnalysis?.globalCopyCount || 0
+        responseData.typingAnalysis.globalEventAnalysis?.globalCopyCount || 0
       }
 - Question Copy Count: ${
-        responseData.typingPatterns.globalEventAnalysis?.questionCopyCount || 0
+        responseData.typingAnalysis.globalEventAnalysis?.questionCopyCount || 0
       }
 - External Interactions: ${
-        responseData.typingPatterns.globalEventAnalysis
+        responseData.typingAnalysis.globalEventAnalysis
           ?.externalInteractionCount || 0
       }
 - Has Question Copying: ${
-        responseData.typingPatterns.globalEventAnalysis?.hasQuestionCopying
+        responseData.typingAnalysis.globalEventAnalysis?.hasQuestionCopying
           ? "YES - CRITICAL"
           : "NO"
       }
 - High Risk Copying: ${
-        responseData.typingPatterns.globalEventAnalysis?.hasHighRiskCopying
+        responseData.typingAnalysis.globalEventAnalysis?.hasHighRiskCopying
           ? "YES - CRITICAL"
           : "NO"
       }
 - Suspicious Patterns: ${
-        responseData.typingPatterns.globalEventAnalysis
+        responseData.typingAnalysis.globalEventAnalysis
           ?.suspiciousPatternCount || 0
       }
 - Global Risk Level: ${
-        responseData.typingPatterns.globalEventAnalysis?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.globalEventAnalysis?.riskLevel?.toUpperCase() ||
         "LOW"
       }
 
 **Copy-Paste Correlations (ADVANCED CHEATING DETECTION):**
 - Total Correlations: ${
-        responseData.typingPatterns.copyPasteCorrelations?.totalCorrelations ||
+        responseData.typingAnalysis.copyPasteCorrelations?.totalCorrelations ||
         0
       }
 - Question Paste Count: ${
-        responseData.typingPatterns.copyPasteCorrelations?.questionPasteCount ||
+        responseData.typingAnalysis.copyPasteCorrelations?.questionPasteCount ||
         0
       }
 - Average Time Between: ${
-        responseData.typingPatterns.copyPasteCorrelations?.averageTimeBetween
+        responseData.typingAnalysis.copyPasteCorrelations?.averageTimeBetween
           ? Math.round(
-              responseData.typingPatterns.copyPasteCorrelations
+              responseData.typingAnalysis.copyPasteCorrelations
                 .averageTimeBetween / 1000
             ) + "s"
           : "N/A"
       }
 - Correlation Risk Level: ${
-        responseData.typingPatterns.copyPasteCorrelations?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.copyPasteCorrelations?.riskLevel?.toUpperCase() ||
         "LOW"
       }
 
@@ -1822,22 +1830,22 @@ This typing analysis data should be considered alongside content quality. A cand
 The typing analysis provides behavioral evidence that should SIGNIFICANTLY influence your cheating confidence score.
       }
 - Varied Vocabulary: ${
-        responseData.typingPatterns.qualityAnalysis?.hasVariedVocabulary
+        responseData.typingAnalysis.qualityAnalysis?.hasVariedVocabulary
           ? "YES"
           : "NO"
       }
 - Quality Risk Level: ${
-        responseData.typingPatterns.qualityAnalysis?.riskLevel?.toUpperCase() ||
+        responseData.typingAnalysis.qualityAnalysis?.riskLevel?.toUpperCase() ||
         "LOW"
       }`
     : `
 **Legacy Typing Data:**
-- Keystroke Count: ${responseData.typingPatterns.keystrokes?.length || 0}
+- Keystroke Count: ${responseData.typingAnalysis.keystrokes?.length || 0}
 - Paste Events: ${
-        responseData.typingPatterns.pasteEvents?.length || 0
+        responseData.typingAnalysis.pasteEvents?.length || 0
       } paste operations detected
 - Total Duration: ${Math.round(
-        (responseData.typingPatterns.totalTypingDuration || 0) / 1000
+        (responseData.typingAnalysis.totalTypingDuration || 0) / 1000
       )} seconds`
 }
 
@@ -2269,7 +2277,6 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
       asPerExperience:
         "Unable to evaluate technical skills due to lack of response content",
     },
-    isCopiedFromAITool: false,
     isCopiedFromAnyWebsite: false,
     languageDetection: { languages: ["English"], percentageWise: ["100%"] },
     overallContentQuality: "Poor - No meaningful content provided",
@@ -2378,6 +2385,9 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
   };
 
   transformed.overallRating = cleanRating(transformed.overallRating);
+  transformed.communicationRating = cleanRating(
+    transformed.communicationRating
+  );
   transformed.confidenceLevel = cleanRating(transformed.confidenceLevel);
   transformed.responseCoherence = cleanRating(transformed.responseCoherence);
   transformed.environmentalSuitability = cleanRating(
@@ -2529,8 +2539,16 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     : defaultResponse.behavioralInsights;
   transformed.responseQuality =
     parsedAnalysis.responseQuality || defaultResponse.responseQuality;
-  transformed.cheatingConfidence =
+  // Ensure cheatingConfidence is always a valid number
+  const rawCheatingConfidence =
     parsedAnalysis.cheatingConfidence || defaultResponse.cheatingConfidence;
+  transformed.cheatingConfidence =
+    typeof rawCheatingConfidence === "number" && !isNaN(rawCheatingConfidence)
+      ? rawCheatingConfidence
+      : transformed.isCheatingDetected
+      ? 75
+      : 0;
+
   transformed.contextualFactors = Array.isArray(
     parsedAnalysis.contextualFactors
   )
@@ -4185,6 +4203,9 @@ const processResponse = async (responseData) => {
               // CRITICAL FIX: Include typing analysis results
               typingAnalysis: processingContext.typingAnalysis,
               hasTypingAnalysis: processingContext.hasTypingAnalysis,
+              // CRITICAL FIX: Include copyPasteAnalysis for video/audio responses
+              copyPasteAnalysis: responseData.copyPasteAnalysis,
+              hasCopyPasteAnalysis: !!responseData.copyPasteAnalysis,
             }
           );
 
@@ -4803,10 +4824,6 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
         detected: "Multiple People Present",
         notDetected: "Person Detection Completed - Single person detected",
       },
-      CopiedFromAITool: {
-        detected: "AI Tool Usage",
-        notDetected: "AI Tool Detection Completed - No AI tool usage found",
-      },
       CopiedFromWebsite: {
         detected: "Web Content Copied",
         notDetected:
@@ -4858,11 +4875,43 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
         notDetected:
           "Question Copying Analysis Completed - No question copying detected",
       },
+      FullScreenExit: {
+        detected: "Full Screen Exit Detected",
+        notDetected:
+          "Full Screen Analysis Completed - No full screen exits detected",
+      },
     };
 
     // V2: Enhanced flag processing with comprehensive detection logic
-    const processEnhancedFlags = (analysis, responseData, type) => {
-      const flagResults = [];
+    const processEnhancedFlags = (
+      analysis,
+      responseData,
+      type,
+      existingAnalysis = null
+    ) => {
+      // Initialize flag map for efficient updates - similar to webcam service
+      const flagMap = new Map();
+
+      // If existing analysis exists, initialize map with those flags
+      if (existingAnalysis?.flagResults) {
+        logger.info("V2: Preserving existing flag analysis", {
+          candidateScreeningId: responseData.candidateScreeningId,
+          existingFlagsCount: existingAnalysis.flagResults.length,
+          existingFlags: existingAnalysis.flagResults.map((f) => ({
+            flag: f.flag,
+            detected: f.detected,
+          })),
+        });
+
+        existingAnalysis.flagResults.forEach((flag) => {
+          // Only create new ObjectId if missing
+          const flagWithId = flag._id
+            ? flag
+            : { ...flag, _id: new ObjectId().toString() };
+          flagMap.set(flag.flag, flagWithId);
+        });
+      }
+
       const flagsToCheck = [];
 
       // Determine which flags to check based on response type
@@ -4872,7 +4921,8 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           "LipSyncMismatch",
           "MultiplePersonsDetected",
           "ReadingFromExternal",
-          "SuspiciousPatterns"
+          "SuspiciousPatterns",
+          "MobileDeviceDetected"
         );
       } else if (type === "audio") {
         flagsToCheck.push(
@@ -4881,13 +4931,7 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           "SuspiciousPatterns"
         );
       } else if (type === "subjective") {
-        flagsToCheck.push(
-          "CopyPasteBehavior",
-          "FocusLoss",
-          "TabSwitching",
-          "QuestionCopying",
-          "ResearchBehavior"
-        );
+        flagsToCheck.push("CopyPasteBehavior", "FocusLoss", "ResearchBehavior");
 
         // DEBUG: Log typing data availability for subjective responses
         logger.info(
@@ -4895,7 +4939,6 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           {
             candidateScreeningId: responseData.candidateScreeningId,
             hasTypingAnalysis: !!responseData.typingAnalysis,
-            hasTypingPatterns: !!responseData.typingPatterns,
             pasteEventCount: responseData.typingAnalysis?.pasteEventCount || 0,
             pastePercentage:
               responseData.typingAnalysis?.pasteAnalysis?.pastePercentage || 0,
@@ -4912,13 +4955,27 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       // Always check content-based flags
       flagsToCheck.push(
         "AICopied",
-        "CopiedFromAITool",
         "CopiedFromWebsite",
-        "ExternalAssistance"
+        "ExternalAssistance",
+        "TabSwitching",
+        "QuestionCopying",
+        "FullScreenExit"
       );
 
-      // Check device-related flags
-      flagsToCheck.push("MobileDeviceDetected");
+      // Helper function to find and update or add flag - similar to webcam service
+      const updateOrAddFlag = (flagName, detected, message) => {
+        const startTime = new Date().toISOString();
+        const existingFlag = flagMap.get(flagName);
+        const flagData = {
+          flag: flagName,
+          detected,
+          message,
+          _id: existingFlag?._id || new ObjectId().toString(),
+          lastUpdated: startTime,
+        };
+
+        flagMap.set(flagName, flagData);
+      };
 
       // Process each flag
       flagsToCheck.forEach((flagKey) => {
@@ -4928,6 +4985,23 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           responseData,
           type
         );
+
+        // Log new flag detections for verification
+        if (
+          isDetected &&
+          ["FullScreenExit", "TabSwitching", "QuestionCopying"].includes(
+            flagKey
+          )
+        ) {
+          logger.info(`V2: Enhanced flag detection triggered`, {
+            flag: flagKey,
+            candidateScreeningId: responseData.candidateScreeningId,
+            type: type,
+            fullScreenExitCount: responseData.fullScreenExitCount || "",
+            tabSwitchCount: responseData.tabSwitchCount || "",
+            hasCopyPasteAnalysis: !!responseData.copyPasteAnalysis,
+          });
+        }
 
         // DEBUG: Log flag detection results for debugging
         if (
@@ -4947,17 +5021,104 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           });
         }
 
+        // DEBUG: Log QuestionCopying flag detection for all types (especially video/audio)
+        if (flagKey === "QuestionCopying") {
+          logger.info(`V2 Flag Detection: ${flagKey} result`, {
+            candidateScreeningId: responseData.candidateScreeningId,
+            flagKey,
+            isDetected,
+            type,
+            // Typing analysis data (subjective)
+            hasTypingAnalysis: !!responseData.typingAnalysis,
+            typingQuestionCopying:
+              responseData.typingAnalysis?.globalEventAnalysis
+                ?.hasQuestionCopying || false,
+            typingQuestionCopyCount:
+              responseData.typingAnalysis?.globalEventAnalysis
+                ?.questionCopyCount || 0,
+            // Copy-paste analysis data (video/audio)
+            hasCopyPasteAnalysis: !!responseData.copyPasteAnalysis,
+            copyPasteAnalysisType: typeof responseData.copyPasteAnalysis,
+            copyPasteQuestionCopying:
+              responseData.copyPasteAnalysis?.hasQuestionCopying || false,
+            copyPasteQuestionCopyCount:
+              responseData.copyPasteAnalysis?.questionCopyCount || 0,
+            copyPasteFullQuestionCopyCount:
+              responseData.copyPasteAnalysis?.fullQuestionCopyCount || 0,
+            copyBreakdownQuestionCount:
+              responseData.copyPasteAnalysis?.copyBreakdown?.questionCopies
+                ?.count || 0,
+            copyBreakdownFullQuestionCount:
+              responseData.copyPasteAnalysis?.copyBreakdown?.fullQuestionCopies
+                ?.count || 0,
+            // CRITICAL FIX: Log additional field variations that might contain the data
+            altCopyPasteQuestionCopyCount:
+              responseData.copyPasteAnalysis?.copyPasteQuestionCopyCount || 0,
+            altCopyBreakdownQuestionCount:
+              responseData.copyPasteAnalysis?.copyBreakdownQuestionCount || 0,
+            explicitCopyPasteQuestionCopying:
+              responseData.copyPasteAnalysis?.copyPasteQuestionCopying || false,
+            // Indicators
+            hasIndicators: analysis.cheatingIndicators?.length > 0,
+            indicatorsCount: analysis.cheatingIndicators?.length || 0,
+            questionCopyIndicators:
+              analysis.cheatingIndicators?.filter(
+                (indicator) =>
+                  indicator.toLowerCase().includes("question copy") ||
+                  indicator.toLowerCase().includes("copying question") ||
+                  indicator.toLowerCase().includes("question text")
+              ) || [],
+          });
+        }
+
         const message =
           flagMapping[flagKey][isDetected ? "detected" : "notDetected"];
 
-        flagResults.push({
-          flag: flagKey,
-          detected: isDetected,
-          message: message,
-        });
+        // Use the updateOrAddFlag helper to maintain existing flags
+        updateOrAddFlag(flagKey, isDetected, message);
+      });
+
+      // Convert Map to array and validate - similar to webcam service
+      const flagResults = Array.from(flagMap.values());
+      if (flagResults.length === 0) {
+        throw new Error("No flags were processed");
+      }
+
+      // Log final flag processing results
+      const detectedCount = flagResults.filter((f) => f.detected).length;
+      logger.info("V2: Flag processing completed with preservation", {
+        candidateScreeningId: responseData.candidateScreeningId,
+        totalFlags: flagResults.length,
+        detectedFlags: detectedCount,
+        clearFlags: flagResults.length - detectedCount,
+        flagsProcessed: flagResults.map((f) => ({
+          flag: f.flag,
+          detected: f.detected,
+        })),
       });
 
       return flagResults;
+    };
+
+    // V2: Test function for flag detection (for debugging/validation)
+    const testFlagDetection = (testData) => {
+      const results = {};
+      const flags = ["FullScreenExit", "TabSwitching", "QuestionCopying"];
+
+      flags.forEach((flag) => {
+        try {
+          results[flag] = checkFlagDetection(
+            flag,
+            testData.analysis || {},
+            testData.responseData || {},
+            testData.type || "unknown"
+          );
+        } catch (error) {
+          results[flag] = { error: error.message };
+        }
+      });
+
+      return results;
     };
 
     // V2: Comprehensive flag detection logic
@@ -4987,40 +5148,96 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           );
 
         case "EyesMovement":
-          return (
+          // ENHANCED: More comprehensive eye movement detection
+          const hasSuspiciousEyeMovement =
             analysis.behavioralAnalysis?.eyeMovementPattern ===
               "Frequent downward glances" ||
             analysis.behavioralAnalysis?.eyeMovementPattern ===
               "Reading from external source detected" ||
-            analysis.cheatingIndicators?.some(
-              (indicator) =>
-                indicator.toLowerCase().includes("eye movement") ||
-                indicator.toLowerCase().includes("suspicious eye")
-            )
+            analysis.behavioralAnalysis?.eyeMovementPattern ===
+              "Limited camera engagement" || // NEW: Poor camera engagement
+            analysis.behavioralAnalysis?.eyeMovementPattern ===
+              "Varied behavior patterns observed"; // NEW: Inconsistent patterns can be suspicious
+
+          const hasEyeMovementIndicators = analysis.cheatingIndicators?.some(
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("eye movement") ||
+                lowerIndicator.includes("suspicious eye") ||
+                lowerIndicator.includes("looking down") ||
+                lowerIndicator.includes("downward") ||
+                lowerIndicator.includes("off-screen") ||
+                lowerIndicator.includes("alternating") ||
+                lowerIndicator.includes("glances") ||
+                lowerIndicator.includes("sustained") ||
+                lowerIndicator.includes("continuous") ||
+                lowerIndicator.includes("frequently")
+              );
+            }
+          );
+
+          // NEW: Check micro-behavioral eye movement analysis
+          const hasMicroEyeEvidence =
+            analysis.microAnalysis?.eyeMovement?.suspicionLevel > 0.3;
+
+          return (
+            hasSuspiciousEyeMovement ||
+            hasEyeMovementIndicators ||
+            hasMicroEyeEvidence
           );
 
         case "ReadingFromExternal":
-          // CRITICAL FIX: Enhanced reading detection to catch all reading patterns
+          // ENHANCED: More comprehensive reading detection to catch all reading patterns
           const hasReadingBehavior =
             analysis.behavioralAnalysis?.eyeMovementPattern ===
               "Reading from external source detected" ||
             analysis.behavioralAnalysis?.eyeMovementPattern ===
               "Frequent downward glances" ||
+            analysis.behavioralAnalysis?.eyeMovementPattern ===
+              "Limited camera engagement" || // NEW: This can indicate reading
             analysis.behavioralAnalysis?.responseDelivery ===
               "Reading word-for-word style" ||
+            analysis.behavioralAnalysis?.responseDelivery ===
+              "Structured presentation" || // NEW: Can indicate reading from notes
             analysis.behavioralAnalysis?.speakingTone ===
               "Reading rhythm detected" ||
+            analysis.behavioralAnalysis?.speakingTone === "Monotone delivery" || // NEW: Often indicates reading
             analysis.behavioralAnalysis?.timingPatterns ===
-              "Unnatural pauses before answers";
+              "Unnatural pauses before answers" ||
+            analysis.behavioralAnalysis?.timingPatterns ===
+              "Regular pauses before answers"; // NEW: Systematic pausing
 
           const hasReadingIndicators = analysis.cheatingIndicators?.some(
-            (indicator) =>
-              indicator.toLowerCase().includes("reading from external") ||
-              indicator.toLowerCase().includes("external source") ||
-              indicator.toLowerCase().includes("reading patterns")
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("reading from external") ||
+                lowerIndicator.includes("external source") ||
+                lowerIndicator.includes("reading patterns") ||
+                lowerIndicator.includes("reading behavior") ||
+                lowerIndicator.includes("looking down") ||
+                lowerIndicator.includes("downward") ||
+                lowerIndicator.includes("off-screen") ||
+                lowerIndicator.includes("alternating") ||
+                lowerIndicator.includes("continuous") ||
+                lowerIndicator.includes("sustained") ||
+                lowerIndicator.includes("word repetition") ||
+                lowerIndicator.includes("reading rhythm")
+              );
+            }
           );
 
-          return hasReadingBehavior || hasReadingIndicators;
+          // NEW: Check for micro-behavioral evidence of reading
+          const hasMicroReadingEvidence =
+            analysis.microAnalysis?.eyeMovement?.suspicionLevel > 0.3 ||
+            analysis.microAnalysis?.speaking?.suspicionLevel > 0.3;
+
+          return (
+            hasReadingBehavior ||
+            hasReadingIndicators ||
+            hasMicroReadingEvidence
+          );
 
         case "OtherRelevantNoise":
           return (
@@ -5033,14 +5250,38 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           );
 
         case "MultipleVoiceDetected":
-          return (
+          // ENHANCED: More comprehensive voice detection
+          const hasMultipleVoices =
             analysis.multipleVoicesDetected === true ||
-            analysis.isOnlyOneVoiceInAudio === false ||
-            analysis.cheatingIndicators?.some(
-              (indicator) =>
-                indicator.toLowerCase().includes("multiple voice") ||
-                indicator.toLowerCase().includes("voices")
-            )
+            analysis.isOnlyOneVoiceInAudio === false;
+
+          const hasVoiceIndicators = analysis.cheatingIndicators?.some(
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("multiple voice") ||
+                lowerIndicator.includes("voices") ||
+                lowerIndicator.includes("background voice") ||
+                lowerIndicator.includes("conversation") ||
+                lowerIndicator.includes("whisper") ||
+                lowerIndicator.includes("prompting") ||
+                lowerIndicator.includes("assistance") ||
+                lowerIndicator.includes("helper") ||
+                lowerIndicator.includes("coaching")
+              );
+            }
+          );
+
+          // NEW: Check background noise analysis for conversational assistance
+          const hasConversationalNoise =
+            analysis.backgroundNoise?.level === "high" &&
+            (analysis.backgroundNoise?.contextualImpact?.includes(
+              "conversation"
+            ) ||
+              analysis.backgroundNoise?.contextualImpact?.includes("voice"));
+
+          return (
+            hasMultipleVoices || hasVoiceIndicators || hasConversationalNoise
           );
 
         case "MultiplePersonsDetected":
@@ -5050,16 +5291,6 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
               (indicator) =>
                 indicator.toLowerCase().includes("multiple person") ||
                 indicator.toLowerCase().includes("people")
-            )
-          );
-
-        case "CopiedFromAITool":
-          return (
-            analysis.isCopiedFromAITool === true ||
-            analysis.cheatingIndicators?.some(
-              (indicator) =>
-                indicator.toLowerCase().includes("ai tool") ||
-                indicator.toLowerCase().includes("copied from ai")
             )
           );
 
@@ -5081,37 +5312,49 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           );
 
         case "CopyPasteBehavior":
-          // FIX: Correct data path - typingAnalysis instead of typingPatterns
-          const pasteCount =
-            responseData.typingAnalysis?.pasteEventCount ||
-            responseData.typingPatterns?.pasteEventCount ||
-            0;
+          // ENHANCED: More comprehensive copy-paste detection
+          const pasteCount = responseData.typingAnalysis?.pasteEventCount || 0;
           const pastePercentage =
-            responseData.typingAnalysis?.pasteAnalysis?.pastePercentage ||
-            responseData.typingPatterns?.pasteAnalysis?.pastePercentage ||
-            0;
+            responseData.typingAnalysis?.pasteAnalysis?.pastePercentage || 0;
+          const copyCount = responseData.typingAnalysis?.copyEventCount || 0;
 
-          // FIX: Lower thresholds for better detection - even 1 paste event with high percentage should be flagged
+          // ENHANCED: More sensitive thresholds for copy-paste detection
           const hasSignificantPasting =
-            (pasteCount >= 1 && pastePercentage >= 30) ||
+            (pasteCount >= 1 && pastePercentage >= 20) || // LOWERED: from 30% to 20%
             pasteCount >= 2 ||
-            pastePercentage >= 50;
+            pastePercentage >= 40 || // LOWERED: from 50% to 40%
+            copyCount >= 3; // NEW: Multiple copy events are suspicious
+
+          // NEW: Check for typing speed analysis that might indicate paste behavior
+          const hasTypingSpeedEvidence =
+            responseData.typingAnalysis?.typingSpeedAnalysis?.score > 0.6 ||
+            responseData.typingAnalysis?.typingBurstAnalysis?.score > 0.5;
 
           const hasPasteIndicatorEvidence = analysis.cheatingIndicators?.some(
-            (indicator) =>
-              indicator.toLowerCase().includes("copy-paste") ||
-              indicator.toLowerCase().includes("paste") ||
-              indicator.toLowerCase().includes("copying")
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("copy-paste") ||
+                lowerIndicator.includes("paste") ||
+                lowerIndicator.includes("copying") ||
+                lowerIndicator.includes("burst") ||
+                lowerIndicator.includes("typing speed") ||
+                lowerIndicator.includes("impossible") ||
+                lowerIndicator.includes("rapid")
+              );
+            }
           );
 
-          return hasSignificantPasting || hasPasteIndicatorEvidence;
+          return (
+            hasSignificantPasting ||
+            hasTypingSpeedEvidence ||
+            hasPasteIndicatorEvidence
+          );
 
         case "FocusLoss":
-          // FIX: Correct data path - typingAnalysis instead of typingPatterns
+          // Use typingAnalysis data path consistently
           const focusLoss =
-            responseData.typingAnalysis?.focusAnalysis?.focusLossCount ||
-            responseData.typingPatterns?.focusAnalysis?.focusLossCount ||
-            0;
+            responseData.typingAnalysis?.focusAnalysis?.focusLossCount || 0;
 
           // FIX: Lower threshold for better detection
           const hasSignificantFocusLoss = focusLoss >= 3;
@@ -5128,8 +5371,8 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
         case "TabSwitching":
           const tabSwitches = responseData.tabSwitchCount || 0;
 
-          // FIX: Lower threshold - even 1 tab switch should be flagged for subjective questions
-          // as it indicates potential external research
+          // Tab switching detection for all question types - any tab switch is suspicious
+          // as it indicates potential external research or assistance
           const hasTabSwitching = tabSwitches >= 1;
 
           const hasTabIndicatorEvidence = analysis.cheatingIndicators?.some(
@@ -5143,22 +5386,71 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           return hasTabSwitching || hasTabIndicatorEvidence;
 
         case "QuestionCopying":
-          // FIX: Correct data path - typingAnalysis instead of typingPatterns
+          // Handle both typingAnalysis (subjective) and copyPasteAnalysis (video/audio)
+          let hasQuestionCopying = false;
+
+          // For subjective questions - check typingAnalysis
           const questionCopying =
             responseData.typingAnalysis?.globalEventAnalysis
-              ?.hasQuestionCopying ||
-            responseData.typingPatterns?.globalEventAnalysis
-              ?.hasQuestionCopying ||
-            false;
+              ?.hasQuestionCopying || false;
 
           const questionCopyCount =
             responseData.typingAnalysis?.globalEventAnalysis
-              ?.questionCopyCount ||
-            responseData.typingPatterns?.globalEventAnalysis
-              ?.questionCopyCount ||
-            0;
+              ?.questionCopyCount || 0;
 
-          const hasQuestionCopying = questionCopying || questionCopyCount > 0;
+          // For video/audio questions - check copyPasteAnalysis
+          const copyPasteAnalysis = responseData.copyPasteAnalysis;
+          let copyPasteQuestionCopying = false;
+
+          if (copyPasteAnalysis && typeof copyPasteAnalysis === "object") {
+            // ENHANCED: More comprehensive check for question copying
+            const hasDirectQuestionCopying =
+              copyPasteAnalysis.hasQuestionCopying === true;
+            const hasFullQuestionCopying =
+              copyPasteAnalysis.hasFullQuestionCopying === true;
+
+            // CRITICAL FIX: Check multiple field name variations for question copy counts
+            const hasQuestionCopyCount =
+              (copyPasteAnalysis.questionCopyCount || 0) > 0 ||
+              (copyPasteAnalysis.copyPasteQuestionCopyCount || 0) > 0;
+            const hasFullQuestionCopyCount =
+              (copyPasteAnalysis.fullQuestionCopyCount || 0) > 0 ||
+              (copyPasteAnalysis.copyPasteFullQuestionCopyCount || 0) > 0;
+
+            // Check copyBreakdown structure with multiple field variations
+            const copyBreakdown = copyPasteAnalysis.copyBreakdown;
+            const hasQuestionCopiesInBreakdown =
+              copyBreakdown?.questionCopies?.count > 0 ||
+              (copyPasteAnalysis.copyBreakdownQuestionCount || 0) > 0;
+            const hasFullQuestionCopiesInBreakdown =
+              copyBreakdown?.fullQuestionCopies?.count > 0 ||
+              (copyPasteAnalysis.copyBreakdownFullQuestionCount || 0) > 0;
+
+            // CRITICAL FIX: Check for high risk level which indicates question copying
+            const hasHighRiskLevel =
+              copyPasteAnalysis.riskLevel === "critical" ||
+              copyPasteAnalysis.riskLevel === "high";
+            const isSuspicious = copyPasteAnalysis.isSuspicious === true;
+
+            // CRITICAL FIX: Also check for explicit copyPasteQuestionCopying field from logs
+            const hasExplicitQuestionCopying =
+              copyPasteAnalysis.copyPasteQuestionCopying === true;
+
+            copyPasteQuestionCopying =
+              hasDirectQuestionCopying ||
+              hasFullQuestionCopying ||
+              hasQuestionCopyCount ||
+              hasFullQuestionCopyCount ||
+              hasQuestionCopiesInBreakdown ||
+              hasFullQuestionCopiesInBreakdown ||
+              hasExplicitQuestionCopying ||
+              (hasHighRiskLevel && isSuspicious); // Additional check for high-risk cases
+          }
+
+          hasQuestionCopying =
+            questionCopying ||
+            questionCopyCount > 0 ||
+            copyPasteQuestionCopying;
 
           const hasQuestionIndicatorEvidence =
             analysis.cheatingIndicators?.some(
@@ -5171,13 +5463,10 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           return hasQuestionCopying || hasQuestionIndicatorEvidence;
 
         case "ExternalAssistance":
-          // FIX: Correct data path - typingAnalysis instead of typingPatterns
+          // Use typingAnalysis data path consistently
           const externalInteractions =
             responseData.typingAnalysis?.globalEventAnalysis
-              ?.externalInteractionCount ||
-            responseData.typingPatterns?.globalEventAnalysis
-              ?.externalInteractionCount ||
-            0;
+              ?.externalInteractionCount || 0;
           return (
             externalInteractions > 2 ||
             analysis.cheatingIndicators?.some(
@@ -5188,43 +5477,121 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           );
 
         case "SuspiciousPatterns":
-          // CRITICAL FIX: Enhanced suspicious pattern detection
+          // ENHANCED: More comprehensive suspicious pattern detection
           const hasSuspiciousBehavior =
             analysis.behavioralAnalysis?.timingPatterns ===
               "Unnatural pauses before answers" ||
+            analysis.behavioralAnalysis?.timingPatterns ===
+              "Regular pauses before answers" || // NEW: Systematic pausing
             analysis.behavioralAnalysis?.speakingTone ===
               "Reading rhythm detected" ||
+            analysis.behavioralAnalysis?.speakingTone === "Monotone delivery" || // NEW: Unnatural speech
             analysis.behavioralAnalysis?.eyeMovementPattern ===
               "Reading from external source detected" ||
+            analysis.behavioralAnalysis?.eyeMovementPattern ===
+              "Frequent downward glances" || // NEW: Downward looking
+            analysis.behavioralAnalysis?.eyeMovementPattern ===
+              "Limited camera engagement" || // NEW: Poor engagement
             analysis.behavioralAnalysis?.responseDelivery ===
-              "Reading word-for-word style";
+              "Reading word-for-word style" ||
+            analysis.behavioralAnalysis?.responseDelivery ===
+              "Structured presentation"; // NEW: Can indicate reading from notes
 
           const hasSuspiciousIndicators = analysis.cheatingIndicators?.some(
-            (indicator) =>
-              indicator.toLowerCase().includes("suspicious pattern") ||
-              indicator.toLowerCase().includes("behavioral") ||
-              indicator.toLowerCase().includes("reading patterns")
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("suspicious pattern") ||
+                lowerIndicator.includes("behavioral") ||
+                lowerIndicator.includes("reading patterns") ||
+                lowerIndicator.includes("alternating") ||
+                lowerIndicator.includes("continuous") ||
+                lowerIndicator.includes("sustained") ||
+                lowerIndicator.includes("looking down") ||
+                lowerIndicator.includes("off-screen") ||
+                lowerIndicator.includes("word repetition") ||
+                lowerIndicator.includes("unnatural pause") ||
+                lowerIndicator.includes("reading rhythm") ||
+                lowerIndicator.includes("monotone")
+              );
+            }
           );
 
-          return hasSuspiciousBehavior || hasSuspiciousIndicators;
+          // NEW: Check micro-behavioral analysis for suspicious patterns
+          const hasMicroSuspiciousEvidence =
+            analysis.microAnalysis?.eyeMovement?.suspicionLevel > 0.3 ||
+            analysis.microAnalysis?.speaking?.suspicionLevel > 0.3 ||
+            analysis.microAnalysis?.suspicious?.suspicionLevel > 0.2;
+
+          return (
+            hasSuspiciousBehavior ||
+            hasSuspiciousIndicators ||
+            hasMicroSuspiciousEvidence
+          );
 
         case "ResearchBehavior":
-          return analysis.cheatingIndicators?.some(
-            (indicator) =>
-              indicator.toLowerCase().includes("research") ||
-              indicator.toLowerCase().includes("googling")
+          // ENHANCED: More comprehensive research behavior detection
+          const hasResearchIndicators = analysis.cheatingIndicators?.some(
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("research") ||
+                lowerIndicator.includes("googling") ||
+                lowerIndicator.includes("searching") ||
+                lowerIndicator.includes("pause") ||
+                lowerIndicator.includes("external assistance") ||
+                lowerIndicator.includes("thinking time") ||
+                lowerIndicator.includes("long pause") ||
+                lowerIndicator.includes("extended pause")
+              );
+            }
           );
+
+          // NEW: Check for typing pause patterns that suggest research
+          const hasResearchPausePattern =
+            responseData.typingAnalysis?.pauseAnalysis?.score > 0.6 ||
+            responseData.typingAnalysis?.pauseAnalysis?.excessivePauseCount > 0;
+
+          // NEW: Check for focus loss that might indicate research activity
+          const hasResearchFocusPattern =
+            responseData.typingAnalysis?.focusAnalysis?.focusLossCount > 2 ||
+            responseData.tabSwitchCount > 1;
+
+          return (
+            hasResearchIndicators ||
+            hasResearchPausePattern ||
+            hasResearchFocusPattern
+          );
+
+        case "FullScreenExit":
+          // Detect full screen exit behavior based on count
+          const fullScreenExits = responseData.fullScreenExitCount || 0;
+
+          // Any full screen exit is considered suspicious
+          const hasFullScreenExit = fullScreenExits >= 1;
+
+          const hasFullScreenIndicatorEvidence =
+            analysis.cheatingIndicators?.some(
+              (indicator) =>
+                indicator.toLowerCase().includes("full screen") ||
+                indicator.toLowerCase().includes("fullscreen") ||
+                indicator.toLowerCase().includes("screen exit")
+            );
+
+          return hasFullScreenExit || hasFullScreenIndicatorEvidence;
 
         default:
           return false;
       }
     };
 
-    // Process flags with the new system
+    // Process flags with the new system - pass existing analysis for flag preservation
+    const existingAnalysis = question.cheatingAnalysis || null;
     const flagResults = processEnhancedFlags(
       transformedAnalysis,
       responseData,
-      normalizedType
+      normalizedType,
+      existingAnalysis
     );
 
     // Generate final flag data (keep only essential)
@@ -5248,16 +5615,19 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     const totalChecks = flagResults.length;
     const clearChecks = totalChecks - flaggedChecks;
 
+    // V2.3: Helper function to get critical flags list
+    const getCriticalFlags = () => [
+      "EyesMovement",
+      "ReadingFromExternal",
+      "SuspiciousPatterns",
+      "ExternalAssistance",
+      "MobileDeviceDetected",
+    ];
+
     // V2: CRITICAL FIX - Update isCheatingDetected based on flag system results
     if (flaggedChecks > 0) {
       // Define critical cheating flags that should immediately trigger cheating detection
-      const criticalFlags = [
-        "EyesMovement",
-        "ReadingFromExternal",
-        "SuspiciousPatterns",
-        "ExternalAssistance",
-        "MobileDeviceDetected",
-      ];
+      const criticalFlags = getCriticalFlags();
       const detectedCriticalFlags = detectedFlags.filter((flag) =>
         criticalFlags.includes(flag.flag)
       );
@@ -5427,48 +5797,9 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       { typingAnalysisResult }
     );
 
-    // Add optimized flag analysis data
-    typeSpecificRecord.flagAnalysis = {
-      flagResults: flagResults,
-      totalChecks: totalChecks,
-      flaggedChecks: flaggedChecks,
-      clearChecks: clearChecks,
-      flagSystemVersion: "V2.2_OPTIMIZED",
-      processingTimestamp: new Date(),
-    };
-
-    logger.info("V2.1: Creating type-specific database record", {
-      type: normalizedType,
-      candidateScreeningId: responseData.candidateScreeningId,
-      hasTypeSpecificFields: true,
-      recordSize: Object.keys(typeSpecificRecord).length,
-      videoFields:
-        normalizedType === "video"
-          ? {
-              isLipSync: typeSpecificRecord.isLipSync,
-              isOnlyOnePersonInVideo: typeSpecificRecord.isOnlyOnePersonInVideo,
-              facialExpressions:
-                typeSpecificRecord.facialExpressions?.substring(0, 50) + "...",
-              eyeMovement:
-                typeSpecificRecord.eyeMovement?.substring(0, 50) + "...",
-            }
-          : undefined,
-      audioFields:
-        normalizedType === "audio"
-          ? {
-              isOnlyOneVoiceInAudio: typeSpecificRecord.isOnlyOneVoiceInAudio,
-              voiceClarity:
-                typeSpecificRecord.voiceClarity?.substring(0, 50) + "...",
-              multipleVoicesDetected: typeSpecificRecord.multipleVoicesDetected,
-            }
-          : undefined,
-    });
-
     const questionAiResponse = await CandidateAnswerAiResponse.create(
       typeSpecificRecord
     );
-
-    console.log("V2: Question AI response created", questionAiResponse);
 
     const answerSummary = Array.isArray(questionAiResponse.answerSummary)
       ? questionAiResponse.answerSummary
@@ -5478,33 +5809,40 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     question.answerFileId = responseData.answerFileId;
     question.candidateAnswerAiResponseId = questionAiResponse._id;
     question.answerSummary = answerSummary;
-    question.cheatingFlags = finalCheatingFlags; // Use the processed flags
     question.transcription = questionAiResponse.transcription || "";
     question.correctPercentage = questionAiResponse.correctPercentage || "0%";
     question.isCheatingDetected =
       question.isCheatingDetected === true
         ? question.isCheatingDetected
         : questionAiResponse.isCheatingDetected;
-    question.detectedCheatings = [
-      ...(question.detectedCheatings || []),
-      ...(questionAiResponse.cheatingIndicators || []),
-    ];
+    // V2.3: STANDARDIZED cheatingAnalysis - Comprehensive flag analysis storage
+    logger.info("V2.3: Setting cheatingAnalysis field", {
+      candidateScreeningId: responseData.candidateScreeningId,
+      questionId: responseData.questionId,
+      flagResultsCount: flagResults?.length || 0,
+      flaggedChecks,
+      clearChecks,
+      totalChecks,
+      hasValidData: !!(
+        flagResults &&
+        flaggedChecks !== undefined &&
+        totalChecks !== undefined
+      ),
+    });
 
-    // V2: Add contextual metadata to question
-    question.processingVersion = "V2";
+    question.cheatingAnalysis = {
+      flagResults,
+      flaggedChecks,
+      clearChecks,
+      totalChecks,
+      processingTimestamp: new Date().toISOString(),
+      flagSystemVersion: "2.3.0",
+    };
+
+    // V2.3: Add minimal contextual metadata to question (reduced redundancy)
+    question.processingVersion = "V2.3";
     question.contextualQuality = transformedAnalysis.responseQuality;
     question.cheatingConfidence = transformedAnalysis.cheatingConfidence;
-    question.behavioralInsights = transformedAnalysis.behavioralInsights || [];
-    question.responseQuality = transformedAnalysis.responseQuality;
-    question.contextualFactors = transformedAnalysis.contextualFactors || [];
-
-    // V2.2: Add optimized flag analysis data to question
-    question.flagAnalysis = {
-      totalChecks: totalChecks,
-      flaggedChecks: flaggedChecks,
-      clearChecks: clearChecks,
-      flagSystemVersion: "V2.2_OPTIMIZED",
-    };
 
     // V2: Add relevance score for subjective questions
     if (
@@ -5515,18 +5853,22 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
         transformedAnalysis.relevanceAssessment.score || 0;
     }
 
-    // V2: Debug log question fields being saved
-    logger.info("V2: Question fields being saved", {
-      questionId: responseData.questionId,
-      processingVersion: question.processingVersion,
-      contextualQuality: question.contextualQuality,
-      cheatingConfidence: question.cheatingConfidence,
-      behavioralInsightsCount: question.behavioralInsights?.length || 0,
-      responseQuality: question.responseQuality,
-      contextualFactorsCount: question.contextualFactors?.length || 0,
-      relevanceScore: question.relevanceScore,
-      type: normalizedType,
-    });
+    // V2.3: Debug log question fields being saved (updated for cheatingAnalysis)
+    logger.info(
+      "V2.3: Question fields being saved with standardized cheatingAnalysis",
+      {
+        questionId: responseData.questionId,
+        processingVersion: question.processingVersion,
+        contextualQuality: question.contextualQuality,
+        cheatingConfidence: question.cheatingConfidence,
+        cheatingAnalysisVersion: question.cheatingAnalysis?.flagSystemVersion,
+        flaggedChecks: question.cheatingAnalysis?.flaggedChecks,
+        totalChecks: question.cheatingAnalysis?.totalChecks,
+        flagResultsCount: question.cheatingAnalysis?.flagResults?.length,
+        relevanceScore: question.relevanceScore,
+        type: normalizedType,
+      }
+    );
 
     // V2: Enhanced document-level cheating detection with contextual logic
     if (questionAiResponse.isCheatingDetected && !doc.isCheatingDetected) {
@@ -5557,6 +5899,17 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     doc.cheatingFlags = finalCheatingFlags;
 
     await doc.save();
+
+    // V2.3: Verify cheatingAnalysis was saved correctly
+    logger.info("V2.3: Document saved - verifying cheatingAnalysis field", {
+      candidateScreeningId: responseData.candidateScreeningId,
+      questionId: responseData.questionId,
+      cheatingAnalysisPresent: !!question.cheatingAnalysis,
+      cheatingAnalysisKeys: question.cheatingAnalysis
+        ? Object.keys(question.cheatingAnalysis)
+        : [],
+      flagResultsCount: question.cheatingAnalysis?.flagResults?.length || 0,
+    });
 
     logger.info(
       "V2: Successfully processed response with contextual analysis",
@@ -5598,19 +5951,11 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       contextualFactors: transformedAnalysis.contextualFactors,
       timestampSummary: timestampSummary,
 
-      // V2.2: Optimized flag analysis results
-      flagAnalysis: {
-        flagResults: flagResults,
-        totalChecks: totalChecks,
-        flaggedChecks: flaggedChecks,
-        clearChecks: clearChecks,
-        detectedFlags: detectedFlags.map((f) => ({
-          flag: f.flag,
-          message: f.message,
-        })),
-        clearedFlags: flagResults
-          .filter((f) => !f.detected)
-          .map((f) => ({ flag: f.flag, message: f.message })),
+      // V2.3: Reference to comprehensive flag analysis (stored in question.cheatingAnalysis)
+      flagAnalysisRef: {
+        note: "Complete flag analysis available in question.cheatingAnalysis",
+        summary: `${flaggedChecks}/${totalChecks} flags detected`,
+        version: "V2.3_STANDARDIZED",
       },
 
       processingMetadata: {
@@ -7263,69 +7608,139 @@ const analyzeMicroEyeMovements = (eyeEvents) => {
     const duration = event.duration || 0;
     const confidence = event.confidence || 0;
 
-    // CRITICAL FIX: Filter out normal thinking behaviors
+    // ENHANCED: More selective filter for normal thinking behaviors
+    // Only filter out clearly normal behaviors to avoid missing reading patterns
     const isNormalThinking =
-      duration <= 5 || // Brief glances (≤5s) are normal thinking
-      confidence <= 40 || // Low confidence indicates normal behavior
-      event.category === "behavioral" || // Explicitly marked as behavioral
-      description.includes("thinking") ||
-      description.includes("recall") ||
+      (duration <= 3 && confidence <= 30) || // Only very brief, low-confidence events
+      (event.category === "behavioral" && duration <= 5) || // Short behavioral events only
+      description.includes("brief thinking") ||
+      description.includes("natural thinking") ||
       description.includes("formulating") ||
-      description.includes("brief") ||
-      behavior.includes("thinking");
+      (behavior.includes("thinking") && duration <= 4); // Short thinking patterns only
 
     if (isNormalThinking) {
       // Skip normal thinking behaviors - don't flag as suspicious
       return;
     }
 
-    // 1. CRITICAL: Detect sustained off-screen looking (primary reading indicator)
-    // FIXED: Increased threshold to 10+ seconds for genuine reading patterns
+    // 1. CRITICAL FIX: Detect sustained off-screen looking (primary reading indicator)
+    // LOWERED threshold to catch actual reading patterns that were being missed
     if (
-      duration > 10 &&
-      confidence > 60 && // Require higher confidence for cheating detection
+      duration > 5 && // FIXED: Reduced from 10 to 5 seconds to catch more reading patterns
+      confidence > 50 && // FIXED: Reduced from 60 to 50 for better detection
       (description.includes("looking") || behavior.includes("looking")) &&
       (description.includes("off-screen") ||
         description.includes("down") ||
         description.includes("left") ||
         description.includes("away") ||
         description.includes("alternating") ||
-        behavior.includes("alternating"))
+        description.includes("reading") ||
+        behavior.includes("alternating") ||
+        behavior.includes("reading"))
     ) {
-      const readingSuspicion = Math.min(0.8, duration / 20); // Scale with duration
+      // ENHANCED: Better scoring for different durations
+      let readingSuspicion = 0;
+      if (duration > 15) {
+        readingSuspicion = 0.9; // Very high suspicion for long periods
+      } else if (duration > 10) {
+        readingSuspicion = 0.7; // High suspicion
+      } else if (duration > 7) {
+        readingSuspicion = 0.5; // Medium-high suspicion
+      } else {
+        readingSuspicion = 0.3; // Lower but still flagged
+      }
+
       suspicion += readingSuspicion;
       indicators.push(
-        `Sustained off-screen looking detected: ${duration}s - strong reading indicator (${Math.round(
+        `Sustained off-screen looking detected: ${duration}s - reading indicator (${Math.round(
           readingSuspicion * 100
         )}% suspicion)`
       );
     }
 
-    // 2. Detect "alternating" patterns (looking between source and camera)
-    // FIXED: Require higher confidence and longer duration
+    // 2. ENHANCED: Detect "alternating" patterns (looking between source and camera)
+    // FIXED: Lowered thresholds to catch actual reading patterns that were being missed
     if (
       (description.includes("alternating") ||
-        behavior.includes("alternating")) &&
-      duration > 15 &&
-      confidence > 70
+        behavior.includes("alternating") ||
+        description.includes("between") ||
+        description.includes("back and forth")) &&
+      duration > 4 && // FIXED: Reduced from 15 to 4 seconds
+      confidence > 50 // FIXED: Reduced from 70 to 50
     ) {
-      suspicion += 0.6;
+      let alternatingSuspicion = 0;
+      if (duration > 12) {
+        alternatingSuspicion = 0.8; // Very high for long alternating
+      } else if (duration > 8) {
+        alternatingSuspicion = 0.6; // High suspicion
+      } else {
+        alternatingSuspicion = 0.4; // Medium suspicion
+      }
+
+      suspicion += alternatingSuspicion;
       indicators.push(
-        `Alternating eye pattern for ${duration}s - consistent with reading from external source`
+        `Alternating eye pattern detected: ${duration}s - reading behavior (${Math.round(
+          alternatingSuspicion * 100
+        )}% suspicion)`
       );
     }
 
-    // 3. Detect "drifting" or "glancing" patterns that suggest reading
-    // FIXED: Distinguish between brief thinking glances and sustained reading
+    // 3. ENHANCED: Detect "drifting" or "glancing" patterns that suggest reading
+    // FIXED: Lowered thresholds and improved detection
     if (
-      (description.includes("drift") || description.includes("glance")) &&
-      duration > 12 &&
-      confidence > 65 &&
+      (description.includes("drift") ||
+        description.includes("glance") ||
+        description.includes("repeated") ||
+        description.includes("systematic") ||
+        description.includes("continuous") ||
+        description.includes("consistently") ||
+        description.includes("frequently")) &&
+      duration > 3 && // FIXED: Reduced from 12 to 3 seconds
+      confidence > 45 && // FIXED: Reduced from 65 to 45
       !description.includes("brief")
     ) {
-      suspicion += 0.5;
+      let glancingSuspicion = 0;
+      if (duration > 10) {
+        glancingSuspicion = 0.7; // High for long patterns
+      } else if (duration > 6) {
+        glancingSuspicion = 0.5; // Medium-high
+      } else {
+        glancingSuspicion = 0.3; // Lower but flagged
+      }
+
+      suspicion += glancingSuspicion;
       indicators.push(
-        `Eye drifting/glancing pattern for ${duration}s - suggests reading behavior`
+        `Eye drifting/glancing pattern for ${duration}s - continuous reading behavior (${Math.round(
+          glancingSuspicion * 100
+        )}% suspicion)`
+      );
+    }
+
+    // NEW: Specific detection for "looking down" patterns (phone/notes reading)
+    if (
+      (description.includes("looking down") ||
+        description.includes("downward") ||
+        description.includes("down and") ||
+        behavior.includes("looking down") ||
+        description.includes("phone") ||
+        description.includes("notes")) &&
+      duration > 3 &&
+      confidence > 45
+    ) {
+      let downwardSuspicion = 0;
+      if (duration > 10) {
+        downwardSuspicion = 0.8; // Very high for sustained downward looking
+      } else if (duration > 6) {
+        downwardSuspicion = 0.6; // High suspicion
+      } else {
+        downwardSuspicion = 0.4; // Medium suspicion
+      }
+
+      suspicion += downwardSuspicion;
+      indicators.push(
+        `Sustained downward looking detected: ${duration}s - likely reading from device/notes (${Math.round(
+          downwardSuspicion * 100
+        )}% suspicion)`
       );
     }
 
@@ -7546,17 +7961,32 @@ const analyzeObviousReadingPatterns = (
       const behavior = (event.behavior || "").toLowerCase();
       const eventDuration = event.duration || 0;
 
-      // Detect sustained off-screen looking (>10 seconds = very suspicious)
+      // FIXED: Detect sustained off-screen looking (lowered threshold to catch more cases)
       if (
-        eventDuration > 10 &&
+        eventDuration > 5 && // FIXED: Reduced from 10 to 5 seconds
         (description.includes("off-screen") ||
           (description.includes("looking") && description.includes("away")) ||
           description.includes("alternating") ||
-          behavior.includes("alternating"))
+          description.includes("down") ||
+          description.includes("reading") ||
+          behavior.includes("alternating") ||
+          behavior.includes("reading"))
       ) {
-        readingScore += 0.6;
+        // ENHANCED: Better scoring based on duration
+        let offScreenScore = 0;
+        if (eventDuration > 15) {
+          offScreenScore = 0.8; // Very high for long periods
+        } else if (eventDuration > 10) {
+          offScreenScore = 0.6; // High for medium periods
+        } else {
+          offScreenScore = 0.4; // Medium for shorter but still suspicious periods
+        }
+
+        readingScore += offScreenScore;
         readingIndicators.push(
-          `Sustained off-screen looking for ${eventDuration}s - classic reading behavior`
+          `Sustained off-screen looking for ${eventDuration}s - reading behavior detected (${Math.round(
+            offScreenScore * 100
+          )}% confidence)`
         );
       }
 
@@ -7571,11 +8001,50 @@ const analyzeObviousReadingPatterns = (
         );
       }
 
-      // Detect alternating patterns (reading then looking back)
-      if (description.includes("alternating") && eventDuration > 5) {
-        readingScore += 0.5;
+      // ENHANCED: Detect alternating patterns (reading then looking back)
+      if (
+        (description.includes("alternating") ||
+          description.includes("between") ||
+          description.includes("back and forth")) &&
+        eventDuration > 3 // FIXED: Reduced from 5 to 3 seconds
+      ) {
+        let alternatingScore = 0;
+        if (eventDuration > 10) {
+          alternatingScore = 0.7; // High for long alternating
+        } else if (eventDuration > 6) {
+          alternatingScore = 0.5; // Medium-high
+        } else {
+          alternatingScore = 0.3; // Lower but flagged
+        }
+
+        readingScore += alternatingScore;
         readingIndicators.push(
-          `Alternating looking pattern for ${eventDuration}s - reading and responding behavior`
+          `Alternating looking pattern for ${eventDuration}s - reading and responding behavior (${Math.round(
+            alternatingScore * 100
+          )}% confidence)`
+        );
+      }
+
+      // NEW: Detect continuous/frequent looking patterns
+      if (
+        (description.includes("continuous") ||
+          description.includes("frequently") ||
+          description.includes("repeatedly") ||
+          description.includes("consistently")) &&
+        eventDuration > 3
+      ) {
+        let continuousScore = 0;
+        if (eventDuration > 8) {
+          continuousScore = 0.6; // High for long continuous patterns
+        } else {
+          continuousScore = 0.4; // Medium for shorter patterns
+        }
+
+        readingScore += continuousScore;
+        readingIndicators.push(
+          `Continuous reading pattern detected for ${eventDuration}s - sustained reading behavior (${Math.round(
+            continuousScore * 100
+          )}% confidence)`
         );
       }
     });
@@ -8141,7 +8610,16 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
     context.behavioralAnalysis?.timingPatterns ===
       "Unnatural pauses before answers";
 
-  // If behavioral analysis shows clear reading evidence, flag immediately
+  // CRITICAL FIX: Check copyPasteAnalysis for question copying evidence
+  const hasQuestionCopyingEvidence =
+    context.copyPasteAnalysis &&
+    ((context.copyPasteAnalysis.copyPasteQuestionCopyCount || 0) > 0 ||
+      (context.copyPasteAnalysis.copyBreakdownQuestionCount || 0) > 0 ||
+      context.copyPasteAnalysis.copyPasteQuestionCopying === true ||
+      context.copyPasteAnalysis.hasQuestionCopying === true ||
+      (context.copyPasteAnalysis.questionCopyCount || 0) > 0);
+
+  // If behavioral analysis shows clear reading evidence OR question copying detected, flag immediately
   if (hasBehavioralReadingEvidence) {
     logger.info(
       "V2: Behavioral reading evidence detected in sophisticated analysis",
@@ -8156,8 +8634,8 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
     );
 
     return {
-      isCheatingDetected: true,
-      cheatingConfidence: 85, // High confidence for behavioral evidence
+      flagged: true, // FIXED: Use correct property name
+      confidence: 85, // FIXED: Use correct property name (was cheatingConfidence)
       contextualFactors: [
         "Behavioral analysis indicates reading from external sources",
         "Assessment authenticity compromised by detected reading patterns",
@@ -8168,9 +8646,47 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
     };
   }
 
+  // CRITICAL FIX: Check for question copying evidence
+  if (hasQuestionCopyingEvidence) {
+    logger.info(
+      "V2: Question copying evidence detected in sophisticated analysis",
+      {
+        copyPasteQuestionCopyCount:
+          context.copyPasteAnalysis?.copyPasteQuestionCopyCount || 0,
+        copyBreakdownQuestionCount:
+          context.copyPasteAnalysis?.copyBreakdownQuestionCount || 0,
+        copyPasteQuestionCopying:
+          context.copyPasteAnalysis?.copyPasteQuestionCopying,
+        hasQuestionCopying: context.copyPasteAnalysis?.hasQuestionCopying,
+        questionCopyCount: context.copyPasteAnalysis?.questionCopyCount || 0,
+        reason: "Question copying detected - flagging as cheating",
+      }
+    );
+
+    return {
+      flagged: true,
+      confidence: 90, // High confidence for question copying
+      contextualFactors: [
+        "Question copying detected - candidate likely used external research",
+        "Assessment integrity compromised by copying question text",
+        "Evidence suggests external assistance through question research",
+      ],
+      reason: "Question copying evidence detected in copyPasteAnalysis",
+      questionCopyingEvidence: true,
+    };
+  }
+
   let totalSuspicionScore = 0;
   const allIndicators = [];
   const analysisDetails = {};
+
+  // Helper function to safely add to totalSuspicionScore
+  const safeAddToScore = (value, weight = 1) => {
+    const safeValue = typeof value === "number" && !isNaN(value) ? value : 0;
+    const safeWeight =
+      typeof weight === "number" && !isNaN(weight) ? weight : 0;
+    totalSuspicionScore += safeValue * safeWeight;
+  };
 
   // 1. Language Pattern Analysis
   if (context.transcription) {
@@ -8178,8 +8694,10 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
       context.transcription,
       context
     );
-    totalSuspicionScore += linguisticAnalysis.suspicionLevel * 0.4; // strong emphasis
-    allIndicators.push(...linguisticAnalysis.indicators);
+    safeAddToScore(linguisticAnalysis?.suspicionLevel, 0.4); // strong emphasis
+    if (linguisticAnalysis?.indicators) {
+      allIndicators.push(...linguisticAnalysis.indicators);
+    }
     analysisDetails.linguistic = linguisticAnalysis;
   }
 
@@ -8189,8 +8707,10 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
       context.analysis,
       context
     );
-    totalSuspicionScore += inconsistencyAnalysis.inconsistencyScore * 0.3; // moderate emphasis
-    allIndicators.push(...inconsistencyAnalysis.indicators);
+    safeAddToScore(inconsistencyAnalysis?.inconsistencyScore, 0.3); // moderate emphasis
+    if (inconsistencyAnalysis?.indicators) {
+      allIndicators.push(...inconsistencyAnalysis.indicators);
+    }
     analysisDetails.inconsistency = inconsistencyAnalysis;
   }
 
@@ -8200,8 +8720,10 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
       context.behavioralAnalysis,
       context.duration
     );
-    totalSuspicionScore += microAnalysis.suspicionLevel * 0.3; // moderate emphasis
-    allIndicators.push(...microAnalysis.indicators);
+    safeAddToScore(microAnalysis?.suspicionLevel, 0.3); // moderate emphasis
+    if (microAnalysis?.indicators) {
+      allIndicators.push(...microAnalysis.indicators);
+    }
     analysisDetails.microBehavioral = microAnalysis;
   }
 
@@ -8215,7 +8737,7 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
     const typingWeight = 0.6;
     const normalizedTypingScore = typingScore; // Already normalized 0-1
 
-    totalSuspicionScore += normalizedTypingScore * typingWeight;
+    safeAddToScore(normalizedTypingScore, typingWeight);
 
     if (context.typingAnalysis.indicators) {
       allIndicators.push(...context.typingAnalysis.indicators);
@@ -8246,9 +8768,11 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
     context.behavioralAnalysis,
     context.duration
   );
-  if (obviousReadingAnalysis.score > 0.4) {
-    totalSuspicionScore += obviousReadingAnalysis.score * 0.5; // strong emphasis for clear reading behavior
-    allIndicators.push(...obviousReadingAnalysis.indicators);
+  if (obviousReadingAnalysis?.score > 0.4) {
+    safeAddToScore(obviousReadingAnalysis.score, 0.5); // strong emphasis for clear reading behavior
+    if (obviousReadingAnalysis?.indicators) {
+      allIndicators.push(...obviousReadingAnalysis.indicators);
+    }
     analysisDetails.obviousReading = obviousReadingAnalysis;
   }
 
@@ -8274,17 +8798,33 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
 
   // FIXED: Raised threshold from 50% to 70% to reduce false positives
   const sophisticatedThreshold = 0.7; // 70% threshold
+
+  // Ensure totalSuspicionScore is a valid number
+  const safeTotalSuspicionScore =
+    typeof totalSuspicionScore === "number" && !isNaN(totalSuspicionScore)
+      ? totalSuspicionScore
+      : 0;
+  const safeRobustConfidence =
+    typeof robustResult?.confidence === "number" &&
+    !isNaN(robustResult.confidence)
+      ? robustResult.confidence
+      : 0;
+
   const shouldFlag =
     robustResult.flagged ||
     robustResult.behavioralEvidence || // CRITICAL FIX: Include behavioral evidence as direct flag
-    (totalSuspicionScore >= sophisticatedThreshold &&
+    (safeTotalSuspicionScore >= sophisticatedThreshold &&
       hasMultipleHighConfidenceIndicators) ||
     obviousReadingDetected ||
     typingCheatingDetected; // CRITICAL: Include typing cheating as a direct flag
+
   const combinedConfidence = shouldFlag
     ? Math.min(
         100,
-        Math.max(robustResult.confidence, Math.round(totalSuspicionScore * 100))
+        Math.max(
+          safeRobustConfidence,
+          Math.round(safeTotalSuspicionScore * 100)
+        )
       )
     : 0;
 
@@ -8293,7 +8833,7 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
     context.questionType || context.normalizedType || "unknown";
   const analysis = {
     isCheatingDetected: shouldFlag,
-    cheatingConfidence: Math.round(totalSuspicionScore * 100),
+    cheatingConfidence: Math.round(safeTotalSuspicionScore * 100),
   };
 
   const additionalData = {
@@ -8321,10 +8861,10 @@ const sophisticatedCheatingDetection = (indicators, context = {}) => {
   logger.info("V2: Sophisticated cheating detection completed", {
     flagged: shouldFlag,
     combinedConfidence,
-    totalSuspicionScore: Math.round(totalSuspicionScore * 100),
+    totalSuspicionScore: Math.round(safeTotalSuspicionScore * 100),
     sophisticatedThreshold: Math.round(sophisticatedThreshold * 100),
     robustDetected: robustResult.flagged,
-    sophisticatedDetected: totalSuspicionScore >= sophisticatedThreshold,
+    sophisticatedDetected: safeTotalSuspicionScore >= sophisticatedThreshold,
     typingCheatingDetected,
     obviousReadingDetected,
     hasMultipleStrongIndicators: hasMultipleHighConfidenceIndicators,
@@ -10125,6 +10665,7 @@ const createTypeSpecificRecord = (
 
     // Common analysis results
     communication: transformedAnalysis.communication,
+    communicationRating: transformedAnalysis.communicationRating,
     isCheatingDetected: transformedAnalysis.isCheatingDetected,
     cheatingIndicators: transformedAnalysis.cheatingIndicators,
     cheatingConfidence: transformedAnalysis.cheatingConfidence,
@@ -10155,7 +10696,6 @@ const createTypeSpecificRecord = (
     environmentalSuitability: transformedAnalysis.environmentalSuitability,
 
     // AI detection
-    isCopiedFromAITool: transformedAnalysis.isCopiedFromAITool,
     isCopiedFromAnyWebsite: transformedAnalysis.isCopiedFromAnyWebsite,
     percentOfAnswerMatchWithAiModel:
       transformedAnalysis.percentOfAnswerMatchWithAiModel,

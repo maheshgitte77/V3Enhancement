@@ -157,8 +157,6 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
             },
             processingVersion: {
               type: String,
-              enum: ["V1", "V2"],
-              default: "V1",
             },
             contextualQuality: {
               type: String,
@@ -189,6 +187,10 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               min: 0,
               max: 1,
               default: 0,
+            },
+            cheatingAnalysis: {
+              type: mongoose.Schema.Types.Mixed,
+              default: null,
             },
           },
         ],
@@ -243,8 +245,6 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
             },
             processingVersion: {
               type: String,
-              enum: ["V1", "V2"],
-              default: "V1",
             },
             contextualQuality: {
               type: String,
@@ -275,6 +275,10 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               min: 0,
               max: 1,
               default: 0,
+            },
+            cheatingAnalysis: {
+              type: mongoose.Schema.Types.Mixed,
+              default: null,
             },
           },
         ],
@@ -321,8 +325,6 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
             },
             processingVersion: {
               type: String,
-              enum: ["V1", "V2"],
-              default: "V1",
             },
             contextualQuality: {
               type: String,
@@ -353,6 +355,10 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               min: 0,
               max: 1,
               default: 0,
+            },
+            cheatingAnalysis: {
+              type: mongoose.Schema.Types.Mixed,
+              default: null,
             },
           },
         ],

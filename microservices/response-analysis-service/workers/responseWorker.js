@@ -198,7 +198,6 @@ const transformAiResponse = (parsedAnalysis) => {
       rating: "0.0 out of 5",
       asPerExperience: "Not evaluated",
     },
-    isCopiedFromAITool: false,
     isCopiedFromAnyWebsite: false,
     languageDetection: { languages: ["Unknown"], percentageWise: ["100%"] },
     overallContentQuality: "Not evaluated",
@@ -354,7 +353,6 @@ const generatePrompt = (responseData, normalizedType) => {
       - **OtherRelevantNoise**: Disruptive background noise affecting evaluation.
       - **MultipleVoiceDetected**: Multiple distinct voices or whispers detected.
       - **MultiplePersonsDetected**: More than one person in the video.
-      - **CopiedFromAITool**: Response matches AI-generated text (>90% similarity).
       - **CopiedFromWebsite**: Response matches web content (>90% similarity).
       - **MobileDeviceDetected**: Mobile phone or tablet visible or interacted with.
 
@@ -377,7 +375,7 @@ const generatePrompt = (responseData, normalizedType) => {
         "percentOfAnswerMatchWithAiModel": "[0–100%]",
         "technicalDepth": { "rating": "<String, 0.0–5.0>", "asPerExplanation": "[Explanation]" },
         "technicalDepthAsPerExperience": { "rating": "<String, 0.0–5.0>", "asPerExperience": "[Explanation]" },
-        "isCopiedFromAITool": [true/false],
+
         "isCopiedFromAnyWebsite": [true/false],
         "languageDetection": { "languages": ["[Language]"], "percentageWise": ["[0–100%]"] },
         "overallContentQuality": "[Description or 'Not evaluated']",
@@ -419,7 +417,6 @@ const generatePrompt = (responseData, normalizedType) => {
       - **AICopied**: Response matches AI-generated content (>90% similarity).
       - **OtherRelevantNoise**: Disruptive background noise affecting evaluation.
       - **MultipleVoiceDetected**: Multiple distinct voices or whispers detected.
-      - **CopiedFromAITool**: Response matches AI-generated text (>90% similarity).
       - **CopiedFromWebsite**: Response matches web content (>90% similarity).
 
       **Input**: Audio file
@@ -436,7 +433,7 @@ const generatePrompt = (responseData, normalizedType) => {
         "percentOfAnswerMatchWithAiModel": "[0–100%]",
         "technicalDepth": { "rating": "<String, 0.0–5.0>", "asPerExplanation": "[Explanation]" },
         "technicalDepthAsPerExperience": { "rating": "<String, 0.0–5.0>", "asPerExperience": "[Explanation]" },
-        "isCopiedFromAITool": [true/false],
+
         "isCopiedFromAnyWebsite": [true/false],
         "languageDetection": { "languages": ["[Language]"], "percentageWise": ["[0–100%]"] },
         "overallContentQuality": "[Description or 'Not evaluated']",
@@ -476,7 +473,6 @@ const generatePrompt = (responseData, normalizedType) => {
 
       **Cheating Flags to Detect**:
       - **AICopied**: Response matches AI-generated content (>90% similarity).
-      - **CopiedFromAITool**: Response matches AI-generated text (>90% similarity).
       - **CopiedFromWebsite**: Response matches web content (>90% similarity).
 
       **Input**: Text answer: "${responseData.textAnswer || ""}"
@@ -489,7 +485,7 @@ const generatePrompt = (responseData, normalizedType) => {
         "percentOfAnswerMatchWithAiModel": "[0–100%]",
         "technicalDepth": { "rating": "<String, 0.0–5.0>", "asPerExplanation": "[Explanation]" },
         "technicalDepthAsPerExperience": { "rating": "<String, 0.0–5.0>", "asPerExperience": "[Explanation]" },
-        "isCopiedFromAITool": [true/false],
+
         "isCopiedFromAnyWebsite": [true/false],
         "languageDetection": { "languages": ["[Language]"], "percentageWise": ["[0–100%]"] },
         "overallContentQuality": "[Description or 'Not evaluated']",
@@ -661,7 +657,6 @@ const processResponse = async (responseData) => {
             "OtherRelevantNoise",
             "MultipleVoiceDetected",
             "MultiplePersonsDetected",
-            "CopiedFromAITool",
             "CopiedFromWebsite",
             "MobileDeviceDetected",
           ].some((allowedFlag) => flag.includes(allowedFlag))
@@ -749,7 +744,6 @@ const processResponse = async (responseData) => {
           communication: transformedAnalysis.communication,
           isCheatingDetected: transformedAnalysis.isCheatingDetected,
           cheatingIndicators: transformedAnalysis.cheatingIndicators,
-          isCopiedFromAITool: transformedAnalysis.isCopiedFromAITool,
           isCopiedFromAnyWebsite: transformedAnalysis.isCopiedFromAnyWebsite,
           percentOfAnswerMatchWithAiModel:
             transformedAnalysis.percentOfAnswerMatchWithAiModel,

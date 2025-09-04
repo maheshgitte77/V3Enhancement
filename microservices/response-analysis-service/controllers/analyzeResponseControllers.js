@@ -175,6 +175,10 @@ const createVersionedMediaResponseController = (worker, version) => {
         maxTime,
         file_uri, // New parameter for URI-based file processing
         mimetype, // Provided mimetype from the request
+        fullScreenExitCount,
+        tabSwitchCount,
+        hasCopyPasteAnalysis,
+        copyPasteAnalysis,
       } = req.body;
 
       // Handle file input - either uploaded file or URI download
@@ -295,6 +299,12 @@ const createVersionedMediaResponseController = (worker, version) => {
           questionDuration: maxTime,
           isScreening: false,
           fileSource: file_uri ? "uri" : "upload", // Track source for debugging
+          fullScreenExitCount,
+          tabSwitchCount,
+          hasCopyPasteAnalysis,
+          copyPasteAnalysis: copyPasteAnalysis
+            ? JSON.parse(copyPasteAnalysis)
+            : null,
         };
 
         // Process directly with the specified worker version

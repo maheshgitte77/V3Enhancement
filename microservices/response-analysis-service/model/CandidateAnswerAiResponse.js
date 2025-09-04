@@ -87,6 +87,12 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       min: 0,
       max: 100,
       default: 0,
+      validate: {
+        validator: function (v) {
+          return typeof v === "number" && !isNaN(v) && v >= 0 && v <= 100;
+        },
+        message: "cheatingConfidence must be a valid number between 0 and 100",
+      },
     },
     contextualFactors: {
       type: [String],
@@ -161,9 +167,6 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     environmentalSuitability: { type: String },
 
     // ===== AI DETECTION (All Types) =====
-    isCopiedFromAITool: {
-      type: Boolean,
-    },
     isCopiedFromAnyWebsite: {
       type: Boolean,
     },
@@ -552,6 +555,31 @@ CandidateAnswerAiResponseSchema.index({
 CandidateAnswerAiResponseSchema.index({
   type: 1,
   candidateScreeningId: 1,
+});
+
+/**
+ * Pre-save middleware to ensure cheatingConfidence is always a valid number
+ * @function
+ * @name preSave
+ * @memberof CandidateAnswerAiResponseSchema
+ */
+CandidateAnswerAiResponseSchema.pre("save", function (next) {
+  // Ensure cheatingConfidence is always a valid number
+  if (
+    typeof this.cheatingConfidence !== "number" ||
+    isNaN(this.cheatingConfidence)
+  ) {
+    this.cheatingConfidence = this.isCheatingDetected ? 75 : 0;
+  }
+
+  // Ensure cheatingConfidence is within valid range
+  if (this.cheatingConfidence < 0) {
+    this.cheatingConfidence = 0;
+  } else if (this.cheatingConfidence > 100) {
+    this.cheatingConfidence = 100;
+  }
+
+  next();
 });
 
 /**

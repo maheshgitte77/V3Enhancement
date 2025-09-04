@@ -591,7 +591,6 @@ const transformAiResponse = (parsedAnalysis, fileProcessingFailed = false) => {
         ? "Experience assessment unavailable due to technical processing issue"
         : "No technical content to evaluate for experience level",
     },
-    isCopiedFromAITool: false,
     isCopiedFromAnyWebsite: false,
     languageDetection: {
       languages: fileProcessingFailed ? ["Processing Failed"] : ["English"],
@@ -1280,7 +1279,6 @@ const processResponse = async (responseData) => {
       OtherRelevantNoise: "Background Help Detected",
       MultipleVoiceDetected: "Multiple Voices",
       MultiplePersonsDetected: "Multiple People",
-      CopiedFromAITool: "AI Tool Content",
       CopiedFromWebsite: "Website Content",
       MobileDeviceDetected: "Mobile Device Detected",
     };
@@ -1400,7 +1398,6 @@ const processResponse = async (responseData) => {
       communication: transformedAnalysis.communication,
       isCheatingDetected: transformedAnalysis.isCheatingDetected,
       cheatingIndicators: transformedAnalysis.cheatingIndicators,
-      isCopiedFromAITool: transformedAnalysis.isCopiedFromAITool,
       isCopiedFromAnyWebsite: transformedAnalysis.isCopiedFromAnyWebsite,
       percentOfAnswerMatchWithAiModel:
         transformedAnalysis.percentOfAnswerMatchWithAiModel,
@@ -1527,6 +1524,7 @@ const processResponse = async (responseData) => {
 /**
  * Processes a candidate's screening response with enhanced analysis
  * V1 includes improved screening assessment capabilities
+ * UPDATED: Compatible with V2 data structures (cheatingAnalysis, contextualFactors, etc.)
  * @async
  * @function processScreening
  * @param {Object} screeningData - The screening data to process
@@ -1534,7 +1532,7 @@ const processResponse = async (responseData) => {
  * @throws {ProcessingError} If screening processing fails
  */
 const processScreening = async (screeningData) => {
-  console.log("Processing screening data V1");
+  console.log("Processing screening data V1 (V2 Compatible)");
   const { candidateScreeningId, screeningAssessmentId } = screeningData;
   try {
     const screeningResult = await CandidateScreeningResult.findOne({
@@ -1624,6 +1622,13 @@ const processScreening = async (screeningData) => {
     - **communicationClarity**: Percentage (0-100) based on Communication ratings from non-MCQ responses
     - **analyticalThinking**: Percentage (0-100) based on Technical Depth, Answer Effectiveness, and problem-solving demonstrated
     - **problemSolvingAbility**: Percentage (0-100) based on Correct Percentages, Answer Effectiveness, and practical application skills
+    
+    **V2 Compatibility Notes:**
+    - Consider Cheating Confidence scores when evaluating integrity
+    - Factor in Response Quality assessments (low/medium/high) for overall evaluation
+    - Use Contextual Factors to understand assessment environment and conditions
+    - Include Behavioral Insights when assessing candidate presentation and professionalism
+    - If Cheating Analysis shows flagged checks, prioritize integrity concerns in summary
 
     **Candidate Screening Data:**
     - **Candidate Fit Score**: ${candidateFitScore}% (Use this for fit category determination)
@@ -1708,6 +1713,30 @@ const processScreening = async (screeningData) => {
           ? questionDetails.question
           : response.question;
 
+        // V1: Enhanced compatibility with V2 data structures
+        const cheatingConfidence =
+          typeof response.cheatingConfidence === "number"
+            ? response.cheatingConfidence
+            : 0;
+        const contextualFactors = Array.isArray(response.contextualFactors)
+          ? response.contextualFactors.join(", ")
+          : "No contextual factors available";
+        const responseQuality = response.responseQuality || "unknown";
+        const behavioralInsights = Array.isArray(response.behavioralInsights)
+          ? response.behavioralInsights.join(", ")
+          : "No behavioral insights available";
+
+        // V1: Check for V2 cheatingAnalysis structure
+        let cheatingAnalysisInfo = "";
+        if (questionDetails?.cheatingAnalysis) {
+          const analysis = questionDetails.cheatingAnalysis;
+          cheatingAnalysisInfo = `
+    - Cheating Analysis: ${analysis.flaggedChecks || 0}/${
+            analysis.totalChecks || 0
+          } flags detected
+    - Processing Version: ${analysis.flagSystemVersion || "unknown"}`;
+        }
+
         prompt += `
     Question ${questionIndex++}:
     - Type: ${questionType}
@@ -1727,7 +1756,11 @@ const processScreening = async (screeningData) => {
         })
     - Overall Rating: ${response.overallRating}
     - Confidence Level: ${response.confidenceLevel}
-    - Response Coherence: ${response.responseCoherence}${extraFields}
+    - Response Coherence: ${response.responseCoherence}
+    - Cheating Confidence: ${cheatingConfidence}%
+    - Response Quality: ${responseQuality}
+    - Contextual Factors: ${contextualFactors}
+    - Behavioral Insights: ${behavioralInsights}${cheatingAnalysisInfo}${extraFields}
     `;
       }
     }
