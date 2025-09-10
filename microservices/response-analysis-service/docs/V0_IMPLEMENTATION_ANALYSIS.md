@@ -67,7 +67,6 @@ if (responseIsIrrelevant) {
 ```javascript
 // Current V0 Limitations:
 percentOfAnswerMatchWithAiModel: "90%"; // ❌ How is this calculated?
-isCopiedFromAITool: true; // ❌ Based on what criteria?
 ```
 
 **Problems:**

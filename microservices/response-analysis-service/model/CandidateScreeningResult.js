@@ -447,6 +447,57 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       description:
         "Set of all languages detected across all candidate responses",
     },
+    // Enhanced ranking scores
+    retryEfficiencyScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description: "Score based on efficient use of retakes (0-100)",
+    },
+    firstAttemptSuccessRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description:
+        "Percentage of questions answered correctly on first attempt",
+    },
+    integrityScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description: "Assessment integrity score based on cheating indicators",
+    },
+    timeEfficiencyScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description: "Time usage efficiency score across all questions",
+    },
+    responseQualityScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description: "Overall response quality based on AI analysis",
+    },
+    submissionTimingScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description: "Score based on submission timing (earlier = better)",
+    },
+    attemptRateScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      description: "Percentage of questions attempted out of total questions",
+    },
   },
   {
     strict: false,

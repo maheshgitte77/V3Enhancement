@@ -38,6 +38,8 @@ const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
 
+const mongoose = require("mongoose");
+
 dotenv.config();
 
 /**
@@ -1522,6 +1524,354 @@ const processResponse = async (responseData) => {
 };
 
 /**
+ * Calculate retry efficiency and first-attempt success scores
+ * @param {Object} screeningResult - The screening result data
+ * @returns {Object} Retry-related scores
+ */
+const calculateRetryScores = (screeningResult) => {
+  let totalAllowedRetakes = 0;
+  let totalUsedRetakes = 0;
+  let firstAttemptCorrect = 0;
+  let totalRetryableQuestions = 0;
+
+  screeningResult.skills?.forEach((skill) => {
+    // Video questions with retakes
+    skill.video?.forEach((video) => {
+      if (video.retakeCount > 0) {
+        totalAllowedRetakes += video.retakeCount;
+        totalUsedRetakes += video.usedRetakeCount || 0;
+        totalRetryableQuestions++;
+
+        // If got it right without using retakes
+        if (
+          (video.usedRetakeCount || 0) === 0 &&
+          parseFloat(video.correctPercentage) > 70
+        ) {
+          firstAttemptCorrect++;
+        }
+      }
+    });
+
+    // Audio questions with retakes
+    skill.audio?.forEach((audio) => {
+      if (audio.retakeCount > 0) {
+        totalAllowedRetakes += audio.retakeCount;
+        totalUsedRetakes += audio.usedRetakeCount || 0;
+        totalRetryableQuestions++;
+
+        if (
+          (audio.usedRetakeCount || 0) === 0 &&
+          parseFloat(audio.correctPercentage) > 70
+        ) {
+          firstAttemptCorrect++;
+        }
+      }
+    });
+  });
+
+  const retryEfficiencyScore =
+    totalAllowedRetakes > 0
+      ? Math.round(
+          ((totalAllowedRetakes - totalUsedRetakes) / totalAllowedRetakes) * 100
+        )
+      : 100;
+
+  const firstAttemptSuccessRate =
+    totalRetryableQuestions > 0
+      ? Math.round((firstAttemptCorrect / totalRetryableQuestions) * 100)
+      : 100;
+
+  return { retryEfficiencyScore, firstAttemptSuccessRate };
+};
+
+/**
+ * Calculate assessment integrity score based on cheating indicators
+ * @param {Object} screeningResult - The screening result data
+ * @returns {number} Integrity score (0-100)
+ */
+const calculateIntegrityScore = (screeningResult) => {
+  let totalCheatingFlags = 0;
+  let totalFullScreenExits = screeningResult.fullScreenExitCount || 0;
+  let totalTabSwitches = screeningResult.tabSwitchCount || 0;
+  let totalQuestions = 0;
+
+  // Count cheating indicators across all questions
+  screeningResult.skills?.forEach((skill) => {
+    ["mcq", "video", "audio", "subjective"].forEach((type) => {
+      skill[type]?.forEach((question) => {
+        totalQuestions++;
+        totalCheatingFlags += question.cheatingFlags?.length || 0;
+        totalFullScreenExits += question.fullScreenExitCount || 0;
+        totalTabSwitches += question.tabSwitchCount || 0;
+      });
+    });
+  });
+
+  // Calculate integrity score (inverse of cheating indicators)
+  const maxExpectedFlags = totalQuestions * 2; // Assume max 2 flags per question
+  const maxExpectedExits = totalQuestions * 1; // Assume max 1 exit per question
+  const maxExpectedSwitches = totalQuestions * 1; // Assume max 1 switch per question
+
+  const flagsPenalty = Math.min(
+    (totalCheatingFlags / maxExpectedFlags) * 40,
+    40
+  );
+  const exitsPenalty = Math.min(
+    (totalFullScreenExits / maxExpectedExits) * 30,
+    30
+  );
+  const switchesPenalty = Math.min(
+    (totalTabSwitches / maxExpectedSwitches) * 30,
+    30
+  );
+
+  const integrityScore = Math.max(
+    0,
+    Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty)
+  );
+  return integrityScore;
+};
+
+/**
+ * Calculate time efficiency score based on time usage patterns
+ * @param {Object} screeningResult - The screening result data
+ * @returns {number} Time efficiency score (0-100)
+ */
+const calculateTimeEfficiencyScore = (screeningResult) => {
+  let totalTimeSpent = screeningResult.totalTimeSpent || 0;
+  let totalMaxTime = 0;
+  let questionTimeEfficiency = [];
+
+  screeningResult.skills?.forEach((skill) => {
+    ["mcq", "video", "audio", "subjective"].forEach((type) => {
+      skill[type]?.forEach((question) => {
+        const maxTime = question.maxTime || 0;
+        const timeSpent = question.timeSpent || 0;
+
+        if (maxTime > 0 && timeSpent > 0) {
+          totalMaxTime += maxTime;
+          const efficiency = Math.min((maxTime / timeSpent) * 100, 100);
+          questionTimeEfficiency.push(efficiency);
+        }
+      });
+    });
+  });
+
+  // Calculate average efficiency across all questions
+  const avgQuestionEfficiency =
+    questionTimeEfficiency.length > 0
+      ? questionTimeEfficiency.reduce((sum, eff) => sum + eff, 0) /
+        questionTimeEfficiency.length
+      : 100;
+
+  // Overall time efficiency (balance between not rushing and not taking too long)
+  const overallEfficiency =
+    totalMaxTime > 0
+      ? Math.min((totalMaxTime / totalTimeSpent) * 100, 100)
+      : 100;
+
+  // Combine both metrics (70% question-level, 30% overall)
+  const timeEfficiencyScore = Math.round(
+    avgQuestionEfficiency * 0.7 + overallEfficiency * 0.3
+  );
+  return Math.min(timeEfficiencyScore, 100);
+};
+
+/**
+ * Calculate response quality score based on AI analysis results
+ * @param {Array} aiResponses - Array of AI response analysis
+ * @returns {number} Response quality score (0-100)
+ */
+const calculateResponseQualityScore = (aiResponses) => {
+  if (!aiResponses || aiResponses.length === 0) return 0;
+
+  let qualityScores = [];
+
+  aiResponses.forEach((response) => {
+    let questionQuality = 0;
+
+    // Technical depth rating (25%)
+    const techDepthScore = convertRatingToScore(
+      response.technicalDepth?.rating
+    );
+    questionQuality += techDepthScore * 0.25;
+
+    // Answer effectiveness rating (25%)
+    const effectivenessScore = convertRatingToScore(
+      response.answerEffectiveness?.rating
+    );
+    questionQuality += effectivenessScore * 0.25;
+
+    // Overall rating (25%)
+    const overallScore = convertRatingToScore(response.overallRating);
+    questionQuality += overallScore * 0.25;
+
+    // Response quality field (25%)
+    const responseQualityScore =
+      response.responseQuality === "high"
+        ? 100
+        : response.responseQuality === "medium"
+        ? 70
+        : response.responseQuality === "low"
+        ? 30
+        : 50;
+    questionQuality += responseQualityScore * 0.25;
+
+    qualityScores.push(questionQuality);
+  });
+
+  return qualityScores.length > 0
+    ? Math.round(
+        qualityScores.reduce((sum, score) => sum + score, 0) /
+          qualityScores.length
+      )
+    : 0;
+};
+
+/**
+ * Convert rating strings to numeric scores
+ * @param {string} rating - Rating string (e.g., "Excellent", "Good", "Average", "Poor")
+ * @returns {number} Numeric score (0-100)
+ */
+const convertRatingToScore = (rating) => {
+  if (!rating) return 50;
+
+  const lowerRating = rating.toLowerCase();
+  if (lowerRating.includes("excellent") || lowerRating.includes("outstanding"))
+    return 100;
+  if (lowerRating.includes("very good") || lowerRating.includes("strong"))
+    return 85;
+  if (lowerRating.includes("good")) return 70;
+  if (lowerRating.includes("average") || lowerRating.includes("satisfactory"))
+    return 55;
+  if (lowerRating.includes("below average") || lowerRating.includes("weak"))
+    return 35;
+  if (lowerRating.includes("poor") || lowerRating.includes("inadequate"))
+    return 20;
+
+  return 50; // Default for unknown ratings
+};
+
+/**
+ * Calculate all enhanced ranking scores for a candidate
+ * @param {Object} screeningResult - The screening result data
+ * @returns {Object} All calculated scores for ranking
+ */
+const calculateEnhancedRankingScores = async (screeningResult) => {
+  // Get AI responses for this candidate
+  const aiResponses = await CandidateAnswerAiResponse.find({
+    candidateScreeningId: screeningResult.candidateScreeningId,
+  });
+
+  // Calculate all score components
+  const retryScores = calculateRetryScores(screeningResult);
+  const integrityScore = calculateIntegrityScore(screeningResult);
+  const timeEfficiencyScore = calculateTimeEfficiencyScore(screeningResult);
+  const responseQualityScore = calculateResponseQualityScore(aiResponses);
+
+  // Calculate submission timing score (earlier submission = higher score)
+  const submissionTimingScore =
+    screeningResult.submittedOn && screeningResult.startedOn
+      ? Math.max(
+          0,
+          100 -
+            Math.floor(
+              (screeningResult.submittedOn - screeningResult.startedOn) /
+                (1000 * 60)
+            )
+        ) // Penalty per minute
+      : 50;
+
+  // Calculate attempt rate score
+  const attemptRateScore =
+    screeningResult.totalQuestions > 0
+      ? Math.round(
+          (screeningResult.attemptedQuestions /
+            screeningResult.totalQuestions) *
+            100
+        )
+      : 0;
+
+  return {
+    retryEfficiencyScore: retryScores.retryEfficiencyScore,
+    firstAttemptSuccessRate: retryScores.firstAttemptSuccessRate,
+    integrityScore,
+    timeEfficiencyScore,
+    responseQualityScore,
+    submissionTimingScore,
+    attemptRateScore,
+  };
+};
+
+/**
+ * Enhanced comparison function for sorting candidates with multi-level criteria
+ * @param {Object} a - First candidate screening result
+ * @param {Object} b - Second candidate screening result
+ * @returns {number} Comparison result (-1, 0, 1)
+ */
+const compareScreeningsEnhanced = (a, b) => {
+  // Primary: Candidate Fit Score (descending)
+  if (b.candidateFitScore !== a.candidateFitScore) {
+    return b.candidateFitScore - a.candidateFitScore;
+  }
+
+  // Secondary: Communication Clarity (descending)
+  if (b.communicationClarity !== a.communicationClarity) {
+    return b.communicationClarity - a.communicationClarity;
+  }
+
+  // Tertiary: Analytical Thinking (descending)
+  if (b.analyticalThinking !== a.analyticalThinking) {
+    return b.analyticalThinking - a.analyticalThinking;
+  }
+
+  // Fourth: Problem Solving Ability (descending)
+  if (b.problemSolvingAbility !== a.problemSolvingAbility) {
+    return b.problemSolvingAbility - a.problemSolvingAbility;
+  }
+
+  // Fifth: Retry Efficiency Score (descending - fewer retakes used = better)
+  if (b.retryEfficiencyScore !== a.retryEfficiencyScore) {
+    return b.retryEfficiencyScore - a.retryEfficiencyScore;
+  }
+
+  // Sixth: First Attempt Success Rate (descending)
+  if (b.firstAttemptSuccessRate !== a.firstAttemptSuccessRate) {
+    return b.firstAttemptSuccessRate - a.firstAttemptSuccessRate;
+  }
+
+  // Seventh: Assessment Integrity Score (descending)
+  if (b.integrityScore !== a.integrityScore) {
+    return b.integrityScore - a.integrityScore;
+  }
+
+  // Eighth: Time Efficiency Score (descending)
+  if (b.timeEfficiencyScore !== a.timeEfficiencyScore) {
+    return b.timeEfficiencyScore - a.timeEfficiencyScore;
+  }
+
+  // Ninth: Response Quality Score (descending)
+  if (b.responseQualityScore !== a.responseQualityScore) {
+    return b.responseQualityScore - a.responseQualityScore;
+  }
+
+  // Tenth: Attempt Rate Score (descending)
+  if (b.attemptRateScore !== a.attemptRateScore) {
+    return b.attemptRateScore - a.attemptRateScore;
+  }
+
+  // Final: Submission Timing Score (descending - earlier submission = better)
+  if (b.submissionTimingScore !== a.submissionTimingScore) {
+    return b.submissionTimingScore - a.submissionTimingScore;
+  }
+
+  // Ultimate tie-breaker: candidateScreeningId (for consistency)
+  return a.candidateScreeningId
+    .toString()
+    .localeCompare(b.candidateScreeningId.toString());
+};
+
+/**
  * Processes a candidate's screening response with enhanced analysis
  * V1 includes improved screening assessment capabilities
  * UPDATED: Compatible with V2 data structures (cheatingAnalysis, contextualFactors, etc.)
@@ -1532,14 +1882,37 @@ const processResponse = async (responseData) => {
  * @throws {ProcessingError} If screening processing fails
  */
 const processScreening = async (screeningData) => {
-  console.log("Processing screening data V1 (V2 Compatible)");
   const { candidateScreeningId, screeningAssessmentId } = screeningData;
   try {
     const screeningResult = await CandidateScreeningResult.findOne({
       candidateScreeningId,
     });
-    if (!screeningResult) {
-      throw new ProcessingError("CandidateScreeningResult not found");
+    const result = await CandidateScreening.aggregate([
+      {
+        $match: {
+          _id: new mongoose.Types.ObjectId(candidateScreeningId),
+        },
+      },
+      {
+        $lookup: {
+          from: "screeningassessments",
+          localField: "screeningAssessmentId",
+          foreignField: "_id",
+          as: "screeningAssessmentId",
+        },
+      },
+      {
+        $unwind: "$screeningAssessmentId",
+      },
+    ]);
+    const candidateScreening = result[0];
+    console.log(candidateScreening);
+    if (!candidateScreening) {
+      throw new ProcessingError("CandidateScreening not found");
+    }
+    const cutOffScore = candidateScreening.screeningAssessmentId.cutoffScore;
+    if (!cutOffScore) {
+      throw new ProcessingError("Cut off score not found");
     }
 
     let correctPercentages = [];
@@ -1584,6 +1957,16 @@ const processScreening = async (screeningData) => {
             correctPercentages.length
         )
       : 0;
+    let status;
+    if (candidateFitScore >= cutOffScore) {
+      status = "Passed";
+    } else {
+      status = "Failed";
+    }
+    await CandidateScreening.updateOne(
+      { _id: new mongoose.Types.ObjectId(candidateScreeningId) },
+      { $set: { status } }
+    );
 
     const aiResponses = await CandidateAnswerAiResponse.find({
       candidateScreeningId: screeningResult.candidateScreeningId,
@@ -1874,12 +2257,6 @@ const processScreening = async (screeningData) => {
       languagesUsedArray.push("English");
     }
 
-    logger.info("V1: Collected languages used by candidate", {
-      candidateScreeningId,
-      languagesUsed: languagesUsedArray,
-      totalResponses: aiResponses.length,
-    });
-
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -1898,16 +2275,23 @@ const processScreening = async (screeningData) => {
 
     const allCandidateScreening = await CandidateScreening.find({
       screeningAssessmentId: screeningAssessmentId,
-      status: "Appeared",
+      status: { $nin: ["Invited", "Invite Expired", "Appearing"] },
     });
 
     const allScreenings = await CandidateScreeningResult.find({
       candidateScreeningId: { $in: allCandidateScreening.map((i) => i._id) },
     });
 
-    const sortedScreenings = allScreenings.sort(
-      (a, b) => b.candidateFitScore - a.candidateFitScore
+    // Calculate enhanced ranking scores for all candidates
+    const enhancedScreenings = await Promise.all(
+      allScreenings.map(async (screening) => {
+        const enhancedScores = await calculateEnhancedRankingScores(screening);
+        return { ...screening.toObject(), ...enhancedScores };
+      })
     );
+
+    const sortedScreenings = enhancedScreenings.sort(compareScreeningsEnhanced);
+    console.log(sortedScreenings);
 
     for (let i = 0; i < sortedScreenings.length; i++) {
       const currentScreening = sortedScreenings[i];
@@ -1920,6 +2304,7 @@ const processScreening = async (screeningData) => {
                 100
             )
           : 100;
+      console.log(currentScreening.name + " : " + rank);
 
       await CandidateScreeningResult.updateOne(
         { candidateScreeningId: currentScreening.candidateScreeningId },
@@ -1927,6 +2312,14 @@ const processScreening = async (screeningData) => {
           $set: {
             candidateRank: rank,
             betterThanOfCandidates,
+            // Store enhanced ranking scores
+            retryEfficiencyScore: currentScreening.retryEfficiencyScore,
+            firstAttemptSuccessRate: currentScreening.firstAttemptSuccessRate,
+            integrityScore: currentScreening.integrityScore,
+            timeEfficiencyScore: currentScreening.timeEfficiencyScore,
+            responseQualityScore: currentScreening.responseQualityScore,
+            submissionTimingScore: currentScreening.submissionTimingScore,
+            attemptRateScore: currentScreening.attemptRateScore,
             updatedAt: new Date(),
           },
         }
