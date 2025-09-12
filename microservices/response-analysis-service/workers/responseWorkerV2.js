@@ -1520,7 +1520,11 @@ const generateV2Prompt = (
   const basePrompt = `
 You are an advanced AI evaluator using BALANCED & CONTEXT-AWARE analysis. Your goal is to provide accurate, fair assessment with intelligent contextual understanding.
 
+**🚨 CRITICAL WARNING: FOR VIDEO RESPONSES, YOU MUST ANALYZE LIP SYNC FIRST 🚨**
+**BEFORE analyzing reading behaviors, eye movements, or any other behaviors, you MUST complete the mandatory lip sync analysis. Same-gender proxy speaking (male-male, female-female) is extremely common and MUST be detected. Do not let other behaviors distract you from this critical analysis.**
+
 **V2 CORE PRINCIPLES:**
+- **LIP SYNC PRIORITY**: For video responses, lip sync analysis is MANDATORY and must be performed FIRST
 - CONTEXTUAL ANALYSIS: Consider situation, experience level, and response quality
 - BALANCED APPROACH: Neither too lenient nor too strict - find the right balance
 - MULTI-FACTOR DECISIONS: Use multiple signals before making judgments
@@ -1528,6 +1532,19 @@ You are an advanced AI evaluator using BALANCED & CONTEXT-AWARE analysis. Your g
 - INTELLIGENT RELEVANCE: Smart assessment of response appropriateness
 - HR-FRIENDLY LANGUAGE: Use clear, actionable language that HR professionals can understand
 - COMPLETE EVALUATION: Every field must be thoroughly evaluated - NO placeholder values like "Not evaluated"
+- **MANDATORY: LIP SYNC ANALYSIS FIRST**: For video responses, you MUST perform lip sync analysis BEFORE analyzing any other behaviors. This is the #1 priority. Proxy speaking (someone else speaking while candidate moves lips) is the most serious form of cheating and MUST be detected regardless of other behaviors present.
+
+**CRITICAL LIP SYNC CHECKLIST - MANDATORY FOR ALL VIDEO RESPONSES:**
+✓ Step 1: Does the voice gender match the visible person's gender?
+✓ Step 2: Does the voice age/maturity match the visible person's apparent age?
+✓ Step 3: Do the lip movements sync EXACTLY with the audio timing?
+✓ Step 4: Do the mouth shapes correspond to the consonants and vowels being spoken?
+✓ Step 5: Does the voice tone/pitch match what you'd expect from the visible person?
+✓ Step 6: Are there any timing delays between lip movement and audio?
+✓ Step 7: Does the voice remain consistent throughout the entire response?
+✓ Step 8: Does the environmental audio match the video environment?
+
+**IF ANY OF THESE FAIL, SET isLipSync = FALSE IMMEDIATELY**
 
 **MANDATORY V2 FIELDS - MUST ALWAYS BE POPULATED:**
 - cheatingConfidence: Always provide 0-100 score, even when no cheating detected (0 means no concerns)
@@ -1544,8 +1561,28 @@ Flag cheating when strong evidence exists OR any extended reading patterns (over
 
 **SPECIAL FOCUS FOR AUDIO/VIDEO QUESTIONS:**
 - **Audio Questions**: Focus on speech patterns, word repetitions, unnatural pauses, reading rhythm vs natural speech
-- **Video Questions**: Focus on eye movement patterns, looking down/away from camera, alternating between source and camera
+- **Video Questions**: Focus on eye movement patterns, looking down/away from camera, alternating between source and camera, AND CRITICALLY analyze for multiple persons in the video frame
 - **Both Types**: Look for content-delivery mismatches (high accuracy with poor flow)
+- **MANDATORY: LIP SYNC ANALYSIS - PERFORM THIS FIRST**: For video responses, perform DETAILED audio-video synchronization analysis BEFORE analyzing any other behaviors:
+
+**MANDATORY LIP SYNC ANALYSIS PROTOCOL:**
+  - **STEP 1**: **TIMING SYNCHRONIZATION** - Watch lip movements frame by frame - do they match the EXACT timing of spoken words? Even 0.3 second delays indicate proxy speaking
+  - **STEP 2**: **VOICE CHARACTERISTICS MATCHING** - Does the voice match the person's gender, age, accent, tone, pitch, speech patterns? SAME GENDER people can have very different voice characteristics
+  - **STEP 3**: **LIP-SOUND CORRESPONDENCE** - Do the lip shapes and movements correspond to the specific consonants and vowels being made? Watch for: P/B sounds (lips together), F/V sounds (teeth on lip), TH sounds (tongue visible)
+  - **STEP 4**: **AUDIO-VIDEO CONSISTENCY** - Is there consistent synchronization throughout the ENTIRE video? Check beginning, middle, and end
+  - **STEP 5**: **SAME-GENDER PROXY DETECTION** - Is someone else speaking while the candidate moves lips? CRITICAL: This commonly occurs with SAME GENDER individuals - look for voice tone/pitch differences even within same gender
+  - **STEP 6**: **PRE-RECORDED DETECTION** - Does the audio seem disconnected from the video? Look for unnatural consistency or environmental audio mismatches
+  
+**CRITICAL INDICATORS - ANY ONE OF THESE = isLipSync FALSE:**
+    * **Same-gender proxy speaking**: Voice tone/pitch doesn't match visible person (male-male or female-female proxy speaking)
+    * **Timing delays**: Lip movements occur before/after corresponding audio (even 0.3s delays are suspicious)
+    * **Lip-sound mismatch**: Mouth shapes don't match the specific sounds being produced
+    * **Voice inconsistency**: Voice characteristics change during the response indicating multiple speakers
+    * **Environmental audio mismatch**: Background noise in audio doesn't match video environment
+    * **Gender mismatch**: Male voice with female candidate, female voice with male candidate
+    * **Age mismatch**: Young voice with older candidate, mature voice with young candidate
+  
+**MANDATORY REQUIREMENT**: You MUST analyze lip sync FIRST before reading behaviors, eye movements, or any other analysis. If you detect ANY lip sync issues, set isLipSync = FALSE regardless of other behaviors present.
 
 - **PRIMARY FOCUS**: Detect candidates reading from external sources (phones, notes, screens, papers, scripts)
 - **Key Reading Indicators**: ANY sustained downward/off-screen looking (>3 seconds), repeated glances to same location, systematic eye patterns
@@ -1574,6 +1611,17 @@ Flag cheating when strong evidence exists OR any extended reading patterns (over
 - Audio Cues: Background voices, whispered prompts, keyboard typing sounds, phone notifications
 - Response Patterns: Answers that don't match candidate's established knowledge level, sudden topic shifts, external prompting responses
 - Communication Style: Candidate responding to off-camera questions, looking away during answers, unnatural conversation flow
+- **CRITICAL: ACTIVE ASSISTANCE DETECTION**: For video responses, focus ONLY on people who are ACTIVELY HELPING the candidate:
+  - **IGNORE**: People accidentally walking by in background, family members passing through, pets, or brief appearances
+  - **DETECT**: People actively assisting with answers, providing prompts, or collaborating with candidate
+  - **Key Indicators of Active Assistance**:
+    * Person looking at candidate while candidate is speaking (suggesting prompting/coaching)
+    * Person gesturing or pointing while candidate answers (suggesting assistance)
+    * Person holding notes, phone, or device visible to candidate
+    * Candidate repeatedly looking at someone off-camera for answers
+    * Person whispering or speaking to candidate during response
+    * Person appearing to read from notes/screen to help candidate
+    * Sustained presence of person in frame during entire response (not just passing by)
 
 **3. AI TOOL USAGE:**
 - Content Quality: Perfect grammar in spoken responses, overly formal language, technical accuracy beyond experience level
@@ -1607,13 +1655,29 @@ Flag cheating when strong evidence exists OR any extended reading patterns (over
 - Environmental responses: reacting to sounds, lighting adjustments
 
 **BEHAVIORAL ANALYSIS REQUIREMENTS:**
-For video responses, ALWAYS analyze and report:
+For video responses, ALWAYS analyze in this MANDATORY ORDER:
+
+**PRIORITY 1 - MANDATORY LIP SYNC ANALYSIS (MUST BE DONE FIRST):**
+- **CRITICAL: Lip sync analysis** - Perform comprehensive audio-video synchronization analysis BEFORE any other analysis:
+  * **TIMING PRECISION**: Check if lip movements match spoken words timing (even 0.3s delays are suspicious)
+  * **VOICE CHARACTERISTICS**: Verify voice matches candidate's apparent gender, age, tone, pitch, accent
+  * **SAME-GENDER PROXY DETECTION**: Detect if someone else is speaking while candidate moves lips (even same gender) - this is COMMON
+  * **LIP-SOUND CORRESPONDENCE**: Verify mouth shapes match the specific sounds being produced (P/B, F/V, TH, etc.)
+  * **CONSISTENCY ANALYSIS**: Check for consistent synchronization throughout entire video
+  * **ENVIRONMENTAL MATCHING**: Ensure audio environment matches video environment
+  * **VOICE PATTERN ANALYSIS**: Look for changes in voice characteristics during response
+  * Flag any timing delays, voice mismatches, or proxy speaking scenarios regardless of gender
+
+**PRIORITY 2 - OTHER BEHAVIORAL ANALYSIS (ONLY AFTER LIP SYNC ANALYSIS):**
 - Eye movement patterns and camera engagement
 - Speaking rhythm and tone naturalness
 - Response delivery style (conversational vs reading)
 - Timing patterns and pause analysis
 - Facial expressions and body language
 - Environmental audio cues
+- **CRITICAL: Active assistance detection** - Identify people ACTIVELY HELPING the candidate (ignore accidental background people)
+
+**CRITICAL REMINDER**: If you find ANY lip sync issues in Priority 1 analysis, set isLipSync = FALSE immediately. Do not let other behaviors override lip sync findings.
 
 **TIMESTAMP ANALYSIS REQUIREMENTS:**
 For each behavioral observation, provide specific timestamps:
@@ -1627,6 +1691,13 @@ For each behavioral observation, provide specific timestamps:
 - "0:15-0:45 (30s): Frequent downward glances detected with 85% confidence - candidate appears to be reading from device below camera"
 - "1:20-1:35 (15s): Monotone delivery pattern with 70% confidence - unnatural speaking rhythm suggesting script reading"
 - "2:10-2:25 (15s): Unnatural pause before technical answer with 90% confidence - suggests external assistance or reference checking"
+- "0:30-1:00 (30s): Person actively assisting candidate with 95% confidence - person gesturing and looking at candidate while they answer"
+- "1:45-2:00 (15s): Lip sync mismatch detected with 90% confidence - audio playing without corresponding lip movement, suggests pre-recorded content"
+- "0:10-0:50 (40s): Voice-face mismatch detected with 95% confidence - female voice heard while male candidate appears to mouth words, indicates proxy speaking"
+- "2:15-2:30 (15s): Audio-video delay detected with 80% confidence - lip movements occur before corresponding audio, suggests synchronization issues"
+- "0:30-1:15 (45s): Same-gender proxy speaking detected with 85% confidence - male voice tone and pitch don't match visible male candidate's apparent voice characteristics"
+- "1:20-1:45 (25s): Lip-sound mismatch detected with 80% confidence - mouth movements don't correspond to consonant and vowel sounds being produced"
+- "0:05-0:35 (30s): Voice inconsistency detected with 75% confidence - voice characteristics change mid-response suggesting different speakers"
 
 **CONTEXTUAL FACTORS TO CONSIDER:**
 - Candidate experience level: ${responseData.experience} years
@@ -1958,7 +2029,37 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
   "transcription": "[CANDIDATE VOICE ONLY - Complete word-for-word transcription of ONLY what the candidate said, excluding all background voices, whispers, coaching, or secondary speakers]",
       "communication": "[HR-friendly assessment: Professional presentation, clarity, confidence level, speaking pace. DO NOT mention reading, cheating, or integrity concerns - these are handled separately]",
   "communicationRating": "<String, 0.0–5.0>",
-  "cheatingIndicators": ["[ONLY include if genuine cheating evidence exists with STRONG EVIDENCE - e.g., 'Clear evidence of reading from external sources', 'Typing patterns suggest copy-paste behavior', 'Extended pauses suggest candidate was researching answers'. NEVER flag normal behaviors like touching face, brief pauses, natural gestures. If no genuine cheating detected, use: 'No integrity concerns detected - candidate followed proper interview guidelines']"],
+  "isOnlyOnePersonInVideo": [true/false - MANDATORY for video responses - true if only candidate visible, false if people ACTIVELY ASSISTING candidate are detected (ignore accidental background people)],
+  "isLipSync": [true/false - MANDATORY for video responses - PERFORM LIP SYNC ANALYSIS FIRST BEFORE ANY OTHER ANALYSIS:
+    
+    **MANDATORY LIP SYNC CHECKLIST - CHECK EACH ITEM:**
+    ✓ Does voice gender match visible person's gender?
+    ✓ Does voice age/maturity match visible person's apparent age?
+    ✓ Do lip movements sync EXACTLY with audio timing (no delays >0.3s)?
+    ✓ Do mouth shapes match consonants/vowels being spoken?
+    ✓ Does voice tone/pitch match what you'd expect from visible person?
+    ✓ Are there any timing delays between lip movement and audio?
+    ✓ Does voice remain consistent throughout entire response?
+    ✓ Does environmental audio match video environment?
+    
+    **SET TO FALSE IF ANY CHECKLIST ITEM FAILS:**
+      * Voice doesn't match candidate's gender/age/tone/pitch (SAME GENDER people can have very different voice characteristics)
+      * Someone else is speaking while candidate moves lips (SAME GENDER proxy speaking is COMMON)
+      * Audio-video timing delays (even 0.3 second delays are suspicious)
+      * Lip movements without corresponding audio or audio without lip movements
+      * Mouth shapes don't match the specific sounds being produced (P/B sounds need lips together, F/V need teeth on lip)
+      * Voice characteristics change during the response (multiple speakers detected)
+      * Environmental audio doesn't match video environment
+      
+    **SET TO TRUE ONLY IF ALL CHECKLIST ITEMS PASS:**
+      * Voice clearly matches candidate's apparent characteristics (gender, age, tone, pitch)
+      * Lip movements perfectly sync with audio timing throughout entire video
+      * Mouth movements correspond to specific sounds being produced
+      * Consistent voice characteristics throughout response
+      * No evidence of proxy speaking, pre-recorded content, or timing delays
+      
+    **CRITICAL: Analyze lip sync FIRST. Do not let reading behaviors or eye movements distract from lip sync analysis. Same-gender proxy speaking (male-male, female-female) is very common and must be detected.],
+  "cheatingIndicators": ["[ONLY include if genuine cheating evidence exists with STRONG EVIDENCE - e.g., 'Clear evidence of reading from external sources', 'Person actively assisting candidate with answers', 'Female voice detected while male candidate appears to speak - proxy speaking identified', 'Male voice tone and pitch don't match visible male candidate - same-gender proxy speaking detected', 'Audio-video synchronization mismatch - lip movements don't match spoken words', 'Lip-sound mismatch detected - mouth movements don't correspond to sounds being produced', 'Voice characteristics inconsistent throughout response - multiple speakers detected', 'Timing delay between lip movements and audio - synchronization issues detected', 'Typing patterns suggest copy-paste behavior', 'Extended pauses suggest candidate was researching answers'. NEVER flag normal behaviors like touching face, brief pauses, natural gestures, or accidental background people. If no genuine cheating detected, use: 'No integrity concerns detected - candidate followed proper interview guidelines']"],
   "isCheatingDetected": [true/false - ONLY set to true if genuine cheating behaviors are detected. Environmental factors like monitor reflections should NOT trigger cheating detection],
   "cheatingConfidence": "<0-100 MANDATORY - Base confidence ONLY on genuine cheating behaviors, not environmental factors>",
   "contextualFactors": ["[MANDATORY - Clear explanation of assessment decision]", "[Environmental factors that influenced evaluation]", "[How candidate's experience level was considered]"],
@@ -2009,10 +2110,10 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
         {
           "timestamp": "[seconds from start]",
           "duration": "[duration in seconds]", 
-          "behavior": "[FOCUS ON READING BEHAVIORS: 'Extended periods looking away from camera', 'Eye movements suggesting reading from screen', 'Unnatural speaking rhythm suggesting reading', 'External device visible during response', 'Screen reflections visible while candidate appears to be reading'. DO NOT report: touching nose, resting chin, natural gestures, brief thinking pauses, normal monitor reflections without reading behavior]",
+          "behavior": "[FOCUS ON READING BEHAVIORS, ACTIVE ASSISTANCE, AND LIP SYNC ISSUES: 'Extended periods looking away from camera', 'Eye movements suggesting reading from screen', 'Unnatural speaking rhythm suggesting reading', 'External device visible during response', 'Screen reflections visible while candidate appears to be reading', 'Person actively assisting candidate with answers', 'Person gesturing or prompting candidate', 'Person holding notes/device to help candidate', 'Candidate repeatedly looking at someone for answers', 'Voice-face gender mismatch - proxy speaking detected', 'Same-gender proxy speaking - voice characteristics don't match visible person', 'Audio-video synchronization delay detected', 'Lip-sound mismatch - mouth movements don't correspond to sounds', 'Voice inconsistency - characteristics change during response', 'Timing delay between lip movements and audio', 'Lip movements without corresponding audio', 'Audio playing without natural lip movement'. DO NOT report: touching nose, resting chin, natural gestures, brief thinking pauses, normal monitor reflections, accidental background people passing by]",
           "confidence": "[Assessment level: Strong/Moderate/Low - Use Strong for clear evidence, Moderate for possible concerns, Low for normal behaviors]",
-          "description": "[Explain WHY this suggests reading from external source - focus on reading indicators, not normal human behaviors]",
-          "category": "[concerning|technical|environmental|behavioral] - Use 'concerning' for reading from external sources or actual dishonesty. Normal gestures = 'behavioral' with low assessment level"
+          "description": "[Explain WHY this suggests reading from external source, active assistance, or lip sync issues - focus on reading indicators, active assistance, and audio-video mismatches, not normal human behaviors or accidental background people]",
+          "category": "[concerning|technical|environmental|behavioral] - Use 'concerning' for reading from external sources, active assistance, lip sync mismatches, or actual dishonesty. Normal gestures = 'behavioral' with low assessment level"
         }
       ],
                 "totalSuspiciousTime": "[total time of concerning behavior]",
@@ -2067,6 +2168,16 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
     }
   }
 }
+
+**🚨 FINAL CRITICAL REMINDER FOR VIDEO RESPONSES 🚨**
+**BEFORE YOU START YOUR ANALYSIS:**
+1. **MANDATORY**: Perform lip sync analysis FIRST using the 8-step checklist
+2. If ANY lip sync checklist item fails, set isLipSync = FALSE immediately
+3. Same-gender proxy speaking (male-male, female-female) is EXTREMELY common - detect it
+4. Do NOT let reading behaviors, eye movements, or other behaviors distract from lip sync analysis
+5. Lip sync analysis takes PRIORITY over all other behavioral analysis
+
+**CRITICAL: Analyze lip sync FIRST. Do not analyze reading behaviors or eye movements until you have completed the mandatory lip sync analysis. Same-gender proxy speaking is very common and must be detected.**
 `;
 
   // Add cheating detection context if available
@@ -5071,6 +5182,153 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           });
         }
 
+        // DEBUG: Log LipSyncMismatch flag detection for video responses
+        if (flagKey === "LipSyncMismatch" && type === "video") {
+          logger.info(`V2 Flag Detection: ${flagKey} result`, {
+            candidateScreeningId: responseData.candidateScreeningId,
+            flagKey,
+            isDetected,
+            type,
+            // Primary detection method
+            isLipSync: analysis.isLipSync,
+            hasLipSyncMismatch: analysis.isLipSync === false,
+            // Indicator-based detection
+            hasLipSyncIndicators:
+              analysis.cheatingIndicators?.some((indicator) => {
+                const lowerIndicator = indicator.toLowerCase();
+                return (
+                  lowerIndicator.includes("lip sync") ||
+                  lowerIndicator.includes("sync issue") ||
+                  lowerIndicator.includes("audio-video") ||
+                  lowerIndicator.includes("synchronization") ||
+                  lowerIndicator.includes("pre-recorded") ||
+                  lowerIndicator.includes("voice-face mismatch") ||
+                  lowerIndicator.includes("proxy speaking") ||
+                  lowerIndicator.includes("same-gender proxy") ||
+                  lowerIndicator.includes("voice tone") ||
+                  lowerIndicator.includes("voice characteristics") ||
+                  lowerIndicator.includes("lip-sound mismatch") ||
+                  lowerIndicator.includes("timing delay") ||
+                  lowerIndicator.includes("gender mismatch") ||
+                  lowerIndicator.includes("voice mismatch")
+                );
+              }) || false,
+            // Behavioral analysis detection
+            hasBehavioralLipSyncEvidence:
+              analysis.behavioralAnalysis?.suspiciousIndicators?.some(
+                (indicator) => {
+                  const lowerIndicator = indicator.toLowerCase();
+                  return (
+                    lowerIndicator.includes("lip sync") ||
+                    lowerIndicator.includes("audio-video") ||
+                    lowerIndicator.includes("synchronization") ||
+                    lowerIndicator.includes("pre-recorded") ||
+                    lowerIndicator.includes("voice-face mismatch") ||
+                    lowerIndicator.includes("proxy speaking") ||
+                    lowerIndicator.includes("same-gender") ||
+                    lowerIndicator.includes("voice tone") ||
+                    lowerIndicator.includes("voice characteristics") ||
+                    lowerIndicator.includes("lip-sound mismatch") ||
+                    lowerIndicator.includes("timing delay") ||
+                    lowerIndicator.includes("gender mismatch") ||
+                    lowerIndicator.includes("voice mismatch")
+                  );
+                }
+              ) || false,
+            // Suspicious events detection
+            hasSuspiciousLipSyncEvents:
+              analysis.behavioralAnalysis?.behavioralTimestamps?.suspiciousEvents?.some(
+                (event) => {
+                  const behavior = (event.behavior || "").toLowerCase();
+                  return (
+                    behavior.includes("lip sync") ||
+                    behavior.includes("audio-video") ||
+                    behavior.includes("synchronization") ||
+                    behavior.includes("pre-recorded") ||
+                    behavior.includes("delayed audio") ||
+                    behavior.includes("voice-face mismatch") ||
+                    behavior.includes("proxy speaking") ||
+                    behavior.includes("same-gender") ||
+                    behavior.includes("voice tone") ||
+                    behavior.includes("voice characteristics") ||
+                    behavior.includes("lip-sound mismatch") ||
+                    behavior.includes("timing delay") ||
+                    behavior.includes("gender mismatch") ||
+                    behavior.includes("voice mismatch")
+                  );
+                }
+              ) || false,
+            // All indicators for debugging
+            allCheatingIndicators: analysis.cheatingIndicators || [],
+            behavioralSuspiciousIndicators:
+              analysis.behavioralAnalysis?.suspiciousIndicators || [],
+            suspiciousEvents:
+              analysis.behavioralAnalysis?.behavioralTimestamps
+                ?.suspiciousEvents || [],
+          });
+        }
+
+        // DEBUG: Log MultiplePersonsDetected flag detection for video responses
+        if (flagKey === "MultiplePersonsDetected" && type === "video") {
+          logger.info(`V2 Flag Detection: ${flagKey} result`, {
+            candidateScreeningId: responseData.candidateScreeningId,
+            flagKey,
+            isDetected,
+            type,
+            // Primary detection method
+            isOnlyOnePersonInVideo: analysis.isOnlyOnePersonInVideo,
+            hasActiveAssistance: analysis.isOnlyOnePersonInVideo === false,
+            // Indicator-based detection for active assistance
+            hasActiveAssistanceIndicators:
+              analysis.cheatingIndicators?.some((indicator) => {
+                const lowerIndicator = indicator.toLowerCase();
+                return (
+                  lowerIndicator.includes("person actively assisting") ||
+                  lowerIndicator.includes("actively helping") ||
+                  lowerIndicator.includes("person gesturing") ||
+                  lowerIndicator.includes("person prompting") ||
+                  lowerIndicator.includes("assistance detected")
+                );
+              }) || false,
+            // Behavioral analysis detection for active assistance
+            hasBehavioralAssistanceEvidence:
+              analysis.behavioralAnalysis?.suspiciousIndicators?.some(
+                (indicator) => {
+                  const lowerIndicator = indicator.toLowerCase();
+                  return (
+                    lowerIndicator.includes("person actively assisting") ||
+                    lowerIndicator.includes("actively helping") ||
+                    lowerIndicator.includes("person gesturing") ||
+                    lowerIndicator.includes("assistance") ||
+                    lowerIndicator.includes("collaboration")
+                  );
+                }
+              ) || false,
+            // Suspicious events detection for active assistance
+            hasSuspiciousAssistanceEvents:
+              analysis.behavioralAnalysis?.behavioralTimestamps?.suspiciousEvents?.some(
+                (event) => {
+                  const behavior = (event.behavior || "").toLowerCase();
+                  return (
+                    behavior.includes("person actively assisting") ||
+                    behavior.includes("person gesturing") ||
+                    behavior.includes("person prompting") ||
+                    behavior.includes("person holding notes") ||
+                    behavior.includes("assistance") ||
+                    behavior.includes("collaboration")
+                  );
+                }
+              ) || false,
+            // All indicators for debugging
+            allCheatingIndicators: analysis.cheatingIndicators || [],
+            behavioralSuspiciousIndicators:
+              analysis.behavioralAnalysis?.suspiciousIndicators || [],
+            suspiciousEvents:
+              analysis.behavioralAnalysis?.behavioralTimestamps
+                ?.suspiciousEvents || [],
+          });
+        }
+
         const message =
           flagMapping[flagKey][isDetected ? "detected" : "notDetected"];
 
@@ -5103,7 +5361,13 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     // V2: Test function for flag detection (for debugging/validation)
     const testFlagDetection = (testData) => {
       const results = {};
-      const flags = ["FullScreenExit", "TabSwitching", "QuestionCopying"];
+      const flags = [
+        "FullScreenExit",
+        "TabSwitching",
+        "QuestionCopying",
+        "MultiplePersonsDetected",
+        "LipSyncMismatch",
+      ];
 
       flags.forEach((flag) => {
         try {
@@ -5118,6 +5382,299 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
         }
       });
 
+      return results;
+    };
+
+    // V2: Test function specifically for LipSyncMismatch flag
+    const testLipSyncMismatchDetection = () => {
+      const testCases = [
+        {
+          name: "Case 1: isLipSync = false",
+          analysis: { isLipSync: false },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 2: isLipSync = true",
+          analysis: { isLipSync: true },
+          responseData: {},
+          type: "video",
+          expected: false,
+        },
+        {
+          name: "Case 3: Lip sync indicators",
+          analysis: {
+            isLipSync: true,
+            cheatingIndicators: ["Lip sync mismatch detected"],
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 3b: Voice-face gender mismatch (proxy speaking)",
+          analysis: {
+            isLipSync: true,
+            cheatingIndicators: [
+              "Female voice detected while male candidate appears to speak - proxy speaking identified",
+            ],
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 4: Behavioral analysis evidence",
+          analysis: {
+            isLipSync: true,
+            behavioralAnalysis: {
+              suspiciousIndicators: ["Audio-video synchronization issue"],
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 4b: Behavioral analysis proxy speaking evidence",
+          analysis: {
+            isLipSync: true,
+            behavioralAnalysis: {
+              suspiciousIndicators: [
+                "Voice-face mismatch - female voice with male candidate",
+              ],
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 5: Suspicious events evidence",
+          analysis: {
+            isLipSync: true,
+            behavioralAnalysis: {
+              behavioralTimestamps: {
+                suspiciousEvents: [
+                  {
+                    behavior:
+                      "Pre-recorded audio detected without lip movement",
+                    confidence: 90,
+                    category: "concerning",
+                  },
+                ],
+              },
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 5b: Suspicious events proxy speaking evidence",
+          analysis: {
+            isLipSync: true,
+            behavioralAnalysis: {
+              behavioralTimestamps: {
+                suspiciousEvents: [
+                  {
+                    behavior:
+                      "Voice-face gender mismatch - proxy speaking detected",
+                    confidence: 95,
+                    category: "concerning",
+                  },
+                ],
+              },
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 5c: Same-gender proxy speaking evidence",
+          analysis: {
+            isLipSync: true,
+            cheatingIndicators: [
+              "Male voice tone and pitch don't match visible male candidate - same-gender proxy speaking detected",
+            ],
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 5d: Lip-sound mismatch evidence",
+          analysis: {
+            isLipSync: true,
+            behavioralAnalysis: {
+              behavioralTimestamps: {
+                suspiciousEvents: [
+                  {
+                    behavior:
+                      "Lip-sound mismatch - mouth movements don't correspond to sounds being produced",
+                    confidence: 80,
+                    category: "concerning",
+                  },
+                ],
+              },
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 5e: Voice characteristics inconsistency",
+          analysis: {
+            isLipSync: true,
+            cheatingIndicators: [
+              "Voice characteristics inconsistent throughout response - multiple speakers detected",
+            ],
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 6: No evidence of lip sync issues",
+          analysis: {
+            isLipSync: true,
+            cheatingIndicators: ["No integrity concerns detected"],
+            behavioralAnalysis: {
+              suspiciousIndicators: [],
+              behavioralTimestamps: { suspiciousEvents: [] },
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: false,
+        },
+      ];
+
+      const results = {};
+      testCases.forEach((testCase) => {
+        try {
+          const detected = checkFlagDetection(
+            "LipSyncMismatch",
+            testCase.analysis,
+            testCase.responseData,
+            testCase.type
+          );
+          results[testCase.name] = {
+            detected,
+            expected: testCase.expected,
+            passed: detected === testCase.expected,
+          };
+        } catch (error) {
+          results[testCase.name] = { error: error.message };
+        }
+      });
+
+      logger.info("V2: LipSyncMismatch test results", results);
+      return results;
+    };
+
+    // V2: Test function specifically for MultiplePersonsDetected flag
+    const testMultiplePersonsDetection = () => {
+      const testCases = [
+        {
+          name: "Case 1: isOnlyOnePersonInVideo = false",
+          analysis: { isOnlyOnePersonInVideo: false },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 2: isOnlyOnePersonInVideo = true",
+          analysis: { isOnlyOnePersonInVideo: true },
+          responseData: {},
+          type: "video",
+          expected: false,
+        },
+        {
+          name: "Case 3: Active assistance indicators",
+          analysis: {
+            isOnlyOnePersonInVideo: true,
+            cheatingIndicators: [
+              "Person actively assisting candidate with answers",
+            ],
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 4: Behavioral analysis evidence of assistance",
+          analysis: {
+            isOnlyOnePersonInVideo: true,
+            behavioralAnalysis: {
+              suspiciousIndicators: [
+                "Person gesturing and prompting candidate",
+              ],
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 5: Suspicious events evidence of assistance",
+          analysis: {
+            isOnlyOnePersonInVideo: true,
+            behavioralAnalysis: {
+              behavioralTimestamps: {
+                suspiciousEvents: [
+                  {
+                    behavior: "Person holding notes to help candidate",
+                    confidence: 90,
+                    category: "concerning",
+                  },
+                ],
+              },
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: true,
+        },
+        {
+          name: "Case 6: No evidence of active assistance",
+          analysis: {
+            isOnlyOnePersonInVideo: true,
+            cheatingIndicators: ["No integrity concerns detected"],
+            behavioralAnalysis: {
+              suspiciousIndicators: [],
+              behavioralTimestamps: { suspiciousEvents: [] },
+            },
+          },
+          responseData: {},
+          type: "video",
+          expected: false,
+        },
+      ];
+
+      const results = {};
+      testCases.forEach((testCase) => {
+        try {
+          const detected = checkFlagDetection(
+            "MultiplePersonsDetected",
+            testCase.analysis,
+            testCase.responseData,
+            testCase.type
+          );
+          results[testCase.name] = {
+            detected,
+            expected: testCase.expected,
+            passed: detected === testCase.expected,
+          };
+        } catch (error) {
+          results[testCase.name] = { error: error.message };
+        }
+      });
+
+      logger.info("V2: MultiplePersonsDetected test results", results);
       return results;
     };
 
@@ -5138,13 +5695,131 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           );
 
         case "LipSyncMismatch":
+          // ENHANCED: More comprehensive lip sync detection
+          const hasLipSyncMismatch = analysis.isLipSync === false;
+
+          const hasLipSyncIndicators = analysis.cheatingIndicators?.some(
+            (indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("lip sync") ||
+                lowerIndicator.includes("sync issue") ||
+                lowerIndicator.includes("audio-video") ||
+                lowerIndicator.includes("synchronization") ||
+                lowerIndicator.includes("lip movement") ||
+                lowerIndicator.includes("audio mismatch") ||
+                lowerIndicator.includes("video mismatch") ||
+                lowerIndicator.includes("pre-recorded") ||
+                lowerIndicator.includes("delayed audio") ||
+                lowerIndicator.includes("audio without lip") ||
+                lowerIndicator.includes("lip without audio") ||
+                lowerIndicator.includes("voice-face mismatch") ||
+                lowerIndicator.includes("proxy speaking") ||
+                // Gender-based detection (existing)
+                (lowerIndicator.includes("female voice") &&
+                  lowerIndicator.includes("male candidate")) ||
+                (lowerIndicator.includes("male voice") &&
+                  lowerIndicator.includes("female candidate")) ||
+                // ENHANCED: Same-gender proxy speaking detection
+                lowerIndicator.includes("same-gender proxy") ||
+                lowerIndicator.includes("voice tone") ||
+                lowerIndicator.includes("voice pitch") ||
+                lowerIndicator.includes("voice characteristics") ||
+                lowerIndicator.includes("lip-sound mismatch") ||
+                lowerIndicator.includes("mouth movements don't correspond") ||
+                lowerIndicator.includes("voice inconsistency") ||
+                lowerIndicator.includes("timing delay") ||
+                lowerIndicator.includes("multiple speakers") ||
+                lowerIndicator.includes("someone else speaking") ||
+                lowerIndicator.includes("voice doesn't match") ||
+                lowerIndicator.includes("gender mismatch") ||
+                lowerIndicator.includes("voice mismatch") ||
+                // ENHANCED: Timing and consistency patterns
+                lowerIndicator.includes("don't match visible") ||
+                lowerIndicator.includes("characteristics change") ||
+                lowerIndicator.includes("environmental audio")
+              );
+            }
+          );
+
+          // NEW: Check behavioral analysis for lip sync evidence
+          const hasBehavioralLipSyncEvidence =
+            analysis.behavioralAnalysis?.suspiciousIndicators?.some(
+              (indicator) => {
+                const lowerIndicator = indicator.toLowerCase();
+                return (
+                  lowerIndicator.includes("lip sync") ||
+                  lowerIndicator.includes("audio-video") ||
+                  lowerIndicator.includes("synchronization") ||
+                  lowerIndicator.includes("pre-recorded") ||
+                  lowerIndicator.includes("audio mismatch") ||
+                  lowerIndicator.includes("voice-face mismatch") ||
+                  lowerIndicator.includes("proxy speaking") ||
+                  // Gender-based (existing)
+                  lowerIndicator.includes("female voice") ||
+                  lowerIndicator.includes("male voice") ||
+                  lowerIndicator.includes("gender mismatch") ||
+                  // ENHANCED: Same-gender and timing-based detection
+                  lowerIndicator.includes("same-gender") ||
+                  lowerIndicator.includes("voice tone") ||
+                  lowerIndicator.includes("voice pitch") ||
+                  lowerIndicator.includes("voice characteristics") ||
+                  lowerIndicator.includes("lip-sound mismatch") ||
+                  lowerIndicator.includes("mouth movements") ||
+                  lowerIndicator.includes("voice inconsistency") ||
+                  lowerIndicator.includes("timing delay") ||
+                  lowerIndicator.includes("multiple speakers") ||
+                  lowerIndicator.includes("voice mismatch") ||
+                  lowerIndicator.includes("someone else speaking") ||
+                  lowerIndicator.includes("don't match visible") ||
+                  lowerIndicator.includes("characteristics change")
+                );
+              }
+            );
+
+          // NEW: Check suspicious events for lip sync detection
+          const hasSuspiciousLipSyncEvents =
+            analysis.behavioralAnalysis?.behavioralTimestamps?.suspiciousEvents?.some(
+              (event) => {
+                const behavior = (event.behavior || "").toLowerCase();
+                return (
+                  behavior.includes("lip sync") ||
+                  behavior.includes("audio-video") ||
+                  behavior.includes("synchronization") ||
+                  behavior.includes("pre-recorded") ||
+                  behavior.includes("delayed audio") ||
+                  behavior.includes("audio without lip") ||
+                  behavior.includes("lip without audio") ||
+                  behavior.includes("voice-face mismatch") ||
+                  behavior.includes("proxy speaking") ||
+                  // Gender-based (existing)
+                  behavior.includes("female voice") ||
+                  behavior.includes("male voice") ||
+                  behavior.includes("gender mismatch") ||
+                  // ENHANCED: Same-gender and timing-based detection
+                  behavior.includes("same-gender") ||
+                  behavior.includes("voice tone") ||
+                  behavior.includes("voice pitch") ||
+                  behavior.includes("voice characteristics") ||
+                  behavior.includes("lip-sound mismatch") ||
+                  behavior.includes("mouth movements don't correspond") ||
+                  behavior.includes("voice inconsistency") ||
+                  behavior.includes("timing delay") ||
+                  behavior.includes("multiple speakers") ||
+                  behavior.includes("voice mismatch") ||
+                  behavior.includes("someone else speaking") ||
+                  behavior.includes("don't match visible") ||
+                  behavior.includes("characteristics change") ||
+                  behavior.includes("environmental audio")
+                );
+              }
+            );
+
           return (
-            analysis.isLipSync === false ||
-            analysis.cheatingIndicators?.some(
-              (indicator) =>
-                indicator.toLowerCase().includes("lip sync") ||
-                indicator.toLowerCase().includes("sync issue")
-            )
+            hasLipSyncMismatch ||
+            hasLipSyncIndicators ||
+            hasBehavioralLipSyncEvidence ||
+            hasSuspiciousLipSyncEvents
           );
 
         case "EyesMovement":
@@ -5285,13 +5960,65 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           );
 
         case "MultiplePersonsDetected":
+          // ENHANCED: Focus on ACTIVE ASSISTANCE detection, not just any person in background
+          const hasActiveAssistance = analysis.isOnlyOnePersonInVideo === false;
+
+          const hasActiveAssistanceIndicators =
+            analysis.cheatingIndicators?.some((indicator) => {
+              const lowerIndicator = indicator.toLowerCase();
+              return (
+                lowerIndicator.includes("person actively assisting") ||
+                lowerIndicator.includes("actively helping") ||
+                lowerIndicator.includes("person gesturing") ||
+                lowerIndicator.includes("person prompting") ||
+                lowerIndicator.includes("person holding notes") ||
+                lowerIndicator.includes("person holding device") ||
+                lowerIndicator.includes("candidate looking at someone") ||
+                lowerIndicator.includes("assistance detected") ||
+                lowerIndicator.includes("collaboration detected") ||
+                lowerIndicator.includes("coaching detected")
+              );
+            });
+
+          // NEW: Check behavioral analysis for active assistance evidence
+          const hasBehavioralAssistanceEvidence =
+            analysis.behavioralAnalysis?.suspiciousIndicators?.some(
+              (indicator) => {
+                const lowerIndicator = indicator.toLowerCase();
+                return (
+                  lowerIndicator.includes("person actively assisting") ||
+                  lowerIndicator.includes("actively helping") ||
+                  lowerIndicator.includes("person gesturing") ||
+                  lowerIndicator.includes("person prompting") ||
+                  lowerIndicator.includes("assistance") ||
+                  lowerIndicator.includes("collaboration")
+                );
+              }
+            );
+
+          // NEW: Check suspicious events for active assistance detection
+          const hasSuspiciousAssistanceEvents =
+            analysis.behavioralAnalysis?.behavioralTimestamps?.suspiciousEvents?.some(
+              (event) => {
+                const behavior = (event.behavior || "").toLowerCase();
+                return (
+                  behavior.includes("person actively assisting") ||
+                  behavior.includes("person gesturing") ||
+                  behavior.includes("person prompting") ||
+                  behavior.includes("person holding notes") ||
+                  behavior.includes("person holding device") ||
+                  behavior.includes("candidate looking at someone") ||
+                  behavior.includes("assistance") ||
+                  behavior.includes("collaboration")
+                );
+              }
+            );
+
           return (
-            analysis.isOnlyOnePersonInVideo === false ||
-            analysis.cheatingIndicators?.some(
-              (indicator) =>
-                indicator.toLowerCase().includes("multiple person") ||
-                indicator.toLowerCase().includes("people")
-            )
+            hasActiveAssistance ||
+            hasActiveAssistanceIndicators ||
+            hasBehavioralAssistanceEvidence ||
+            hasSuspiciousAssistanceEvents
           );
 
         case "CopiedFromWebsite":
@@ -5585,6 +6312,33 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       }
     };
 
+    // V2: Run test for LipSyncMismatch flag (only in development)
+    if (process.env.NODE_ENV === "development" && normalizedType === "video") {
+      try {
+        const lipSyncTestResults = testLipSyncMismatchDetection();
+        logger.info("V2: LipSyncMismatch test completed", {
+          candidateScreeningId: responseData.candidateScreeningId,
+          testResults: lipSyncTestResults,
+        });
+      } catch (error) {
+        logger.warn("V2: LipSyncMismatch test failed", {
+          error: error.message,
+        });
+      }
+
+      try {
+        const multiplePersonsTestResults = testMultiplePersonsDetection();
+        logger.info("V2: MultiplePersonsDetected test completed", {
+          candidateScreeningId: responseData.candidateScreeningId,
+          testResults: multiplePersonsTestResults,
+        });
+      } catch (error) {
+        logger.warn("V2: MultiplePersonsDetected test failed", {
+          error: error.message,
+        });
+      }
+    }
+
     // Process flags with the new system - pass existing analysis for flag preservation
     const existingAnalysis = question.cheatingAnalysis || null;
     const flagResults = processEnhancedFlags(
@@ -5622,6 +6376,9 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       "SuspiciousPatterns",
       "ExternalAssistance",
       "MobileDeviceDetected",
+      "LipSyncMismatch", // CRITICAL FIX: Add LipSyncMismatch as critical flag
+      "MultiplePersonsDetected", // CRITICAL FIX: Add MultiplePersonsDetected as critical flag
+      "MultipleVoiceDetected", // CRITICAL FIX: Add MultipleVoiceDetected as critical flag
     ];
 
     // V2: CRITICAL FIX - Update isCheatingDetected based on flag system results
@@ -5634,19 +6391,89 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
 
       if (detectedCriticalFlags.length > 0) {
         transformedAnalysis.isCheatingDetected = true;
-        // Set minimum confidence for critical flags
-        if (transformedAnalysis.cheatingConfidence < 50) {
-          transformedAnalysis.cheatingConfidence = Math.max(
-            50,
-            transformedAnalysis.cheatingConfidence
-          );
-        }
+
+        // ENHANCED: Set confidence based on specific critical flags detected
+        let calculatedConfidence = transformedAnalysis.cheatingConfidence || 0;
+
+        detectedCriticalFlags.forEach((flag) => {
+          switch (flag.flag) {
+            case "LipSyncMismatch":
+              // High confidence for lip sync issues - indicates clear proxy speaking
+              calculatedConfidence = Math.max(calculatedConfidence, 85);
+              break;
+            case "MultiplePersonsDetected":
+              // High confidence for active assistance
+              calculatedConfidence = Math.max(calculatedConfidence, 80);
+              break;
+            case "MultipleVoiceDetected":
+              // High confidence for multiple voices
+              calculatedConfidence = Math.max(calculatedConfidence, 75);
+              break;
+            case "ReadingFromExternal":
+              // Medium-high confidence for reading behavior
+              calculatedConfidence = Math.max(calculatedConfidence, 70);
+              break;
+            case "EyesMovement":
+            case "SuspiciousPatterns":
+              // Medium confidence for behavioral patterns
+              calculatedConfidence = Math.max(calculatedConfidence, 65);
+              break;
+            case "ExternalAssistance":
+            case "MobileDeviceDetected":
+              // Medium confidence for external assistance
+              calculatedConfidence = Math.max(calculatedConfidence, 60);
+              break;
+            default:
+              // Default minimum confidence for any critical flag
+              calculatedConfidence = Math.max(calculatedConfidence, 50);
+              break;
+          }
+        });
+
+        transformedAnalysis.cheatingConfidence = calculatedConfidence;
+
+        // CRITICAL FIX: Update cheating indicators to reflect the detected critical flags
+        const criticalFlagIndicators = detectedCriticalFlags.map((flag) => {
+          switch (flag.flag) {
+            case "LipSyncMismatch":
+              return "Audio-video synchronization mismatch detected - possible proxy speaking";
+            case "MultiplePersonsDetected":
+              return "Multiple persons detected - active assistance identified";
+            case "MultipleVoiceDetected":
+              return "Multiple voices detected - external assistance confirmed";
+            case "ReadingFromExternal":
+              return "Reading from external sources detected - compromised assessment integrity";
+            case "EyesMovement":
+              return "Suspicious eye movement patterns detected - possible external reference use";
+            case "SuspiciousPatterns":
+              return "Suspicious behavioral patterns detected - assessment integrity concerns";
+            case "ExternalAssistance":
+              return "External assistance detected - compromised assessment conditions";
+            case "MobileDeviceDetected":
+              return "Mobile device usage detected - unauthorized resource access";
+            default:
+              return `Critical integrity concern detected: ${flag.flag}`;
+          }
+        });
+
+        // Remove contradictory "No integrity concerns" message and replace with specific indicators
+        transformedAnalysis.cheatingIndicators = [
+          ...criticalFlagIndicators,
+          ...(transformedAnalysis.cheatingIndicators || []).filter(
+            (indicator) => !indicator.includes("No integrity concerns detected")
+          ),
+        ];
+
         logger.info(
           "V2: CRITICAL FIX - isCheatingDetected set to true based on flag system",
           {
             detectedCriticalFlags: detectedCriticalFlags.map((f) => f.flag),
             totalFlagged: flaggedChecks,
-            confidence: transformedAnalysis.cheatingConfidence,
+            originalConfidence: transformedAnalysis.cheatingConfidence,
+            calculatedConfidence: calculatedConfidence,
+            confidenceReason:
+              "Critical flags detected with enhanced confidence calculation",
+            updatedIndicators: criticalFlagIndicators,
           }
         );
       } else if (flaggedChecks >= 2) {
@@ -5665,6 +6492,15 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
             confidence: transformedAnalysis.cheatingConfidence,
           }
         );
+      } else if (flaggedChecks === 1) {
+        // CRITICAL FIX: Even a single flag detection should be logged and considered
+        const singleDetectedFlag = detectedFlags[0];
+        logger.info("V2: Single flag detected - evaluating severity", {
+          detectedFlag: singleDetectedFlag.flag,
+          isCritical: criticalFlags.includes(singleDetectedFlag.flag),
+          currentCheatingStatus: transformedAnalysis.isCheatingDetected,
+          currentConfidence: transformedAnalysis.cheatingConfidence,
+        });
       }
     }
 
