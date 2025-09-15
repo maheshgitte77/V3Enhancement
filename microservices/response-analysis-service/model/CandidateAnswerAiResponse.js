@@ -112,6 +112,11 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     languageDetection: {
       languages: { type: [String] },
       percentageWise: { type: [String] },
+      languageSwitching: { type: Boolean, default: false },
+      primaryLanguage: { type: String, default: "English" },
+      languageProficiency: { type: Map, of: String },
+      codeSwitching: { type: Boolean, default: false },
+      languageConsistency: { type: String, default: "Consistent" },
     },
     overallContentQuality: {
       type: String,

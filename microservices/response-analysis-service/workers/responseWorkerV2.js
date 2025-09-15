@@ -1701,7 +1701,10 @@ For each behavioral observation, provide specific timestamps:
 
 **CONTEXTUAL FACTORS TO CONSIDER:**
 - Candidate experience level: ${responseData.experience} years
-- Job role expectations: ${responseData.jobRole}
+- Job role expectations: ${responseData.jobRole || "Not specified"}
+- **LANGUAGE CONTEXT**: Consider if candidate is responding in their native language or second language
+- **MULTILINGUAL ASSESSMENT**: Evaluate technical competency regardless of language used
+- **LANGUAGE PROFICIENCY**: Assess if language barriers affect technical communication
 - Response quality and coherence
 - Environmental vs. intentional assistance
 - Timing patterns and behavioral indicators
@@ -2024,6 +2027,15 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 - If multiple people are speaking, transcribe ONLY the primary candidate's words
 - Mark unclear candidate speech as "[inaudible]" rather than guessing from background voices
 
+**LANGUAGE DETECTION REQUIREMENTS - MANDATORY:**
+- **MULTI-LANGUAGE ANALYSIS**: Detect ALL languages spoken by the candidate throughout the response
+- **LANGUAGE SWITCHING**: Identify when candidate switches between languages (e.g., English to Hindi, Spanish to English)
+- **LANGUAGE PERCENTAGES**: Calculate the percentage of time spent speaking each language
+- **LANGUAGE PROFICIENCY**: Assess fluency and proficiency in each detected language
+- **MIXED LANGUAGE RESPONSES**: Detect responses that mix multiple languages (code-switching)
+- **LANGUAGE CONSISTENCY**: Note if candidate maintains consistent language or switches frequently
+- **CRITICAL**: Language detection is MANDATORY for all video and audio responses - do not skip this analysis
+
 **Response JSON Format:**
 {
   "transcription": "[CANDIDATE VOICE ONLY - Complete word-for-word transcription of ONLY what the candidate said, excluding all background voices, whispers, coaching, or secondary speakers]",
@@ -2166,6 +2178,18 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
       "irrelevantTimeSeconds": "<number>",
       "relevanceExplanation": "[Clear explanation of how response time was utilized effectively]"
     }
+  },
+  "languageDetection": {
+    "languages": ["[Language 1]", "[Language 2]", "[Language 3]"],
+    "percentageWise": ["[0-100%]", "[0-100%]", "[0-100%]"],
+    "languageSwitching": "[true/false - whether candidate switched between languages]",
+    "primaryLanguage": "[Primary language used by candidate]",
+    "languageProficiency": {
+      "[Language 1]": "[Native/Fluent/Intermediate/Basic]",
+      "[Language 2]": "[Native/Fluent/Intermediate/Basic]"
+    },
+    "codeSwitching": "[true/false - whether candidate mixed languages within sentences]",
+    "languageConsistency": "[Consistent/Mixed/Frequent switching]"
   }
 }
 
@@ -2178,6 +2202,38 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 5. Lip sync analysis takes PRIORITY over all other behavioral analysis
 
 **CRITICAL: Analyze lip sync FIRST. Do not analyze reading behaviors or eye movements until you have completed the mandatory lip sync analysis. Same-gender proxy speaking is very common and must be detected.**
+
+**LANGUAGE DETECTION ANALYSIS - MANDATORY FOR ALL RESPONSES:**
+
+**FOR VIDEO RESPONSES:**
+- Analyze the spoken language(s) in the audio track
+- Detect language switching during the response
+- Assess language proficiency based on pronunciation, fluency, and vocabulary
+- Note if candidate switches to native language for complex technical concepts
+- Identify code-switching patterns (mixing languages within sentences)
+
+**FOR AUDIO RESPONSES:**
+- Focus on spoken language detection and analysis
+- Detect multiple languages if present
+- Assess pronunciation and accent patterns
+- Evaluate language consistency throughout the response
+- Note any language-related communication challenges
+
+**LANGUAGE DETECTION CRITERIA:**
+- **Primary Language**: The language used for majority of the response (>50%)
+- **Secondary Languages**: Any other languages detected
+- **Language Switching**: When candidate changes languages mid-response
+- **Code-Switching**: Mixing languages within the same sentence or phrase
+- **Proficiency Levels**: Native, Fluent, Intermediate, Basic based on pronunciation, vocabulary, and fluency
+- **Language Consistency**: Whether candidate maintains one language or switches frequently
+
+**EXAMPLES OF LANGUAGE DETECTION:**
+- "English (80%), Hindi (20%)" - Candidate primarily speaks English but switches to Hindi for some technical terms
+- "Spanish (60%), English (40%)" - Candidate switches between Spanish and English throughout response
+- "English (100%)" - Candidate responds entirely in English
+- "Hindi (70%), English (30%)" - Candidate primarily speaks Hindi but uses English for technical concepts
+
+**CRITICAL**: Language detection is MANDATORY and must be included in every response analysis. Do not skip this analysis even if the response appears to be in a single language.
 `;
 
   // Add cheating detection context if available
@@ -2475,6 +2531,18 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
         : [parsedAnalysis.languageDetection?.percentageWise || "100%"].filter(
             Boolean
           ),
+      // Enhanced language detection fields
+      languageSwitching:
+        parsedAnalysis.languageDetection?.languageSwitching || false,
+      primaryLanguage:
+        parsedAnalysis.languageDetection?.primaryLanguage ||
+        parsedAnalysis.languageDetection?.languages?.[0] ||
+        "English",
+      languageProficiency:
+        parsedAnalysis.languageDetection?.languageProficiency || {},
+      codeSwitching: parsedAnalysis.languageDetection?.codeSwitching || false,
+      languageConsistency:
+        parsedAnalysis.languageDetection?.languageConsistency || "Consistent",
     },
     answerRating: {
       ...parsedAnalysis.answerRating,
@@ -3847,6 +3915,96 @@ const generateAIDetectionExplanation = (signals) => {
  * @param {Object} responseData - Response data to process
  * @returns {Promise<Object>} Processing result
  */
+/**
+ * Validate language detection results from AI analysis
+ * @param {Object} parsedAnalysis - Parsed AI analysis
+ * @param {string} type - Response type (video/audio)
+ * @returns {Object} Validation result with isValid flag and issues array
+ */
+const validateLanguageDetection = (parsedAnalysis, type) => {
+  const issues = [];
+
+  // Check if language detection exists
+  if (!parsedAnalysis.languageDetection) {
+    issues.push("Missing languageDetection field");
+    return { isValid: false, issues };
+  }
+
+  const langDet = parsedAnalysis.languageDetection;
+
+  // Check if languages array exists and has content
+  if (!Array.isArray(langDet.languages) || langDet.languages.length === 0) {
+    issues.push("Missing or empty languages array");
+  }
+
+  // Check if percentageWise array exists and has content
+  if (
+    !Array.isArray(langDet.percentageWise) ||
+    langDet.percentageWise.length === 0
+  ) {
+    issues.push("Missing or empty percentageWise array");
+  }
+
+  // Check if languages and percentages arrays have same length
+  if (
+    Array.isArray(langDet.languages) &&
+    Array.isArray(langDet.percentageWise)
+  ) {
+    if (langDet.languages.length !== langDet.percentageWise.length) {
+      issues.push("Languages and percentageWise arrays have different lengths");
+    }
+  }
+
+  // Check for valid language names (not "Unknown" or empty)
+  if (Array.isArray(langDet.languages)) {
+    const invalidLanguages = langDet.languages.filter(
+      (lang) => !lang || lang === "Unknown" || lang.trim() === ""
+    );
+    if (invalidLanguages.length > 0) {
+      issues.push(
+        `Invalid language names detected: ${invalidLanguages.join(", ")}`
+      );
+    }
+  }
+
+  // Check for valid percentages
+  if (Array.isArray(langDet.percentageWise)) {
+    const invalidPercentages = langDet.percentageWise.filter(
+      (pct) =>
+        !pct || !pct.includes("%") || isNaN(parseFloat(pct.replace("%", "")))
+    );
+    if (invalidPercentages.length > 0) {
+      issues.push(
+        `Invalid percentage format detected: ${invalidPercentages.join(", ")}`
+      );
+    }
+  }
+
+  // Check if primary language is specified
+  if (!langDet.primaryLanguage || langDet.primaryLanguage === "Unknown") {
+    issues.push("Missing or invalid primaryLanguage");
+  }
+
+  // Check for language switching consistency
+  if (
+    langDet.languageSwitching === true &&
+    Array.isArray(langDet.languages) &&
+    langDet.languages.length <= 1
+  ) {
+    issues.push(
+      "Language switching marked as true but only one language detected"
+    );
+  }
+
+  return {
+    isValid: issues.length === 0,
+    issues,
+    detectedLanguages: langDet.languages || [],
+    primaryLanguage: langDet.primaryLanguage,
+    languageSwitching: langDet.languageSwitching,
+  };
+};
+
 const processResponse = async (responseData) => {
   // V2: Get environment-specific configuration
   const envConfig = getV2EnvironmentConfig();
@@ -4241,6 +4399,16 @@ const processResponse = async (responseData) => {
             !!parsedAnalysis.backgroundNoise?.contextualImpact,
           overallContentQualityValue: parsedAnalysis.overallContentQuality,
           responseQualityValue: parsedAnalysis.responseQuality,
+          // Enhanced language detection logging
+          hasLanguageDetection: !!parsedAnalysis.languageDetection,
+          languageDetectionLanguages:
+            parsedAnalysis.languageDetection?.languages || [],
+          languageDetectionPercentages:
+            parsedAnalysis.languageDetection?.percentageWise || [],
+          languageSwitching:
+            parsedAnalysis.languageDetection?.languageSwitching,
+          primaryLanguage: parsedAnalysis.languageDetection?.primaryLanguage,
+          codeSwitching: parsedAnalysis.languageDetection?.codeSwitching,
         });
 
         // V2: Add base answer context for subjective questions
@@ -4285,6 +4453,23 @@ const processResponse = async (responseData) => {
             parsedAnalysis.cheatingIndicators.riskFactors
               .filter((item) => item != null && typeof item === "string")
               .map((item) => String(item));
+        }
+
+        // V2: Validate language detection before transformation
+        if (normalizedType === "video" || normalizedType === "audio") {
+          const languageValidation = validateLanguageDetection(
+            parsedAnalysis,
+            normalizedType
+          );
+          if (!languageValidation.isValid) {
+            logger.warn("V2: Language detection validation failed", {
+              candidateScreeningId: responseData.candidateScreeningId,
+              type: normalizedType,
+              issues: languageValidation.issues,
+              detectedLanguages:
+                parsedAnalysis.languageDetection?.languages || [],
+            });
+          }
         }
 
         // V2: Transform with context for adaptive processing
@@ -6762,6 +6947,19 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           (key) => V2_FEATURE_FLAGS[key]
         ).length,
         balancedApproach: true,
+        // Enhanced language detection logging
+        languageDetection: {
+          languages: transformedAnalysis.languageDetection?.languages || [],
+          percentages:
+            transformedAnalysis.languageDetection?.percentageWise || [],
+          primaryLanguage:
+            transformedAnalysis.languageDetection?.primaryLanguage,
+          languageSwitching:
+            transformedAnalysis.languageDetection?.languageSwitching,
+          codeSwitching: transformedAnalysis.languageDetection?.codeSwitching,
+          languageConsistency:
+            transformedAnalysis.languageDetection?.languageConsistency,
+        },
       }
     );
 
