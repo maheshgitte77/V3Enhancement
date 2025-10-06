@@ -37,6 +37,7 @@ const winston = require("winston");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
+const ProgrammingAnalysis = require("../model/ProgrammingAnalysis");
 
 const mongoose = require("mongoose");
 
@@ -1597,7 +1598,7 @@ const calculateIntegrityScore = (screeningResult) => {
 
   // Count cheating indicators across all questions
   screeningResult.skills?.forEach((skill) => {
-    ["mcq", "video", "audio", "subjective"].forEach((type) => {
+    ["mcq", "video", "audio", "subjective", "programming"].forEach((type) => {
       skill[type]?.forEach((question) => {
         totalQuestions++;
         totalCheatingFlags += question.cheatingFlags?.length || 0;
@@ -1608,6 +1609,11 @@ const calculateIntegrityScore = (screeningResult) => {
   });
 
   // Calculate integrity score (inverse of cheating indicators)
+  // Safety check: if no questions, return default score
+  if (totalQuestions === 0) {
+    return 100; // Perfect integrity score when no questions to evaluate
+  }
+
   const maxExpectedFlags = totalQuestions * 2; // Assume max 2 flags per question
   const maxExpectedExits = totalQuestions * 1; // Assume max 1 exit per question
   const maxExpectedSwitches = totalQuestions * 1; // Assume max 1 switch per question
@@ -1629,7 +1635,9 @@ const calculateIntegrityScore = (screeningResult) => {
     0,
     Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty)
   );
-  return integrityScore;
+
+  // Additional safety check to ensure we don't return NaN
+  return isNaN(integrityScore) ? 100 : integrityScore;
 };
 
 /**
@@ -1643,7 +1651,7 @@ const calculateTimeEfficiencyScore = (screeningResult) => {
   let questionTimeEfficiency = [];
 
   screeningResult.skills?.forEach((skill) => {
-    ["mcq", "video", "audio", "subjective"].forEach((type) => {
+    ["mcq", "video", "audio", "subjective", "programming"].forEach((type) => {
       skill[type]?.forEach((question) => {
         const maxTime = question.maxTime || 0;
         const timeSpent = question.timeSpent || 0;
@@ -1674,7 +1682,9 @@ const calculateTimeEfficiencyScore = (screeningResult) => {
   const timeEfficiencyScore = Math.round(
     avgQuestionEfficiency * 0.7 + overallEfficiency * 0.3
   );
-  return Math.min(timeEfficiencyScore, 100);
+
+  // Safety check to ensure we don't return NaN
+  return isNaN(timeEfficiencyScore) ? 100 : Math.min(timeEfficiencyScore, 100);
 };
 
 /**
@@ -1720,12 +1730,16 @@ const calculateResponseQualityScore = (aiResponses) => {
     qualityScores.push(questionQuality);
   });
 
-  return qualityScores.length > 0
-    ? Math.round(
-        qualityScores.reduce((sum, score) => sum + score, 0) /
-          qualityScores.length
-      )
-    : 0;
+  const avgQuality =
+    qualityScores.length > 0
+      ? Math.round(
+          qualityScores.reduce((sum, score) => sum + score, 0) /
+            qualityScores.length
+        )
+      : 0;
+
+  // Safety check to ensure we don't return NaN
+  return isNaN(avgQuality) ? 0 : avgQuality;
 };
 
 /**
@@ -1948,6 +1962,16 @@ const processScreening = async (screeningData) => {
               .filter((percentage) => percentage >= 0)
           );
         }
+        if (skill.programming && skill.programming.length) {
+          correctPercentages.push(
+            ...skill.programming
+              .map(
+                (programming) =>
+                  parseFloat(programming.testResults.earnedScore) || 0
+              )
+              .filter((percentage) => percentage >= 0)
+          );
+        }
       });
     }
 
@@ -2001,10 +2025,17 @@ const processScreening = async (screeningData) => {
     2. **⚡ Primary Strength**: One specific strength observed OR "No significant strengths demonstrated" if applicable
     3. **🛠️ Area to Watch**: One brief area for improvement or concern (technical skills, soft skills, or integrity)
 
+    **PROGRAMMING-SPECIFIC EVALUATION CRITERIA:**
+    - **Code Quality Assessment**: Evaluate logical correctness, code structure, and implementation completeness
+    - **Problem-Solving Approach**: Assess algorithm design, edge case handling, and optimization
+    - **Technical Proficiency**: Rate programming language usage, best practices, and code efficiency
+    - **Test Case Performance**: Consider passed/failed test cases and score achievement
+    - **Time Management**: Evaluate time spent vs. allocated time and retake usage
+
     **Evaluation Criteria:**
     - **communicationClarity**: Percentage (0-100) based on Communication ratings from non-MCQ responses
-    - **analyticalThinking**: Percentage (0-100) based on Technical Depth, Answer Effectiveness, and problem-solving demonstrated
-    - **problemSolvingAbility**: Percentage (0-100) based on Correct Percentages, Answer Effectiveness, and practical application skills
+    - **analyticalThinking**: Percentage (0-100) based on Technical Depth, Answer Effectiveness, problem-solving demonstrated, AND programming logical correctness
+    - **problemSolvingAbility**: Percentage (0-100) based on Correct Percentages, Answer Effectiveness, practical application skills, AND programming test case performance
     
     **V2 Compatibility Notes:**
     - Consider Cheating Confidence scores when evaluating integrity
@@ -2012,6 +2043,7 @@ const processScreening = async (screeningData) => {
     - Use Contextual Factors to understand assessment environment and conditions
     - Include Behavioral Insights when assessing candidate presentation and professionalism
     - If Cheating Analysis shows flagged checks, prioritize integrity concerns in summary
+    - For Programming questions, consider code quality, test case performance, and logical correctness
 
     **Candidate Screening Data:**
     - **Candidate Fit Score**: ${candidateFitScore}% (Use this for fit category determination)
@@ -2033,6 +2065,32 @@ const processScreening = async (screeningData) => {
     - Correct Percentage: ${mcq.correctPercentage}
     - Time Spent: ${mcq.timeSpent} seconds
     - Max Time: ${mcq.maxTime} minutes
+    `
+            )
+            .join("\n");
+        }
+        if (skill.programming && skill.programming.length) {
+          prompt += skill.programming
+            .map(
+              (programming) => `
+    Question ${questionIndex++}:
+    - Type: Programming
+    - Skill: ${skill.skill}
+    - Question: ${programming.question}
+    - Question Title: ${programming.questionTitle}
+    - Candidate Answer: ${programming.candidateAnswer}
+    - Language Used: ${programming.languageId}
+    - Test Results: ${programming.testResults.passed}/${
+                programming.testResults.total
+              } passed
+    - Earned Score: ${
+      programming.testResults.earnedScore
+    }% (already in percentage)
+    - Max Score: ${programming.testResults.maxScore}%
+    - Time Spent: ${programming.timeSpent} seconds
+    - Max Time: ${programming.maxTime} minutes
+    - Retakes Used: ${programming.retakes}/${programming.maxAttempts}
+    - Programming Analysis ID: ${programming.programmingAnalysisId}
     `
             )
             .join("\n");
@@ -2090,6 +2148,23 @@ const processScreening = async (screeningData) => {
               break;
             }
           }
+          if (skill.programming && skill.programming.length) {
+            const programming = skill.programming.find(
+              (q) => q._id.toString() === response.questionId?.toString()
+            );
+            if (programming) {
+              questionDetails = programming;
+              skillName = skill.skill;
+              questionType = "Programming";
+              extraFields = `
+    - Time Spent: ${programming.timeSpent} seconds
+    - Max Time: ${programming.maxTime} minutes
+    - Test Results: ${programming.testResults.passed}/${programming.testResults.total} passed
+    - Earned Score: ${programming.testResults.earnedScore}%
+    - Retakes Used: ${programming.retakes}/${programming.maxAttempts}`;
+              break;
+            }
+          }
         }
 
         const questionText = questionDetails
@@ -2120,6 +2195,36 @@ const processScreening = async (screeningData) => {
     - Processing Version: ${analysis.flagSystemVersion || "unknown"}`;
         }
 
+        // V1: Add programming analysis integration
+        let programmingAnalysisInfo = "";
+        if (questionDetails?.programmingAnalysisId) {
+          try {
+            const programmingAnalysis = await ProgrammingAnalysis.findOne({
+              _id: questionDetails.programmingAnalysisId,
+            });
+
+            if (programmingAnalysis) {
+              programmingAnalysisInfo = `
+    - Programming Analysis: ${
+      programmingAnalysis.logicalCorrectness.score
+    }% logical correctness
+    - Code Quality: ${programmingAnalysis.codeQuality.score}%
+    - Overall Grade: ${programmingAnalysis.overallAssessment.grade}
+    - Key Issues: ${programmingAnalysis.logicalCorrectness.weaknesses.join(
+      ", "
+    )}
+    - Recommendations: ${programmingAnalysis.overallAssessment.recommendations.join(
+      ", "
+    )}`;
+            }
+          } catch (error) {
+            logger.warn("V1: Failed to fetch programming analysis", {
+              programmingAnalysisId: questionDetails.programmingAnalysisId,
+              error: error.message,
+            });
+          }
+        }
+
         prompt += `
     Question ${questionIndex++}:
     - Type: ${questionType}
@@ -2143,7 +2248,7 @@ const processScreening = async (screeningData) => {
     - Cheating Confidence: ${cheatingConfidence}%
     - Response Quality: ${responseQuality}
     - Contextual Factors: ${contextualFactors}
-    - Behavioral Insights: ${behavioralInsights}${cheatingAnalysisInfo}${extraFields}
+    - Behavioral Insights: ${behavioralInsights}${cheatingAnalysisInfo}${programmingAnalysisInfo}${extraFields}
     `;
       }
     }
