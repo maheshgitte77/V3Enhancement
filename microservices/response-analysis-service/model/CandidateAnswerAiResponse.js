@@ -98,6 +98,23 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    tokenUsage: {
+      inputTokens: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      outputTokens: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      totalTokens: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+    },
 
     // ===== TECHNICAL ASSESSMENT (All Types) =====
     technicalDepth: {

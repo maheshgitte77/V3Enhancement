@@ -40,6 +40,7 @@ const winston = require("winston");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
+const ProgrammingAnalysis = require("../model/ProgrammingAnalysis");
 const { ObjectId } = require("mongoose").Types;
 
 dotenv.config();
@@ -3969,10 +3970,13 @@ const validateLanguageDetection = (parsedAnalysis, type) => {
 
   // Check for valid percentages
   if (Array.isArray(langDet.percentageWise)) {
-    const invalidPercentages = langDet.percentageWise.filter(
-      (pct) =>
-        !pct || !pct.includes("%") || isNaN(parseFloat(pct.replace("%", "")))
-    );
+    const invalidPercentages = langDet.percentageWise.filter((pct) => {
+      // Ensure pct is a string before calling string methods
+      if (!pct || typeof pct !== "string") {
+        return true; // Invalid if not a string
+      }
+      return !pct.includes("%") || isNaN(parseFloat(pct.replace("%", "")));
+    });
     if (invalidPercentages.length > 0) {
       issues.push(
         `Invalid percentage format detected: ${invalidPercentages.join(", ")}`
@@ -4320,6 +4324,11 @@ const processResponse = async (responseData) => {
 
     // V2: AI Analysis with contextual processing and smart retry
     let transformedAnalysis;
+    let tokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
     const maxRetries = envConfig.performance?.maxRetries || MAX_RETRIES;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -4348,6 +4357,123 @@ const processResponse = async (responseData) => {
         }
 
         const aiResponse = result.text;
+
+        // V2: COMPREHENSIVE DEBUG - Log full response structure to understand token usage
+        logger.info("V2: Full API response structure debug", {
+          questionId: responseData?.questionId,
+          hasResult: !!result,
+          resultKeys: result ? Object.keys(result) : [],
+          hasResponse: !!result.response,
+          responseKeys: result.response ? Object.keys(result.response) : [],
+          hasUsageMetadata: !!result.response?.usageMetadata,
+          usageMetadataKeys: result.response?.usageMetadata
+            ? Object.keys(result.response.usageMetadata)
+            : [],
+          fullUsageMetadata: result.response?.usageMetadata || null,
+          // Check alternative response structures
+          hasCandidates: !!result.response?.candidates,
+          candidatesCount: result.response?.candidates?.length || 0,
+          // Check if usage metadata is at root level
+          hasRootUsageMetadata: !!result.usageMetadata,
+          rootUsageMetadataKeys: result.usageMetadata
+            ? Object.keys(result.usageMetadata)
+            : [],
+          fullRootUsageMetadata: result.usageMetadata || null,
+        });
+
+        // V2: ENHANCED token usage capture with multiple fallback strategies
+        let capturedTokenUsage = {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+        };
+
+        // Strategy 1: Standard response.usageMetadata structure
+        if (result.response?.usageMetadata) {
+          capturedTokenUsage = {
+            inputTokens: result.response.usageMetadata.promptTokenCount || 0,
+            outputTokens:
+              result.response.usageMetadata.candidatesTokenCount || 0,
+            totalTokens: result.response.usageMetadata.totalTokenCount || 0,
+          };
+          logger.info(
+            "V2: Token usage captured via response.usageMetadata",
+            capturedTokenUsage
+          );
+        }
+        // Strategy 2: Root level usageMetadata
+        else if (result.usageMetadata) {
+          capturedTokenUsage = {
+            inputTokens: result.usageMetadata.promptTokenCount || 0,
+            outputTokens: result.usageMetadata.candidatesTokenCount || 0,
+            totalTokens: result.usageMetadata.totalTokenCount || 0,
+          };
+          logger.info(
+            "V2: Token usage captured via root usageMetadata",
+            capturedTokenUsage
+          );
+        }
+        // Strategy 3: Alternative field names
+        else if (result.response?.usageMetadata) {
+          capturedTokenUsage = {
+            inputTokens:
+              result.response.usageMetadata.prompt_tokens ||
+              result.response.usageMetadata.input_tokens ||
+              0,
+            outputTokens:
+              result.response.usageMetadata.completion_tokens ||
+              result.response.usageMetadata.output_tokens ||
+              0,
+            totalTokens: result.response.usageMetadata.total_tokens || 0,
+          };
+          logger.info(
+            "V2: Token usage captured via alternative field names",
+            capturedTokenUsage
+          );
+        }
+        // Strategy 4: Calculate from candidates if available
+        else if (
+          result.response?.candidates &&
+          result.response.candidates.length > 0
+        ) {
+          // This is a fallback - we can't get exact token counts but we can estimate
+          const estimatedInputTokens = Math.ceil(prompt.length / 4); // Rough estimation
+          const estimatedOutputTokens = Math.ceil(aiResponse.length / 4); // Rough estimation
+          capturedTokenUsage = {
+            inputTokens: estimatedInputTokens,
+            outputTokens: estimatedOutputTokens,
+            totalTokens: estimatedInputTokens + estimatedOutputTokens,
+          };
+          logger.info("V2: Token usage estimated from content length", {
+            ...capturedTokenUsage,
+            note: "Estimated values - actual API may not provide token metadata",
+          });
+        } else {
+          logger.warn(
+            "V2: No token usage metadata found in any expected location",
+            {
+              questionId: responseData?.questionId,
+              availableKeys: result ? Object.keys(result) : [],
+              responseKeys: result.response ? Object.keys(result.response) : [],
+            }
+          );
+        }
+
+        tokenUsage = capturedTokenUsage;
+
+        logger.info("V2: Final token usage captured", {
+          inputTokens: tokenUsage.inputTokens,
+          outputTokens: tokenUsage.outputTokens,
+          totalTokens: tokenUsage.totalTokens,
+          questionId: responseData?.questionId,
+          hasOptimisticProcessing:
+            processingContext.optimisticProcessing?.enabled,
+          captureMethod: result.response?.usageMetadata
+            ? "response.usageMetadata"
+            : result.usageMetadata
+            ? "root.usageMetadata"
+            : "estimated",
+        });
 
         // V2: Enhanced JSON parsing with better error handling
         const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
@@ -6815,7 +6941,7 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
       normalizedType,
       responseData,
       transformedAnalysis,
-      { typingAnalysisResult }
+      { typingAnalysisResult, tokenUsage }
     );
 
     const questionAiResponse = await CandidateAnswerAiResponse.create(
@@ -7291,6 +7417,8 @@ const processScreening = async (screeningData) => {
     `;
 
     let parsedResponse;
+    let screeningSummaryTokens = 0; // Initialize for empty screening case
+
     if (
       !aiResponses.length &&
       (!screeningResult.skills || !correctPercentages.length)
@@ -7310,12 +7438,84 @@ const processScreening = async (screeningData) => {
           "🛠️ Area to Watch: Complete lack of engagement with assessment process",
         ],
       };
+      // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
         model: "gemini-2.5-pro",
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;
+
+      // V2: ENHANCED screening summary token usage capture with debugging
+      logger.info("V2: Screening summary API response structure debug", {
+        candidateScreeningId,
+        hasResult: !!result,
+        resultKeys: result ? Object.keys(result) : [],
+        hasResponse: !!result.response,
+        responseKeys: result.response ? Object.keys(result.response) : [],
+        hasUsageMetadata: !!result.response?.usageMetadata,
+        usageMetadataKeys: result.response?.usageMetadata
+          ? Object.keys(result.response.usageMetadata)
+          : [],
+        fullUsageMetadata: result.response?.usageMetadata || null,
+        hasRootUsageMetadata: !!result.usageMetadata,
+        rootUsageMetadataKeys: result.usageMetadata
+          ? Object.keys(result.usageMetadata)
+          : [],
+        fullRootUsageMetadata: result.usageMetadata || null,
+      });
+
+      let screeningSummaryTokens = 0;
+
+      // Strategy 1: Standard response.usageMetadata structure
+      if (result.response?.usageMetadata) {
+        screeningSummaryTokens =
+          result.response.usageMetadata.totalTokenCount || 0;
+        logger.info(
+          "V2: Screening summary token usage captured via response.usageMetadata",
+          {
+            screeningSummaryTokens,
+            candidateScreeningId,
+          }
+        );
+      }
+      // Strategy 2: Root level usageMetadata
+      else if (result.usageMetadata) {
+        screeningSummaryTokens = result.usageMetadata.totalTokenCount || 0;
+        logger.info(
+          "V2: Screening summary token usage captured via root usageMetadata",
+          {
+            screeningSummaryTokens,
+            candidateScreeningId,
+          }
+        );
+      }
+      // Strategy 3: Alternative field names
+      else if (result.response?.usageMetadata) {
+        screeningSummaryTokens =
+          result.response.usageMetadata.total_tokens || 0;
+        logger.info(
+          "V2: Screening summary token usage captured via alternative field names",
+          {
+            screeningSummaryTokens,
+            candidateScreeningId,
+          }
+        );
+      }
+      // Strategy 4: Estimate from content
+      else {
+        const estimatedTokens = Math.ceil(aiResponse.length / 4); // Rough estimation
+        screeningSummaryTokens = estimatedTokens;
+        logger.info(
+          "V2: Screening summary token usage estimated from content length",
+          {
+            screeningSummaryTokens,
+            candidateScreeningId,
+            note: "Estimated value - actual API may not provide token metadata",
+          }
+        );
+      }
+
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
         null,
         aiResponse.slice(
@@ -7377,6 +7577,50 @@ const processScreening = async (screeningData) => {
       totalResponses: aiResponses.length,
     });
 
+    // V2: Calculate total token usage across all questions
+    let questionAnalysisTokens = 0;
+    if (aiResponses && aiResponses.length > 0) {
+      questionAnalysisTokens = aiResponses.reduce((sum, response) => {
+        return sum + (response.tokenUsage?.totalTokens || 0);
+      }, 0);
+    }
+
+    // V2: Calculate programming analysis tokens
+    let programmingAnalysisTokens = 0;
+    try {
+      const programmingAnalyses = await ProgrammingAnalysis.find({
+        candidateScreeningId: screeningResult.candidateScreeningId,
+      });
+
+      if (programmingAnalyses && programmingAnalyses.length > 0) {
+        programmingAnalysisTokens = programmingAnalyses.reduce(
+          (sum, analysis) => {
+            return sum + (analysis.tokenUsage?.totalTokens || 0);
+          },
+          0
+        );
+      }
+    } catch (error) {
+      logger.warn("V2: Failed to fetch programming analysis tokens", {
+        candidateScreeningId,
+        error: error.message,
+      });
+    }
+
+    const totalTokensUsed =
+      questionAnalysisTokens +
+      programmingAnalysisTokens +
+      screeningSummaryTokens;
+
+    logger.info("V2: Token usage summary", {
+      candidateScreeningId,
+      questionAnalysisTokens,
+      programmingAnalysisTokens,
+      screeningSummaryTokens,
+      totalTokensUsed,
+      questionsAnalyzed: aiResponses.length,
+    });
+
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -7388,6 +7632,12 @@ const processScreening = async (screeningData) => {
           fitScorePointers: parsedResponse.fitScorePointers,
           candidateFitScore,
           languagesUsed: languagesUsedArray,
+          totalTokensUsed,
+          tokenBreakdown: {
+            questionAnalysisTokens,
+            programmingAnalysisTokens,
+            screeningSummaryTokens,
+          },
           updatedAt: new Date(),
         },
       }
@@ -11783,6 +12033,11 @@ const createTypeSpecificRecord = (
 
     // Flag analysis
     flagAnalysis: transformedAnalysis.flagAnalysis,
+    tokenUsage: additionalData.tokenUsage || {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    },
   };
 
   // Add type-specific fields

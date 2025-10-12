@@ -498,6 +498,55 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       max: 100,
       description: "Percentage of questions attempted out of total questions",
     },
+    totalTokensUsed: {
+      type: Number,
+      default: 0,
+      min: 0,
+      description:
+        "Total Gemini API tokens used for all questions and screening summary",
+    },
+    totalInputTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+      description:
+        "Total input tokens used for all questions and screening summary",
+    },
+    totalOutputTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+      description:
+        "Total output tokens used for all questions and screening summary",
+    },
+    tokenBreakdown: {
+      questionAnalysisTokens: {
+        type: Number,
+        default: 0,
+        description:
+          "Tokens used for analyzing individual questions (video/audio/subjective)",
+      },
+      programmingAnalysisTokens: {
+        type: Number,
+        default: 0,
+        description: "Tokens used for analyzing programming questions",
+      },
+      screeningSummaryTokens: {
+        type: Number,
+        default: 0,
+        description: "Tokens used for generating screening summary",
+      },
+      totalInputTokens: {
+        type: Number,
+        default: 0,
+        description: "Total input tokens across all analysis types",
+      },
+      totalOutputTokens: {
+        type: Number,
+        default: 0,
+        description: "Total output tokens across all analysis types",
+      },
+    },
   },
   {
     strict: false,

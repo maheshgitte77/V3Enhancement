@@ -140,6 +140,23 @@ const ProgrammingAnalysisSchema = new mongoose.Schema(
         default: [],
       },
     },
+    tokenUsage: {
+      inputTokens: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      outputTokens: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      totalTokens: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+    },
   },
   {
     timestamps: true,

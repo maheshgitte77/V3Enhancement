@@ -1140,6 +1140,31 @@ const processResponse = async (responseData) => {
           contents: [...fileInput, { text: prompt }],
         });
         const aiResponse = result.text;
+
+        // V1: Capture token usage from API response
+        const tokenUsage = {
+          inputTokens: result.response?.usageMetadata?.promptTokenCount || 0,
+          outputTokens:
+            result.response?.usageMetadata?.candidatesTokenCount || 0,
+          totalTokens: result.response?.usageMetadata?.totalTokenCount || 0,
+        };
+
+        logger.info("V1: Token usage captured", {
+          inputTokens: tokenUsage.inputTokens,
+          outputTokens: tokenUsage.outputTokens,
+          totalTokens: tokenUsage.totalTokens,
+          questionId: responseData.questionId,
+        });
+
+        // V1: Add error handling for missing token metadata
+        if (!result.response?.usageMetadata) {
+          logger.warn("Token usage metadata not available in API response", {
+            questionId: responseData?.questionId,
+            hasResult: !!result,
+            hasResponse: !!result.response,
+          });
+        }
+
         logger.info("V1: Received AI response, parsing JSON");
 
         // V1: Enhanced JSON parsing
@@ -1424,6 +1449,7 @@ const processResponse = async (responseData) => {
       environmentalSuitability: transformedAnalysis.environmentalSuitability,
       multipleVoicesDetected: transformedAnalysis.multipleVoicesDetected,
       communicationRating: transformedAnalysis.communicationRating,
+      tokenUsage,
       metrics,
     });
 
@@ -1901,6 +1927,7 @@ const processScreening = async (screeningData) => {
     const screeningResult = await CandidateScreeningResult.findOne({
       candidateScreeningId,
     });
+
     const result = await CandidateScreening.aggregate([
       {
         $match: {
@@ -1919,6 +1946,7 @@ const processScreening = async (screeningData) => {
         $unwind: "$screeningAssessmentId",
       },
     ]);
+
     const candidateScreening = result[0];
     console.log(candidateScreening);
     if (!candidateScreening) {
@@ -1967,7 +1995,7 @@ const processScreening = async (screeningData) => {
             ...skill.programming
               .map(
                 (programming) =>
-                  parseFloat(programming.testResults.earnedScore) || 0
+                  parseFloat(programming.testResults?.earnedScore) || 0
               )
               .filter((percentage) => percentage >= 0)
           );
@@ -2080,13 +2108,13 @@ const processScreening = async (screeningData) => {
     - Question Title: ${programming.questionTitle}
     - Candidate Answer: ${programming.candidateAnswer}
     - Language Used: ${programming.languageId}
-    - Test Results: ${programming.testResults.passed}/${
-                programming.testResults.total
+    - Test Results: ${programming.testResults?.passed || 0}/${
+                programming.testResults?.total || 0
               } passed
     - Earned Score: ${
-      programming.testResults.earnedScore
+      programming.testResults?.earnedScore || 0
     }% (already in percentage)
-    - Max Score: ${programming.testResults.maxScore}%
+    - Max Score: ${programming.testResults?.maxScore || 0}%
     - Time Spent: ${programming.timeSpent} seconds
     - Max Time: ${programming.maxTime} minutes
     - Retakes Used: ${programming.retakes}/${programming.maxAttempts}
@@ -2159,8 +2187,10 @@ const processScreening = async (screeningData) => {
               extraFields = `
     - Time Spent: ${programming.timeSpent} seconds
     - Max Time: ${programming.maxTime} minutes
-    - Test Results: ${programming.testResults.passed}/${programming.testResults.total} passed
-    - Earned Score: ${programming.testResults.earnedScore}%
+    - Test Results: ${programming.testResults?.passed || 0}/${
+                programming.testResults?.total || 0
+              } passed
+    - Earned Score: ${programming.testResults?.earnedScore || 0}%
     - Retakes Used: ${programming.retakes}/${programming.maxAttempts}`;
               break;
             }
@@ -2281,6 +2311,10 @@ const processScreening = async (screeningData) => {
     `;
 
     let parsedResponse;
+    let screeningSummaryTokens = 0; // Initialize for empty screening case
+    let screeningSummaryInputTokens = 0;
+    let screeningSummaryOutputTokens = 0;
+
     if (
       !aiResponses.length &&
       (!screeningResult.skills || !correctPercentages.length)
@@ -2300,12 +2334,104 @@ const processScreening = async (screeningData) => {
           "🛠️ Area to Watch: Complete lack of engagement with assessment process",
         ],
       };
+      // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
         model: "gemini-2.5-pro",
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;
+
+      // V1: Debug API response structure for token metadata
+      logger.info("V1: Debugging API response structure for token metadata", {
+        candidateScreeningId,
+        hasResult: !!result,
+        hasResponse: !!result.response,
+        hasUsageMetadata: !!result.response?.usageMetadata,
+        hasRootUsageMetadata: !!result.usageMetadata,
+        responseKeys: result.response ? Object.keys(result.response) : [],
+        resultKeys: Object.keys(result),
+        usageMetadataKeys: result.response?.usageMetadata
+          ? Object.keys(result.response.usageMetadata)
+          : [],
+        rootUsageMetadataKeys: result.usageMetadata
+          ? Object.keys(result.usageMetadata)
+          : [],
+      });
+
+      // V1: Capture screening summary token usage with multiple strategies
+      // Strategy 1: Standard response.usageMetadata structure
+      if (result.response?.usageMetadata) {
+        screeningSummaryTokens =
+          result.response.usageMetadata.totalTokenCount || 0;
+        screeningSummaryInputTokens =
+          result.response.usageMetadata.promptTokenCount || 0;
+        screeningSummaryOutputTokens =
+          result.response.usageMetadata.candidatesTokenCount || 0;
+        logger.info(
+          "V1: Screening summary token usage captured via response.usageMetadata",
+          {
+            screeningSummaryTokens,
+            screeningSummaryInputTokens,
+            screeningSummaryOutputTokens,
+            candidateScreeningId,
+          }
+        );
+      }
+      // Strategy 2: Root level usageMetadata
+      else if (result.usageMetadata) {
+        screeningSummaryTokens = result.usageMetadata.totalTokenCount || 0;
+        screeningSummaryInputTokens =
+          result.usageMetadata.promptTokenCount || 0;
+        screeningSummaryOutputTokens =
+          result.usageMetadata.candidatesTokenCount || 0;
+        logger.info(
+          "V1: Screening summary token usage captured via root usageMetadata",
+          {
+            screeningSummaryTokens,
+            screeningSummaryInputTokens,
+            screeningSummaryOutputTokens,
+            candidateScreeningId,
+          }
+        );
+      }
+      // Strategy 3: Alternative field names
+      else if (result.response?.usageMetadata) {
+        screeningSummaryTokens =
+          result.response.usageMetadata.total_tokens || 0;
+        screeningSummaryInputTokens =
+          result.response.usageMetadata.input_tokens || 0;
+        screeningSummaryOutputTokens =
+          result.response.usageMetadata.output_tokens || 0;
+        logger.info(
+          "V1: Screening summary token usage captured via alternative field names",
+          {
+            screeningSummaryTokens,
+            screeningSummaryInputTokens,
+            screeningSummaryOutputTokens,
+            candidateScreeningId,
+          }
+        );
+      }
+      // Strategy 4: Estimate from content
+      else {
+        const estimatedTokens = Math.ceil(aiResponse.length / 4); // Rough estimation
+        screeningSummaryTokens = estimatedTokens;
+        // For estimation, assume 80% input, 20% output based on typical prompt/response ratio
+        screeningSummaryInputTokens = Math.ceil(estimatedTokens * 0.8);
+        screeningSummaryOutputTokens = Math.ceil(estimatedTokens * 0.2);
+        logger.info(
+          "V1: Screening summary token usage estimated from content length",
+          {
+            screeningSummaryTokens,
+            screeningSummaryInputTokens,
+            screeningSummaryOutputTokens,
+            candidateScreeningId,
+            note: "Estimated values - actual API may not provide token metadata",
+          }
+        );
+      }
+
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
         null,
         aiResponse.slice(
@@ -2362,6 +2488,84 @@ const processScreening = async (screeningData) => {
       languagesUsedArray.push("English");
     }
 
+    // V1: Calculate total token usage across all questions
+    let questionAnalysisTokens = 0;
+    let questionAnalysisInputTokens = 0;
+    let questionAnalysisOutputTokens = 0;
+    if (aiResponses && aiResponses.length > 0) {
+      questionAnalysisTokens = aiResponses.reduce((sum, response) => {
+        return sum + (response.tokenUsage?.totalTokens || 0);
+      }, 0);
+      questionAnalysisInputTokens = aiResponses.reduce((sum, response) => {
+        return sum + (response.tokenUsage?.inputTokens || 0);
+      }, 0);
+      questionAnalysisOutputTokens = aiResponses.reduce((sum, response) => {
+        return sum + (response.tokenUsage?.outputTokens || 0);
+      }, 0);
+    }
+
+    // V1: Calculate programming analysis tokens
+    let programmingAnalysisTokens = 0;
+    let programmingAnalysisInputTokens = 0;
+    let programmingAnalysisOutputTokens = 0;
+    try {
+      const programmingAnalyses = await ProgrammingAnalysis.find({
+        candidateScreeningId: screeningResult.candidateScreeningId,
+      });
+
+      if (programmingAnalyses && programmingAnalyses.length > 0) {
+        programmingAnalysisTokens = programmingAnalyses.reduce(
+          (sum, analysis) => {
+            return sum + (analysis.tokenUsage?.totalTokens || 0);
+          },
+          0
+        );
+        programmingAnalysisInputTokens = programmingAnalyses.reduce(
+          (sum, analysis) => {
+            return sum + (analysis.tokenUsage?.inputTokens || 0);
+          },
+          0
+        );
+        programmingAnalysisOutputTokens = programmingAnalyses.reduce(
+          (sum, analysis) => {
+            return sum + (analysis.tokenUsage?.outputTokens || 0);
+          },
+          0
+        );
+      }
+    } catch (error) {
+      logger.warn("V1: Failed to fetch programming analysis tokens", {
+        candidateScreeningId,
+        error: error.message,
+      });
+    }
+
+    const totalTokensUsed =
+      questionAnalysisTokens +
+      programmingAnalysisTokens +
+      screeningSummaryTokens;
+
+    const totalInputTokens =
+      questionAnalysisInputTokens +
+      programmingAnalysisInputTokens +
+      screeningSummaryInputTokens;
+
+    const totalOutputTokens =
+      questionAnalysisOutputTokens +
+      programmingAnalysisOutputTokens +
+      screeningSummaryOutputTokens;
+
+    logger.info("V1: Token usage summary", {
+      candidateScreeningId,
+      questionAnalysisTokens,
+      programmingAnalysisTokens,
+      screeningSummaryTokens,
+      totalTokensUsed,
+      totalInputTokens,
+      totalOutputTokens,
+      questionsAnalyzed: aiResponses.length,
+    });
+
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -2373,6 +2577,16 @@ const processScreening = async (screeningData) => {
           fitScorePointers: parsedResponse.fitScorePointers,
           candidateFitScore,
           languagesUsed: languagesUsedArray,
+          totalTokensUsed,
+          totalInputTokens,
+          totalOutputTokens,
+          tokenBreakdown: {
+            questionAnalysisTokens,
+            programmingAnalysisTokens,
+            screeningSummaryTokens,
+            totalInputTokens,
+            totalOutputTokens,
+          },
           updatedAt: new Date(),
         },
       }
