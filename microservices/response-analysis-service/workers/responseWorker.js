@@ -591,7 +591,7 @@ const processResponse = async (responseData) => {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         const result = await client.models.generateContent({
-          model: "gemini-2.5-pro",
+          model: "gemini-2.5-flash",
           contents: [...fileInput, { text: prompt }],
         });
         const aiResponse = result.text;
@@ -1068,7 +1068,7 @@ const processScreening = async (screeningData) => {
       };
     } else {
       const result = await client.models.generateContent({
-        model: "gemini-2.5-pro",
+        model: "gemini-2.5-flash",
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;

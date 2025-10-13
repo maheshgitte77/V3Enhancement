@@ -157,6 +157,18 @@ const ProgrammingAnalysisSchema = new mongoose.Schema(
         min: 0,
       },
     },
+    processingCost: {
+      inputTokens: { type: Number, default: 0 },
+      outputTokens: { type: Number, default: 0 },
+      totalTokens: { type: Number, default: 0 },
+      inputCost: { type: Number, default: 0 },
+      outputCost: { type: Number, default: 0 },
+      totalCost: { type: Number, default: 0 },
+      mediaType: { type: String, default: "text" },
+      inputRate: { type: Number, default: 0.3 },
+      outputRate: { type: Number, default: 2.5 },
+      currency: { type: String, default: "USD" },
+    },
   },
   {
     timestamps: true,

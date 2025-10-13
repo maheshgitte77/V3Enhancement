@@ -83,6 +83,16 @@ const V1_CONFIG = {
     timeoutMs: 90000, // Longer timeout for thorough analysis
     enableCaching: true,
   },
+  pricing: {
+    model: "gemini-2.5-flash",
+    inputRates: {
+      text: 0.1, // per million tokens
+      image: 0.1, // per million tokens
+      video: 0.1, // per million tokens
+      audio: 0.7, // per million tokens
+    },
+    outputRate: 0.4, // per million tokens
+  },
 };
 
 /**
@@ -94,6 +104,50 @@ const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
 const MAX_RETRIES = V1_CONFIG.performance.maxRetries;
 const MAX_POLL_ATTEMPTS = 10;
 const RETRY_BASE_DELAY = 2000;
+
+/**
+ * V1: Calculate processing cost based on token usage and media type
+ * Uses Gemini 2.5 Pro pricing with media-type-specific rates
+ * @param {number} inputTokens - Number of input tokens
+ * @param {number} outputTokens - Number of output tokens
+ * @param {string} mediaType - Type of media (text, video, audio, subjective)
+ * @returns {Object} Cost breakdown object
+ */
+const calculateProcessingCost = (inputTokens, outputTokens, mediaType) => {
+  const config = V1_CONFIG.pricing;
+
+  let inputRate;
+  switch (mediaType.toLowerCase()) {
+    case "video":
+      inputRate = config.inputRates.video;
+      break;
+    case "audio":
+      inputRate = config.inputRates.audio;
+      break;
+    case "subjective":
+    case "text":
+    default:
+      inputRate = config.inputRates.text;
+      break;
+  }
+
+  const inputCost = (inputTokens / 1000000) * inputRate;
+  const outputCost = (outputTokens / 1000000) * config.outputRate;
+  const totalCost = inputCost + outputCost;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    inputCost: parseFloat(inputCost.toFixed(6)),
+    outputCost: parseFloat(outputCost.toFixed(6)),
+    totalCost: parseFloat(totalCost.toFixed(6)),
+    mediaType: mediaType.toLowerCase(),
+    inputRate: inputRate,
+    outputRate: config.outputRate,
+    currency: "USD",
+  };
+};
 
 /**
  * Kafka client configuration for V1
@@ -1136,7 +1190,7 @@ const processResponse = async (responseData) => {
         );
 
         const result = await client.models.generateContent({
-          model: "gemini-2.5-pro",
+          model: "gemini-2.5-flash",
           contents: [...fileInput, { text: prompt }],
         });
         const aiResponse = result.text;
@@ -2337,7 +2391,7 @@ const processScreening = async (screeningData) => {
       // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
-        model: "gemini-2.5-pro",
+        model: "gemini-2.5-flash",
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;
@@ -2566,6 +2620,109 @@ const processScreening = async (screeningData) => {
       questionsAnalyzed: aiResponses.length,
     });
 
+    // V1: Calculate screening summary generation cost
+    let screeningSummaryCost = 0;
+    let screeningSummaryCostInputTokens = 0;
+    let screeningSummaryCostOutputTokens = 0;
+
+    if (result.response?.usageMetadata) {
+      screeningSummaryCostInputTokens =
+        result.response.usageMetadata.promptTokenCount || 0;
+      screeningSummaryCostOutputTokens =
+        result.response.usageMetadata.candidatesTokenCount || 0;
+    } else if (result.usageMetadata) {
+      screeningSummaryCostInputTokens =
+        result.usageMetadata.promptTokenCount || 0;
+      screeningSummaryCostOutputTokens =
+        result.usageMetadata.candidatesTokenCount || 0;
+    } else {
+      // Estimate: 80% input, 20% output
+      screeningSummaryCostInputTokens = Math.ceil(screeningSummaryTokens * 0.8);
+      screeningSummaryCostOutputTokens = Math.ceil(
+        screeningSummaryTokens * 0.2
+      );
+    }
+
+    // Screening summary uses text input (not video/audio)
+    const screeningSummaryProcessingCost = calculateProcessingCost(
+      screeningSummaryCostInputTokens,
+      screeningSummaryCostOutputTokens,
+      "text"
+    );
+
+    screeningSummaryCost = screeningSummaryProcessingCost.totalCost;
+
+    logger.info("V1: Screening summary cost calculated", {
+      candidateScreeningId,
+      inputTokens: screeningSummaryCostInputTokens,
+      outputTokens: screeningSummaryCostOutputTokens,
+      totalCost: screeningSummaryCost,
+      mediaType: "text",
+    });
+
+    // V1: Calculate total processing costs by aggregating from all questions
+    let videoQuestionsCost = 0;
+    let audioQuestionsCost = 0;
+    let subjectiveQuestionsCost = 0;
+    let programmingQuestionsCost = 0;
+
+    if (screeningResult.skills && screeningResult.skills.length) {
+      screeningResult.skills.forEach((skill) => {
+        // Aggregate video question costs
+        if (skill.video && skill.video.length) {
+          videoQuestionsCost += skill.video.reduce((sum, video) => {
+            return sum + (video.processingCost?.totalCost || 0);
+          }, 0);
+        }
+
+        // Aggregate audio question costs
+        if (skill.audio && skill.audio.length) {
+          audioQuestionsCost += skill.audio.reduce((sum, audio) => {
+            return sum + (audio.processingCost?.totalCost || 0);
+          }, 0);
+        }
+
+        // Aggregate subjective question costs
+        if (skill.subjective && skill.subjective.length) {
+          subjectiveQuestionsCost += skill.subjective.reduce(
+            (sum, subjective) => {
+              return sum + (subjective.processingCost?.totalCost || 0);
+            },
+            0
+          );
+        }
+
+        // Aggregate programming question costs (stored at question level)
+        if (skill.programming && skill.programming.length) {
+          programmingQuestionsCost += skill.programming.reduce(
+            (sum, programming) => {
+              return sum + (programming.processingCost?.totalCost || 0);
+            },
+            0
+          );
+        }
+      });
+    }
+
+    // V1: Calculate total processing cost
+    const totalProcessingCost =
+      videoQuestionsCost +
+      audioQuestionsCost +
+      subjectiveQuestionsCost +
+      programmingQuestionsCost +
+      screeningSummaryCost;
+
+    logger.info("V1: Total processing cost calculated", {
+      candidateScreeningId,
+      videoQuestionsCost: `$${videoQuestionsCost.toFixed(6)}`,
+      audioQuestionsCost: `$${audioQuestionsCost.toFixed(6)}`,
+      subjectiveQuestionsCost: `$${subjectiveQuestionsCost.toFixed(6)}`,
+      programmingQuestionsCost: `$${programmingQuestionsCost.toFixed(6)}`,
+      screeningSummaryCost: `$${screeningSummaryCost.toFixed(6)}`,
+      totalProcessingCost: `$${totalProcessingCost.toFixed(6)}`,
+      currency: "USD",
+    });
+
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -2586,6 +2743,20 @@ const processScreening = async (screeningData) => {
             screeningSummaryTokens,
             totalInputTokens,
             totalOutputTokens,
+          },
+          // V1: Add comprehensive cost breakdown
+          costBreakdown: {
+            videoQuestionsCost: parseFloat(videoQuestionsCost.toFixed(6)),
+            audioQuestionsCost: parseFloat(audioQuestionsCost.toFixed(6)),
+            subjectiveQuestionsCost: parseFloat(
+              subjectiveQuestionsCost.toFixed(6)
+            ),
+            programmingQuestionsCost: parseFloat(
+              programmingQuestionsCost.toFixed(6)
+            ),
+            screeningSummaryCost: parseFloat(screeningSummaryCost.toFixed(6)),
+            totalProcessingCost: parseFloat(totalProcessingCost.toFixed(6)),
+            currency: "USD",
           },
           updatedAt: new Date(),
         },

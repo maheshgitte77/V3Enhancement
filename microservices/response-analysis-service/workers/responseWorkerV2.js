@@ -96,6 +96,18 @@ const V2_CONFIG = {
     multiPassAnalysis: false, // Single pass with comprehensive analysis
     confidenceScoring: true, // Include confidence scores in analysis
   },
+  pricing: {
+    model: "gemini-2.5-flash",
+    // Input pricing varies by media type
+    inputRates: {
+      text: 0.1, // per million tokens
+      image: 0.1, // per million tokens
+      video: 0.1, // per million tokens
+      audio: 0.7, // per million tokens
+    },
+    // Output pricing is uniform across all media types
+    outputRate: 0.4, // per million tokens
+  },
 };
 
 /**
@@ -213,6 +225,51 @@ const getV2EnvironmentConfig = () => {
  */
 const isV2FeatureEnabled = (feature) => {
   return V2_FEATURE_FLAGS[feature] || false;
+};
+
+/**
+ * Calculate processing cost based on Gemini 2.5 Pro pricing by media type
+ * @param {number} inputTokens - Number of input tokens
+ * @param {number} outputTokens - Number of output tokens
+ * @param {string} mediaType - Type of media: 'text', 'video', 'audio', 'subjective'
+ * @returns {Object} Cost breakdown with total
+ */
+const calculateProcessingCost = (inputTokens, outputTokens, mediaType) => {
+  const config = V2_CONFIG.pricing;
+
+  // Determine input rate based on media type
+  let inputRate;
+  switch (mediaType.toLowerCase()) {
+    case "video":
+      inputRate = config.inputRates.video;
+      break;
+    case "audio":
+      inputRate = config.inputRates.audio;
+      break;
+    case "subjective":
+    case "text":
+    default:
+      inputRate = config.inputRates.text;
+      break;
+  }
+
+  // Calculate costs (convert to per-token cost)
+  const inputCost = (inputTokens / 1000000) * inputRate;
+  const outputCost = (outputTokens / 1000000) * config.outputRate;
+  const totalCost = inputCost + outputCost;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    inputCost: parseFloat(inputCost.toFixed(6)),
+    outputCost: parseFloat(outputCost.toFixed(6)),
+    totalCost: parseFloat(totalCost.toFixed(6)),
+    mediaType: mediaType.toLowerCase(),
+    inputRate: inputRate,
+    outputRate: config.outputRate,
+    currency: "USD",
+  };
 };
 
 /**
@@ -4061,6 +4118,7 @@ const processResponse = async (responseData) => {
 
   let mediaPath;
   let uploadedFileName = null;
+  let processingCost = null;
 
   try {
     const normalizedType = responseData.type.toLowerCase();
@@ -4349,7 +4407,7 @@ const processResponse = async (responseData) => {
         let result;
         try {
           result = await client.models.generateContent({
-            model: "gemini-2.5-pro",
+            model: "gemini-2.5-flash",
             contents: [...fileInput, { text: prompt }],
           });
         } catch (aiError) {
@@ -4473,6 +4531,19 @@ const processResponse = async (responseData) => {
             : result.usageMetadata
             ? "root.usageMetadata"
             : "estimated",
+        });
+
+        // V2: Calculate processing cost based on token usage and media type
+        processingCost = calculateProcessingCost(
+          tokenUsage.inputTokens,
+          tokenUsage.outputTokens,
+          normalizedType
+        );
+
+        logger.info("V2: Processing cost calculated", {
+          questionId: responseData?.questionId,
+          ...processingCost,
+          costPerQuestion: `$${processingCost.totalCost.toFixed(6)}`,
         });
 
         // V2: Enhanced JSON parsing with better error handling
@@ -6991,6 +7062,9 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     question.contextualQuality = transformedAnalysis.responseQuality;
     question.cheatingConfidence = transformedAnalysis.cheatingConfidence;
 
+    // V2: Store processing cost at question level
+    question.processingCost = processingCost;
+
     // V2: Add relevance score for subjective questions
     if (
       normalizedType === "subjective" &&
@@ -7073,6 +7147,14 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
           (key) => V2_FEATURE_FLAGS[key]
         ).length,
         balancedApproach: true,
+        // V2: Processing cost information
+        processingCost: {
+          totalCost: processingCost.totalCost,
+          mediaType: processingCost.mediaType,
+          inputRate: processingCost.inputRate,
+          outputRate: processingCost.outputRate,
+          tokens: processingCost.totalTokens,
+        },
         // Enhanced language detection logging
         languageDetection: {
           languages: transformedAnalysis.languageDetection?.languages || [],
@@ -7131,6 +7213,8 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
         flagSystemVersion: "V2",
         totalFlagsProcessed: flagResults.length,
         flagProcessingSuccess: true,
+        processingCost: processingCost,
+        costPerQuestion: `$${processingCost.totalCost.toFixed(6)}`,
       },
     };
   } catch (error) {
@@ -7441,7 +7525,7 @@ const processScreening = async (screeningData) => {
       // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
-        model: "gemini-2.5-pro",
+        model: "gemini-2.5-flash",
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;
@@ -7515,6 +7599,44 @@ const processScreening = async (screeningData) => {
           }
         );
       }
+
+      // V2: Calculate screening summary generation cost
+      let screeningSummaryCost = 0;
+      let screeningSummaryInputTokens = 0;
+      let screeningSummaryOutputTokens = 0;
+
+      if (result.response?.usageMetadata) {
+        screeningSummaryInputTokens =
+          result.response.usageMetadata.promptTokenCount || 0;
+        screeningSummaryOutputTokens =
+          result.response.usageMetadata.candidatesTokenCount || 0;
+      } else if (result.usageMetadata) {
+        screeningSummaryInputTokens =
+          result.usageMetadata.promptTokenCount || 0;
+        screeningSummaryOutputTokens =
+          result.usageMetadata.candidatesTokenCount || 0;
+      } else {
+        // Estimate: 80% input, 20% output
+        screeningSummaryInputTokens = Math.ceil(screeningSummaryTokens * 0.8);
+        screeningSummaryOutputTokens = Math.ceil(screeningSummaryTokens * 0.2);
+      }
+
+      // Screening summary uses text input (not video/audio)
+      const screeningSummaryProcessingCost = calculateProcessingCost(
+        screeningSummaryInputTokens,
+        screeningSummaryOutputTokens,
+        "text"
+      );
+
+      screeningSummaryCost = screeningSummaryProcessingCost.totalCost;
+
+      logger.info("V2: Screening summary cost calculated", {
+        candidateScreeningId,
+        inputTokens: screeningSummaryInputTokens,
+        outputTokens: screeningSummaryOutputTokens,
+        totalCost: screeningSummaryCost,
+        mediaType: "text",
+      });
 
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [
         null,
@@ -7621,6 +7743,69 @@ const processScreening = async (screeningData) => {
       questionsAnalyzed: aiResponses.length,
     });
 
+    // V2: Calculate total processing costs by aggregating from all questions
+    let videoQuestionsCost = 0;
+    let audioQuestionsCost = 0;
+    let subjectiveQuestionsCost = 0;
+    let programmingQuestionsCost = 0;
+
+    if (screeningResult.skills && screeningResult.skills.length) {
+      screeningResult.skills.forEach((skill) => {
+        // Aggregate video question costs
+        if (skill.video && skill.video.length) {
+          videoQuestionsCost += skill.video.reduce((sum, video) => {
+            return sum + (video.processingCost?.totalCost || 0);
+          }, 0);
+        }
+
+        // Aggregate audio question costs
+        if (skill.audio && skill.audio.length) {
+          audioQuestionsCost += skill.audio.reduce((sum, audio) => {
+            return sum + (audio.processingCost?.totalCost || 0);
+          }, 0);
+        }
+
+        // Aggregate subjective question costs
+        if (skill.subjective && skill.subjective.length) {
+          subjectiveQuestionsCost += skill.subjective.reduce(
+            (sum, subjective) => {
+              return sum + (subjective.processingCost?.totalCost || 0);
+            },
+            0
+          );
+        }
+
+        // Aggregate programming question costs (stored at question level)
+        if (skill.programming && skill.programming.length) {
+          programmingQuestionsCost += skill.programming.reduce(
+            (sum, programming) => {
+              return sum + (programming.processingCost?.totalCost || 0);
+            },
+            0
+          );
+        }
+      });
+    }
+
+    // V2: Calculate total processing cost
+    const totalProcessingCost =
+      videoQuestionsCost +
+      audioQuestionsCost +
+      subjectiveQuestionsCost +
+      programmingQuestionsCost +
+      screeningSummaryCost;
+
+    logger.info("V2: Total processing cost calculated", {
+      candidateScreeningId,
+      videoQuestionsCost: `$${videoQuestionsCost.toFixed(6)}`,
+      audioQuestionsCost: `$${audioQuestionsCost.toFixed(6)}`,
+      subjectiveQuestionsCost: `$${subjectiveQuestionsCost.toFixed(6)}`,
+      programmingQuestionsCost: `$${programmingQuestionsCost.toFixed(6)}`,
+      screeningSummaryCost: `$${screeningSummaryCost.toFixed(6)}`,
+      totalProcessingCost: `$${totalProcessingCost.toFixed(6)}`,
+      currency: "USD",
+    });
+
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -7637,6 +7822,20 @@ const processScreening = async (screeningData) => {
             questionAnalysisTokens,
             programmingAnalysisTokens,
             screeningSummaryTokens,
+          },
+          // V2: Add comprehensive cost breakdown
+          costBreakdown: {
+            videoQuestionsCost: parseFloat(videoQuestionsCost.toFixed(6)),
+            audioQuestionsCost: parseFloat(audioQuestionsCost.toFixed(6)),
+            subjectiveQuestionsCost: parseFloat(
+              subjectiveQuestionsCost.toFixed(6)
+            ),
+            programmingQuestionsCost: parseFloat(
+              programmingQuestionsCost.toFixed(6)
+            ),
+            screeningSummaryCost: parseFloat(screeningSummaryCost.toFixed(6)),
+            totalProcessingCost: parseFloat(totalProcessingCost.toFixed(6)),
+            currency: "USD",
           },
           updatedAt: new Date(),
         },
