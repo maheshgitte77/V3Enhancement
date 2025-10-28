@@ -1809,6 +1809,156 @@ When cheating is detected with strong evidence, ALL fields must reflect this:
 **Job Role**: ${responseData.jobRole}
 **Duration**: ${responseData.questionDuration}
 
+**CRITICAL: EXPERIENCE-ADJUSTED CORRECTNESS PERCENTAGE CALCULATION**
+
+**correctPercentage MUST BE CALCULATED AS A COMBINED SCORE:**
+
+**Formula**: correctPercentage = (Factual Correctness × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25) × Experience Adjustment Factor
+
+**Component Breakdown:**
+
+1. **Factual Correctness (0-100 points, weight 40%)**: 
+   - Did candidate answer what was asked?
+   - Are the facts/methods/concepts mentioned correct?
+   - Is the information accurate?
+   - 100 points = All facts correct
+   - 75 points = Most facts correct, minor errors
+   - 50 points = Partially correct
+   - 25 points = Many errors
+   - 0 points = Wrong or no answer
+
+2. **Technical Depth (0-100 points, weight 35%)**:
+   - How deep is the technical understanding?
+   - Are use cases, examples, edge cases provided?
+   - Does response show practical application knowledge?
+   - Is the explanation comprehensive or just surface-level?
+   - 100 points = Comprehensive with examples, use cases, best practices
+   - 75 points = Good depth with some practical examples
+   - 50 points = Basic understanding, minimal examples
+   - 25 points = Very shallow, just definitions
+   - 0 points = No depth at all
+
+3. **Communication Effectiveness (0-100 points, weight 25%)**:
+   - How well was the answer communicated?
+   - Is it clear, structured, and coherent?
+   - Does it flow logically?
+   - 100 points = Excellent communication, clear and structured
+   - 75 points = Good communication with minor issues
+   - 50 points = Adequate but could be clearer
+   - 25 points = Poor communication, unclear
+   - 0 points = Incomprehensible
+
+**Experience Adjustment Factor (CONTEXTUAL - NOT BLANKET):**
+
+**IMPORTANT**: Experience adjustment should be applied based on ANSWER QUALITY, not blanket penalty/bonus.
+
+- **0-2 years (Junior)**: 
+  - **Basic/Shallow answers**: Multiply by 1.15 (15% bonus for effort)
+  - **Good/Excellent answers**: Multiply by 1.0 (no adjustment needed)
+  - Cap at 100%
+  - Rationale: Encourage juniors showing foundational knowledge, but don't over-reward excellent answers
+
+- **3-5 years (Mid-level)**:
+  - **All answers**: Multiply by 1.0 (no adjustment)
+  - Standard expectations for all answer qualities
+  
+- **6+ years (Senior/Expert)**:
+  - **Basic/Shallow answers**: Multiply by 0.85 (15% penalty for insufficient depth)
+  - **Good/Excellent answers**: Multiply by 1.0 (no penalty - they deserve full credit)
+  - **Outstanding answers**: Consider 1.05 bonus (5% bonus for exceptional depth)
+  - Rationale: Penalize shallow answers but reward excellent senior performance
+
+**CONTEXTUAL ADJUSTMENT DECISION TREE:**
+
+**Step 1: Calculate Raw Score** = (Factual × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25)
+
+**Step 2: Determine Experience Adjustment Factor:**
+
+**For Junior (0-2 years):**
+- IF Technical Depth < 50 points → Apply 1.15 bonus (encourage effort)
+- IF Technical Depth ≥ 70 points → Apply 1.0 (no bonus needed - already good)
+- ELSE → Apply 1.0 (standard)
+
+**For Mid-level (3-5 years):**
+- ALWAYS apply 1.0 (no adjustment)
+
+**For Senior (6+ years):**
+- IF Technical Depth < 60 points → Apply 0.85 penalty (insufficient depth for senior)
+- IF Technical Depth ≥ 80 points → Apply 1.0 (no penalty - deserves full credit)
+- IF Technical Depth = 100 points → Apply 1.05 bonus (exceptional depth)
+- ELSE → Apply 1.0 (standard)
+
+**Step 3: Apply Adjustment** = Raw Score × Adjustment Factor
+
+**Step 4: Cap at 100%** (if result > 100%, set to 100%)
+
+**CRITICAL**: This ensures excellent answers get excellent scores regardless of experience level!
+
+**CRITICAL EXAMPLES:**
+
+**Example 1 - Senior Role, Basic Answer (SHOULD BE PENALIZED):**
+- Question: "List Character class methods"
+- Answer: "isLetter, isDigit, toUpperCase, toLowerCase" (just names, brief descriptions)
+- Factual Correctness: 100 points (all methods correct)
+- Technical Depth: 40 points (no use cases, examples, or depth) ← SHALLOW
+- Communication: 75 points (clear but basic)
+- Raw Score: (100 × 0.40) + (40 × 0.35) + (75 × 0.25) = 40 + 14 + 18.75 = 72.75
+- Experience Adjustment (6+ years, Technical Depth < 60): 72.75 × 0.85 = **61.84% ← correctPercentage**
+- overallRating: 3.1/5.0 (proportional to 61.84%)
+- Result: **Aligned - both show room for improvement**
+
+**Example 2 - Junior Role, Basic Answer (SHOULD GET BONUS):**
+- Same answer as Example 1
+- Raw Score: 72.75
+- Experience Adjustment (0-2 years, Technical Depth < 50): 72.75 × 1.15 = **83.66% ← correctPercentage**
+- overallRating: 4.2/5.0 (proportional)
+- Result: **Aligned - shows good performance for junior**
+
+**Example 3 - Senior Role, Comprehensive Answer (SHOULD GET FULL CREDIT):**
+- Question: "List Character class methods"
+- Answer: Includes methods + use cases + examples + best practices + edge cases
+- Factual Correctness: 100 points
+- Technical Depth: 95 points ← EXCELLENT DEPTH
+- Communication: 90 points
+- Raw Score: (100 × 0.40) + (95 × 0.35) + (90 × 0.25) = 40 + 33.25 + 22.5 = 95.75
+- Experience Adjustment (6+ years, Technical Depth ≥ 80): 95.75 × 1.0 = **95.75% ← correctPercentage**
+- overallRating: 4.8/5.0 (proportional)
+- Result: **Aligned - both show excellent performance**
+
+**Example 4 - Senior Role, Outstanding Answer (SHOULD GET BONUS):**
+- Question: "List Character class methods"
+- Answer: Comprehensive with advanced examples, performance considerations, edge cases, best practices
+- Factual Correctness: 100 points
+- Technical Depth: 100 points ← OUTSTANDING DEPTH
+- Communication: 95 points
+- Raw Score: (100 × 0.40) + (100 × 0.35) + (95 × 0.25) = 40 + 35 + 23.75 = 98.75
+- Experience Adjustment (6+ years, Technical Depth = 100): 98.75 × 1.05 = **103.69% → 100% ← correctPercentage**
+- overallRating: 5.0/5.0 (proportional)
+- Result: **Aligned - both show outstanding performance**
+
+**ALIGNMENT REQUIREMENT:**
+
+**After calculating correctPercentage, ENSURE these fields are proportionally aligned:**
+
+- correctPercentage 90-100% → overallRating 4.5-5.0, technicalDepth 4.5-5.0, answerRating 4.5-5.0
+- correctPercentage 80-89% → overallRating 4.0-4.4, technicalDepth 4.0-4.4, answerRating 4.0-4.4
+- correctPercentage 70-79% → overallRating 3.5-3.9, technicalDepth 3.5-3.9, answerRating 3.5-3.9
+- correctPercentage 60-69% → overallRating 3.0-3.4, technicalDepth 3.0-3.4, answerRating 3.0-3.4
+- correctPercentage 50-59% → overallRating 2.5-2.9, technicalDepth 2.5-2.9, answerRating 2.5-2.9
+- correctPercentage 40-49% → overallRating 2.0-2.4, technicalDepth 2.0-2.4, answerRating 2.0-2.4
+- correctPercentage 0-39% → overallRating 0.0-1.9, technicalDepth 0.0-1.9, answerRating 0.0-1.9
+
+**CRITICAL: All rating fields (overallRating, technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating) MUST be proportional to correctPercentage. NO contradictions allowed.**
+
+**VALIDATION CHECK BEFORE SUBMITTING RESPONSE:**
+1. Calculate correctPercentage using formula above
+2. Set overallRating proportionally (correctPercentage / 20)
+3. Set technicalDepth.rating proportionally
+4. Set answerRating.rating proportionally
+5. Verify no contradiction exists (all fields aligned)
+
+**If cheating is detected**: Set correctPercentage = 0%, all ratings = 0.0
+
 **Analysis Type**: ${
     normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
   } response
@@ -2201,8 +2351,8 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
     "asPerExperience": "[PURELY TECHNICAL assessment relative to {experienceYears} years experience - meets/exceeds/below expectations. NEVER mention integrity, cheating, or behavioral concerns - keep purely technical]" 
   },
   "overallContentQuality": "[CENTRALIZED integrity reporting field - Include technical quality assessment AND any integrity concerns if detected. This is the ONLY field that should mention cheating, behavioral issues, or integrity concerns. Format: Technical quality + integrity impact if applicable]",
-  "overallRating": "<String, 0.0–5.0>",
-  "correctPercentage": "[0–100%]",
+  "overallRating": "<String, 0.0–5.0> - MUST be proportional to correctPercentage (correctPercentage / 20). Example: 80% correctPercentage = 4.0 overallRating",
+  "correctPercentage": "[0–100%] - COMBINED SCORE using formula: (Factual × 0.40 + Depth × 0.35 + Communication × 0.25) × Experience Factor. NOT just factual accuracy. See calculation instructions above.",
   "detailedSummary": "[Comprehensive HR-friendly summary focusing on: technical competency, communication skills, integrity assessment, and hiring recommendation context]",
   "answerRating": {
     "rating": "<String, 0.0–5.0 MANDATORY - Overall answer quality rating>",
@@ -4573,6 +4723,65 @@ const processResponse = async (responseData) => {
           throw new ProcessingError(
             `AI response JSON parsing failed: ${parseError.message}`
           );
+        }
+
+        // V2: CRITICAL VALIDATION - Ensure no contradictions between correctPercentage and ratings
+        const correctPercentageValue = parseFloat(
+          parsedAnalysis.correctPercentage?.replace("%", "") || "0"
+        );
+        const overallRatingValue = parseFloat(
+          parsedAnalysis.overallRating || "0"
+        );
+        const technicalDepthValue = parseFloat(
+          parsedAnalysis.technicalDepth?.rating || "0"
+        );
+        const answerRatingValue = parseFloat(
+          parsedAnalysis.answerRating?.rating || "0"
+        );
+
+        // Calculate expected rating range based on correctPercentage
+        const expectedMinRating =
+          Math.floor((correctPercentageValue / 20) * 10) / 10;
+        const expectedMaxRating =
+          Math.ceil((correctPercentageValue / 20 + 0.4) * 10) / 10;
+
+        // Check for contradictions
+        const hasContradiction =
+          overallRatingValue < expectedMinRating - 0.5 ||
+          overallRatingValue > expectedMaxRating + 0.5 ||
+          technicalDepthValue < expectedMinRating - 0.5 ||
+          technicalDepthValue > expectedMaxRating + 0.5;
+
+        if (hasContradiction) {
+          logger.warn("V2: Detected rating contradiction - auto-correcting", {
+            correctPercentage: correctPercentageValue,
+            overallRating: overallRatingValue,
+            technicalDepth: technicalDepthValue,
+            expectedRange: `${expectedMinRating}-${expectedMaxRating}`,
+            willAutoCorrect: true,
+          });
+
+          // Auto-correct: Recalculate correctPercentage from ratings (most reliable)
+          const avgRating =
+            (overallRatingValue + technicalDepthValue + answerRatingValue) / 3;
+          const correctedPercentage = Math.round(avgRating * 20);
+
+          parsedAnalysis.correctPercentage = `${correctedPercentage}%`;
+
+          logger.info("V2: Auto-corrected correctPercentage", {
+            original: `${correctPercentageValue}%`,
+            corrected: `${correctedPercentage}%`,
+            basedOnAvgRating: avgRating.toFixed(1),
+          });
+        } else {
+          logger.info("V2: Rating consistency check passed", {
+            correctPercentage: parsedAnalysis.correctPercentage,
+            overallRating: parsedAnalysis.overallRating,
+            technicalDepth: parsedAnalysis.technicalDepth?.rating,
+            answerRating: parsedAnalysis.answerRating?.rating,
+            experienceYears: responseData.experience,
+            aligned: true,
+          });
         }
 
         // V2: Validate and sanitize parsed analysis structure
