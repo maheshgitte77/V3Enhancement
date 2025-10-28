@@ -1648,6 +1648,24 @@ const calculateRetryScores = (screeningResult) => {
         }
       }
     });
+
+    // Programming questions with retakes
+    skill.programming?.forEach((programming) => {
+      if (programming.maxAttempts > 0) {
+        totalAllowedRetakes += programming.maxAttempts;
+        totalUsedRetakes += programming.retakes || 0;
+        totalRetryableQuestions++;
+
+        // If got it right without using retakes (earnedScore >= 70%)
+        if (
+          (programming.retakes || 0) === 0 &&
+          programming.testResults &&
+          programming.testResults.earnedScore >= 70
+        ) {
+          firstAttemptCorrect++;
+        }
+      }
+    });
   });
 
   const retryEfficiencyScore =
@@ -1661,6 +1679,16 @@ const calculateRetryScores = (screeningResult) => {
     totalRetryableQuestions > 0
       ? Math.round((firstAttemptCorrect / totalRetryableQuestions) * 100)
       : 100;
+
+  logger.info("V1: Retry scores calculated", {
+    candidateScreeningId: screeningResult.candidateScreeningId,
+    totalAllowedRetakes,
+    totalUsedRetakes,
+    totalRetryableQuestions,
+    firstAttemptCorrect,
+    retryEfficiencyScore,
+    firstAttemptSuccessRate,
+  });
 
   return { retryEfficiencyScore, firstAttemptSuccessRate };
 };
@@ -1847,6 +1875,122 @@ const convertRatingToScore = (rating) => {
 };
 
 /**
+ * Calculate programming test case success score
+ * @param {Object} screeningResult - The screening result data
+ * @returns {number|null} Average test case success score (0-100) or null if no programming questions
+ */
+const calculateProgrammingTestCaseScore = (screeningResult) => {
+  let totalEarnedScore = 0;
+  let programmingQuestionCount = 0;
+
+  screeningResult.skills?.forEach((skill) => {
+    if (skill.programming && skill.programming.length > 0) {
+      skill.programming.forEach((programming) => {
+        if (
+          programming.testResults &&
+          typeof programming.testResults.earnedScore === "number"
+        ) {
+          totalEarnedScore += programming.testResults.earnedScore;
+          programmingQuestionCount++;
+        }
+      });
+    }
+  });
+
+  if (programmingQuestionCount === 0) {
+    logger.info(
+      "V1: No programming questions found for test case score calculation",
+      {
+        candidateScreeningId: screeningResult.candidateScreeningId,
+      }
+    );
+    return null;
+  }
+
+  const averageScore = Math.round(totalEarnedScore / programmingQuestionCount);
+
+  logger.info("V1: Programming test case score calculated", {
+    candidateScreeningId: screeningResult.candidateScreeningId,
+    totalEarnedScore,
+    programmingQuestionCount,
+    averageScore,
+  });
+
+  return averageScore;
+};
+
+/**
+ * Calculate programming code quality score from ProgrammingAnalysis
+ * @param {Object} screeningResult - The screening result data
+ * @param {string} candidateScreeningId - The candidate screening ID
+ * @returns {Promise<number|null>} Weighted code quality score (0-100) or null if no analysis available
+ */
+const calculateProgrammingCodeQualityScore = async (
+  screeningResult,
+  candidateScreeningId
+) => {
+  try {
+    const programmingAnalyses = await ProgrammingAnalysis.find({
+      candidateScreeningId: candidateScreeningId,
+    });
+
+    if (!programmingAnalyses || programmingAnalyses.length === 0) {
+      logger.info(
+        "V1: No programming analysis found for code quality score calculation",
+        {
+          candidateScreeningId,
+        }
+      );
+      return null;
+    }
+
+    let totalLogicalScore = 0;
+    let totalQualityScore = 0;
+    let analysisCount = 0;
+
+    programmingAnalyses.forEach((analysis) => {
+      if (analysis.logicalCorrectness && analysis.codeQuality) {
+        totalLogicalScore += analysis.logicalCorrectness.score || 0;
+        totalQualityScore += analysis.codeQuality.score || 0;
+        analysisCount++;
+      }
+    });
+
+    if (analysisCount === 0) {
+      logger.warn("V1: No valid programming analysis data found", {
+        candidateScreeningId,
+        totalAnalyses: programmingAnalyses.length,
+      });
+      return null;
+    }
+
+    const avgLogicalScore = totalLogicalScore / analysisCount;
+    const avgQualityScore = totalQualityScore / analysisCount;
+
+    // Weighted average: 60% logical correctness + 40% code quality
+    const weightedScore = Math.round(
+      avgLogicalScore * 0.6 + avgQualityScore * 0.4
+    );
+
+    logger.info("V1: Programming code quality score calculated", {
+      candidateScreeningId,
+      analysisCount,
+      avgLogicalScore,
+      avgQualityScore,
+      weightedScore,
+    });
+
+    return weightedScore;
+  } catch (error) {
+    logger.error("V1: Error calculating programming code quality score", {
+      candidateScreeningId,
+      error: error.message,
+    });
+    return null;
+  }
+};
+
+/**
  * Calculate all enhanced ranking scores for a candidate
  * @param {Object} screeningResult - The screening result data
  * @returns {Object} All calculated scores for ranking
@@ -1862,6 +2006,15 @@ const calculateEnhancedRankingScores = async (screeningResult) => {
   const integrityScore = calculateIntegrityScore(screeningResult);
   const timeEfficiencyScore = calculateTimeEfficiencyScore(screeningResult);
   const responseQualityScore = calculateResponseQualityScore(aiResponses);
+
+  // Calculate programming-specific scores
+  const programmingTestCaseScore =
+    calculateProgrammingTestCaseScore(screeningResult);
+  const programmingCodeQualityScore =
+    await calculateProgrammingCodeQualityScore(
+      screeningResult,
+      screeningResult.candidateScreeningId
+    );
 
   // Calculate submission timing score (earlier submission = higher score)
   const submissionTimingScore =
@@ -1886,6 +2039,19 @@ const calculateEnhancedRankingScores = async (screeningResult) => {
         )
       : 0;
 
+  logger.info("V1: Enhanced ranking scores calculated", {
+    candidateScreeningId: screeningResult.candidateScreeningId,
+    programmingTestCaseScore,
+    programmingCodeQualityScore,
+    retryEfficiencyScore: retryScores.retryEfficiencyScore,
+    firstAttemptSuccessRate: retryScores.firstAttemptSuccessRate,
+    integrityScore,
+    timeEfficiencyScore,
+    responseQualityScore,
+    submissionTimingScore,
+    attemptRateScore,
+  });
+
   return {
     retryEfficiencyScore: retryScores.retryEfficiencyScore,
     firstAttemptSuccessRate: retryScores.firstAttemptSuccessRate,
@@ -1894,6 +2060,8 @@ const calculateEnhancedRankingScores = async (screeningResult) => {
     responseQualityScore,
     submissionTimingScore,
     attemptRateScore,
+    programmingTestCaseScore,
+    programmingCodeQualityScore,
   };
 };
 
@@ -1924,32 +2092,70 @@ const compareScreeningsEnhanced = (a, b) => {
     return b.problemSolvingAbility - a.problemSolvingAbility;
   }
 
-  // Fifth: Retry Efficiency Score (descending - fewer retakes used = better)
+  // Fifth: Programming Test Case Success Score (descending - only compare if both have programming scores)
+  if (
+    a.programmingTestCaseScore !== undefined &&
+    b.programmingTestCaseScore !== undefined
+  ) {
+    if (b.programmingTestCaseScore !== a.programmingTestCaseScore) {
+      logger.info("V1: Programming test case score comparison", {
+        candidateA: a.candidateScreeningId,
+        candidateB: b.candidateScreeningId,
+        scoreA: a.programmingTestCaseScore,
+        scoreB: b.programmingTestCaseScore,
+        winner:
+          b.programmingTestCaseScore > a.programmingTestCaseScore ? "B" : "A",
+      });
+      return b.programmingTestCaseScore - a.programmingTestCaseScore;
+    }
+  }
+
+  // Sixth: Programming Code Quality Score (descending - only compare if both have programming scores)
+  if (
+    a.programmingCodeQualityScore !== undefined &&
+    b.programmingCodeQualityScore !== undefined
+  ) {
+    if (b.programmingCodeQualityScore !== a.programmingCodeQualityScore) {
+      logger.info("V1: Programming code quality score comparison", {
+        candidateA: a.candidateScreeningId,
+        candidateB: b.candidateScreeningId,
+        scoreA: a.programmingCodeQualityScore,
+        scoreB: b.programmingCodeQualityScore,
+        winner:
+          b.programmingCodeQualityScore > a.programmingCodeQualityScore
+            ? "B"
+            : "A",
+      });
+      return b.programmingCodeQualityScore - a.programmingCodeQualityScore;
+    }
+  }
+
+  // Seventh: Retry Efficiency Score (descending - fewer retakes used = better)
   if (b.retryEfficiencyScore !== a.retryEfficiencyScore) {
     return b.retryEfficiencyScore - a.retryEfficiencyScore;
   }
 
-  // Sixth: First Attempt Success Rate (descending)
+  // Eighth: First Attempt Success Rate (descending)
   if (b.firstAttemptSuccessRate !== a.firstAttemptSuccessRate) {
     return b.firstAttemptSuccessRate - a.firstAttemptSuccessRate;
   }
 
-  // Seventh: Assessment Integrity Score (descending)
+  // Ninth: Assessment Integrity Score (descending)
   if (b.integrityScore !== a.integrityScore) {
     return b.integrityScore - a.integrityScore;
   }
 
-  // Eighth: Time Efficiency Score (descending)
+  // Tenth: Time Efficiency Score (descending)
   if (b.timeEfficiencyScore !== a.timeEfficiencyScore) {
     return b.timeEfficiencyScore - a.timeEfficiencyScore;
   }
 
-  // Ninth: Response Quality Score (descending)
+  // Eleventh: Response Quality Score (descending)
   if (b.responseQualityScore !== a.responseQualityScore) {
     return b.responseQualityScore - a.responseQualityScore;
   }
 
-  // Tenth: Attempt Rate Score (descending)
+  // Twelfth: Attempt Rate Score (descending)
   if (b.attemptRateScore !== a.attemptRateScore) {
     return b.attemptRateScore - a.attemptRateScore;
   }
@@ -2002,7 +2208,7 @@ const processScreening = async (screeningData) => {
     ]);
 
     const candidateScreening = result[0];
-    console.log(candidateScreening);
+
     if (!candidateScreening) {
       throw new ProcessingError("CandidateScreening not found");
     }
@@ -2780,6 +2986,28 @@ const processScreening = async (screeningData) => {
       })
     );
 
+    // Log programming score statistics for all candidates
+    const programmingCandidates = enhancedScreenings.filter(
+      (s) =>
+        s.programmingTestCaseScore !== undefined ||
+        s.programmingCodeQualityScore !== undefined
+    );
+
+    logger.info("V1: Programming ranking integration summary", {
+      totalCandidates: enhancedScreenings.length,
+      candidatesWithProgramming: programmingCandidates.length,
+      candidatesWithoutProgramming:
+        enhancedScreenings.length - programmingCandidates.length,
+      programmingScoreStats: {
+        testCaseScores: programmingCandidates
+          .map((c) => c.programmingTestCaseScore)
+          .filter((s) => s !== undefined),
+        codeQualityScores: programmingCandidates
+          .map((c) => c.programmingCodeQualityScore)
+          .filter((s) => s !== undefined),
+      },
+    });
+
     const sortedScreenings = enhancedScreenings.sort(compareScreeningsEnhanced);
     console.log(sortedScreenings);
 
@@ -2796,6 +3024,24 @@ const processScreening = async (screeningData) => {
           : 100;
       console.log(currentScreening.name + " : " + rank);
 
+      // Log programming scores for top candidates
+      if (
+        rank <= 5 &&
+        (currentScreening.programmingTestCaseScore !== undefined ||
+          currentScreening.programmingCodeQualityScore !== undefined)
+      ) {
+        logger.info("V1: Top candidate programming scores", {
+          rank,
+          candidateScreeningId: currentScreening.candidateScreeningId,
+          candidateFitScore: currentScreening.candidateFitScore,
+          programmingTestCaseScore: currentScreening.programmingTestCaseScore,
+          programmingCodeQualityScore:
+            currentScreening.programmingCodeQualityScore,
+          retryEfficiencyScore: currentScreening.retryEfficiencyScore,
+          firstAttemptSuccessRate: currentScreening.firstAttemptSuccessRate,
+        });
+      }
+
       await CandidateScreeningResult.updateOne(
         { candidateScreeningId: currentScreening.candidateScreeningId },
         {
@@ -2810,6 +3056,10 @@ const processScreening = async (screeningData) => {
             responseQualityScore: currentScreening.responseQualityScore,
             submissionTimingScore: currentScreening.submissionTimingScore,
             attemptRateScore: currentScreening.attemptRateScore,
+            // Store programming-specific ranking scores
+            programmingTestCaseScore: currentScreening.programmingTestCaseScore,
+            programmingCodeQualityScore:
+              currentScreening.programmingCodeQualityScore,
             updatedAt: new Date(),
           },
         }
