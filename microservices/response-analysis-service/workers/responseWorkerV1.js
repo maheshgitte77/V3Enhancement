@@ -1749,6 +1749,61 @@ const calculateIntegrityScore = (screeningResult) => {
 };
 
 /**
+ * Calculate candidate recommendation based on fit score and integrity assessment
+ * V1 applies conservative tiered thresholds with benefit of doubt
+ * @param {number} candidateFitScore - Candidate fit score (0-100)
+ * @param {number} integrityScore - Integrity score (0-100)
+ * @param {boolean} isCheatingDetected - Whether cheating was detected
+ * @returns {string} Recommendation: "Strongly Recommended", "Recommended", or "Not Recommended"
+ */
+const calculateRecommendation = (
+  candidateFitScore,
+  integrityScore,
+  isCheatingDetected
+) => {
+  // Base recommendation from fit score
+  let baseRecommendation;
+  if (candidateFitScore >= 75) {
+    baseRecommendation = "Strongly Recommended";
+  } else if (candidateFitScore >= 50) {
+    baseRecommendation = "Recommended";
+  } else {
+    baseRecommendation = "Not Recommended";
+  }
+
+  // Apply tiered integrity downgrades (V1 conservative approach)
+  // Critical: Always "Not Recommended" for severe integrity issues
+  if (integrityScore < 30 || isCheatingDetected === true) {
+    return "Not Recommended";
+  }
+
+  // Major concern: Downgrade by 2 levels
+  if (integrityScore >= 30 && integrityScore < 50) {
+    if (baseRecommendation === "Strongly Recommended") {
+      return "Not Recommended"; // 75+ -> Not Recommended
+    } else if (baseRecommendation === "Recommended") {
+      return "Not Recommended"; // 50-74 -> Not Recommended
+    }
+    // Already "Not Recommended", no change
+    return "Not Recommended";
+  }
+
+  // Moderate concern: Downgrade by 1 level
+  if (integrityScore >= 50 && integrityScore < 70) {
+    if (baseRecommendation === "Strongly Recommended") {
+      return "Recommended"; // 75+ -> Recommended
+    } else if (baseRecommendation === "Recommended") {
+      return "Not Recommended"; // 50-74 -> Not Recommended
+    }
+    // Already "Not Recommended", no change
+    return "Not Recommended";
+  }
+
+  // Minor/no concern (integrityScore >= 70): No downgrade, use base recommendation
+  return baseRecommendation;
+};
+
+/**
  * Calculate time efficiency score based on time usage patterns
  * @param {Object} screeningResult - The screening result data
  * @returns {number} Time efficiency score (0-100)
@@ -2264,9 +2319,11 @@ const processScreening = async (screeningData) => {
     }
 
     const candidateFitScore = correctPercentages.length
-      ? Math.round(
-          correctPercentages.reduce((sum, val) => sum + val, 0) /
+      ? parseFloat(
+          (
+            correctPercentages.reduce((sum, val) => sum + val, 0) /
             correctPercentages.length
+          ).toFixed(2)
         )
       : 0;
     let status;
@@ -2929,6 +2986,22 @@ const processScreening = async (screeningData) => {
       currency: "USD",
     });
 
+    // V1: Calculate recommendation based on fit score and integrity
+    const currentIntegrityScore = calculateIntegrityScore(screeningResult);
+    const recommendation = calculateRecommendation(
+      candidateFitScore,
+      currentIntegrityScore,
+      screeningResult.isCheatingDetected
+    );
+
+    logger.info("V1: Recommendation calculated", {
+      candidateScreeningId,
+      candidateFitScore,
+      integrityScore: currentIntegrityScore,
+      isCheatingDetected: screeningResult.isCheatingDetected,
+      recommendation,
+    });
+
     await CandidateScreeningResult.updateOne(
       { candidateScreeningId },
       {
@@ -2939,6 +3012,7 @@ const processScreening = async (screeningData) => {
           problemSolvingAbility: parsedResponse.problemSolvingAbility,
           fitScorePointers: parsedResponse.fitScorePointers,
           candidateFitScore,
+          recommendation,
           languagesUsed: languagesUsedArray,
           totalTokensUsed,
           totalInputTokens,

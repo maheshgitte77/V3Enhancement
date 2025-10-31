@@ -4727,7 +4727,7 @@ const processResponse = async (responseData) => {
 
         // V2: CRITICAL VALIDATION - Ensure no contradictions between correctPercentage and ratings
         const correctPercentageValue = parseFloat(
-          parsedAnalysis.correctPercentage?.replace("%", "") || "0"
+          parsedAnalysis.correctPercentage || "0"
         );
         const overallRatingValue = parseFloat(
           parsedAnalysis.overallRating || "0"

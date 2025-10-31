@@ -465,9 +465,15 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    candidateRank: {
-      type: Number,
-      default: 0,
+    recommendation: {
+      type: String,
+      enum: [
+        "Strongly Recommended",
+        "Recommended",
+        "Not Recommended",
+        "Not Calculated",
+      ],
+      default: "Not Calculated",
     },
     communicationClarity: {
       type: Number,
