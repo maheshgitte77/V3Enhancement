@@ -97,16 +97,18 @@ const V2_CONFIG = {
     confidenceScoring: true, // Include confidence scores in analysis
   },
   pricing: {
-    model: "gemini-2.5-flash",
-    // Input pricing varies by media type
+    model: "gemini-2.5-pro",
+    // Input pricing based on Gemini 2.5 Pro (for prompts <= 200k tokens)
+    // For prompts > 200k tokens: $2.50 per 1M tokens
     inputRates: {
-      text: 0.1, // per million tokens
-      image: 0.1, // per million tokens
-      video: 0.1, // per million tokens
-      audio: 0.7, // per million tokens
+      text: 1.25, // per million tokens
+      image: 1.25, // per million tokens
+      video: 1.25, // per million tokens
+      audio: 1.25, // per million tokens
     },
-    // Output pricing is uniform across all media types
-    outputRate: 0.4, // per million tokens
+    // Output pricing is uniform across all media types (for prompts <= 200k tokens)
+    // For prompts > 200k tokens: $15.00 per 1M tokens
+    outputRate: 10.0, // per million tokens
   },
 };
 
@@ -1394,7 +1396,7 @@ const generateTextOnlyFallbackAnalysis = (responseData, normalizedType) => {
     },
     overallContentQuality: `Media processing failed due to Google AI API systematic errors. File upload succeeded but status polling encountered persistent 500 errors and URI access issues. This appears to be a Google AI infrastructure problem rather than a candidate issue. Recommend manual review or re-attempt when Google AI service is stable.`,
     overallRating: "0.0",
-    correctPercentage: "0%",
+    correctPercentage: 0,
     detailedSummary: `Assessment incomplete due to Google AI API technical difficulties. The candidate's ${normalizedType} response could not be analyzed because Google AI experienced systematic errors during file processing (persistent 500 errors and URI access failures). This is not a reflection of the candidate's performance but rather a technical limitation. Recommend: 1) Manual review of the media file, 2) Re-attempt analysis when Google AI service is stable, or 3) Alternative assessment method.`,
     answerRating: {
       rating: "0.0",
@@ -2658,7 +2660,7 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     detailedSummary:
       "Candidate did not provide any substantial response content. This may indicate technical issues, lack of preparation, or inability to answer the question.",
     overallRating: "0.0",
-    correctPercentage: "0%",
+    correctPercentage: 0,
     answerRating: {
       rating: "0.0",
       reasonForDeduction: ["No response content provided by candidate"],
@@ -2801,6 +2803,22 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
       transformed.answerEffectiveness.rating
     );
   }
+
+  // V2: Normalize correctPercentage to number with 2 decimal places (remove "%" if present)
+  const normalizeCorrectPercentage = (value) => {
+    if (typeof value === "number") {
+      return parseFloat(value.toFixed(2));
+    }
+    if (typeof value === "string") {
+      const cleaned = value.replace("%", "").trim();
+      const num = parseFloat(cleaned) || 0;
+      return parseFloat(num.toFixed(2));
+    }
+    return 0;
+  };
+  transformed.correctPercentage = normalizeCorrectPercentage(
+    transformed.correctPercentage || 0
+  );
 
   // V2: Ensure V2-specific fields have fallbacks with HR-friendly messaging
   transformed.answerTime =
@@ -4557,7 +4575,7 @@ const processResponse = async (responseData) => {
         let result;
         try {
           result = await client.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-2.5-pro",
             contents: [...fileInput, { text: prompt }],
           });
         } catch (aiError) {
@@ -4726,7 +4744,21 @@ const processResponse = async (responseData) => {
         }
 
         // V2: CRITICAL VALIDATION - Ensure no contradictions between correctPercentage and ratings
-        const correctPercentageValue = parseFloat(
+        // Helper function to normalize correctPercentage to number with 2 decimal places
+        const normalizeCorrectPercentage = (value) => {
+          if (typeof value === "number") {
+            return parseFloat(value.toFixed(2));
+          }
+          if (typeof value === "string") {
+            // Remove "%" sign and parse
+            const cleaned = value.replace("%", "").trim();
+            const num = parseFloat(cleaned) || 0;
+            return parseFloat(num.toFixed(2));
+          }
+          return 0;
+        };
+
+        const correctPercentageValue = normalizeCorrectPercentage(
           parsedAnalysis.correctPercentage || "0"
         );
         const overallRatingValue = parseFloat(
@@ -4764,16 +4796,19 @@ const processResponse = async (responseData) => {
           // Auto-correct: Recalculate correctPercentage from ratings (most reliable)
           const avgRating =
             (overallRatingValue + technicalDepthValue + answerRatingValue) / 3;
-          const correctedPercentage = Math.round(avgRating * 20);
+          const correctedPercentage = parseFloat((avgRating * 20).toFixed(2));
 
-          parsedAnalysis.correctPercentage = `${correctedPercentage}%`;
+          parsedAnalysis.correctPercentage = correctedPercentage;
 
           logger.info("V2: Auto-corrected correctPercentage", {
-            original: `${correctPercentageValue}%`,
-            corrected: `${correctedPercentage}%`,
+            original: correctPercentageValue,
+            corrected: correctedPercentage,
             basedOnAvgRating: avgRating.toFixed(1),
           });
         } else {
+          // Normalize correctPercentage to number with 2 decimal places (even if no contradiction)
+          parsedAnalysis.correctPercentage = correctPercentageValue;
+
           logger.info("V2: Rating consistency check passed", {
             correctPercentage: parsedAnalysis.correctPercentage,
             overallRating: parsedAnalysis.overallRating,
@@ -7237,7 +7272,21 @@ Factors considered: ${contextualCheatingResult.contextualFactors.join(
     question.candidateAnswerAiResponseId = questionAiResponse._id;
     question.answerSummary = answerSummary;
     question.transcription = questionAiResponse.transcription || "";
-    question.correctPercentage = questionAiResponse.correctPercentage || "0%";
+    // Normalize correctPercentage to number with 2 decimal places
+    const normalizeCorrectPercentageForStorage = (value) => {
+      if (typeof value === "number") {
+        return parseFloat(value.toFixed(2));
+      }
+      if (typeof value === "string") {
+        const cleaned = value.replace("%", "").trim();
+        const num = parseFloat(cleaned) || 0;
+        return parseFloat(num.toFixed(2));
+      }
+      return 0;
+    };
+    question.correctPercentage = normalizeCorrectPercentageForStorage(
+      questionAiResponse.correctPercentage || 0
+    );
     question.isCheatingDetected =
       question.isCheatingDetected === true
         ? question.isCheatingDetected
@@ -7734,7 +7783,7 @@ const processScreening = async (screeningData) => {
       // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-2.5-pro",
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;
