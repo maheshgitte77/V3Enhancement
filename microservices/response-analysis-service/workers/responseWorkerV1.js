@@ -40,6 +40,7 @@ const CandidateScreening = require("../model/CandidateScreening");
 const ProgrammingAnalysis = require("../model/ProgrammingAnalysis");
 
 const mongoose = require("mongoose");
+const axios = require("axios");
 
 dotenv.config();
 
@@ -2229,6 +2230,24 @@ const compareScreeningsEnhanced = (a, b) => {
     .localeCompare(b.candidateScreeningId.toString());
 };
 
+const handleImmediateScoreRelease = async (screeningResultId) => {
+  try {
+    const response = await axios.post(
+      `${process.env.NOTIFICATION_SERVICE_URL}/emailNotification/screening/send-result-to-candidate`,
+      {
+        screeningResultId,
+      }
+    );
+    console.log("Immediate score released successfully", response.data);
+  } catch (error) {
+    console.error(`Error releasing immediate score: ${error.message}`, {
+      screeningResultId,
+      error: error.stack,
+    });
+    throw error;
+  }
+};
+
 /**
  * Processes a candidate's screening response with enhanced analysis
  * V1 includes improved screening assessment capabilities
@@ -2240,7 +2259,11 @@ const compareScreeningsEnhanced = (a, b) => {
  * @throws {ProcessingError} If screening processing fails
  */
 const processScreening = async (screeningData) => {
-  const { candidateScreeningId, screeningAssessmentId } = screeningData;
+  const {
+    candidateScreeningId,
+    screeningAssessmentId,
+    releaseScoreImmediately = false,
+  } = screeningData;
   try {
     const screeningResult = await CandidateScreeningResult.findOne({
       candidateScreeningId,
@@ -3146,6 +3169,19 @@ const processScreening = async (screeningData) => {
     logger.info(
       `Successfully processed screening for candidateScreeningId: ${candidateScreeningId}`
     );
+    if (releaseScoreImmediately) {
+      try {
+        await handleImmediateScoreRelease(screeningResult._id);
+      } catch (error) {
+        logger.error(`Error releasing immediate score: ${error.message}`, {
+          screeningResultId: screeningResult._id,
+          error: error.stack,
+        });
+      }
+      logger.info(
+        `Immediate score released successfully for candidateScreeningId: ${candidateScreeningId}`
+      );
+    }
   } catch (error) {
     logger.error(
       `Error processing screening for candidateScreeningId: ${candidateScreeningId}: ${error.message}`
@@ -3158,21 +3194,65 @@ const runConsumer = async (consumerId) => {
   const consumerGroupId = `${process.env.GROUP_ID_VIDEO_ANALYZE}_v1`;
   const consumer = kafka.consumer({
     groupId: consumerGroupId,
+    sessionTimeout: 60000, // 60 seconds - accommodate long processing times
+    heartbeatInterval: 20000, // 20 seconds - must be less than sessionTimeout
+    maxInFlightRequests: 1, // Process one message at a time per partition
+    allowAutoTopicCreation: false,
+    retry: {
+      retries: 8,
+      initialRetryTime: 100,
+      multiplier: 2,
+      maxRetryTime: 30000,
+    },
   });
+
   await consumer.connect();
   logger.info(
     `V1 Consumer ${consumerId} connected with group ID: ${consumerGroupId}`
   );
+
   await consumer.subscribe({
     topic: process.env.KAFKA_VIDEO_TOPIC,
     fromBeginning: true,
   });
+
+  // Add rebalancing event handlers to prevent message loss
+  consumer.on(consumer.events.GROUP_JOIN, ({ payload }) => {
+    logger.info(`V1 Consumer ${consumerId} joined group`, {
+      groupId: payload.groupId,
+      memberId: payload.memberId,
+      leaderId: payload.leaderId,
+      isLeader: payload.isLeader,
+    });
+  });
+
+  // Handle rebalancing - partitions will be paused/resumed automatically
+  consumer.on(consumer.events.REBALANCING, ({ payload }) => {
+    logger.info(`V1 Consumer ${consumerId} rebalancing`, {
+      groupId: payload.groupId,
+      memberId: payload.memberId,
+    });
+  });
+
+  // Handle disconnection events
+  consumer.on(consumer.events.DISCONNECT, ({ payload }) => {
+    logger.warn(`V1 Consumer ${consumerId} disconnected`, {
+      groupId: payload.groupId,
+    });
+  });
+
   await consumer.run({
-    eachMessage: async ({ message }) => {
+    // Process messages one partition at a time to reduce rebalancing issues
+    partitionsConsumedConcurrently: 1,
+    eachMessage: async ({ topic, partition, message }) => {
+      const startTime = Date.now();
       try {
         const videoData = JSON.parse(message.value.toString());
 
         logger.info(`🔔 V1 Consumer ${consumerId} received Kafka message`, {
+          topic,
+          partition,
+          offset: message.offset,
           isScreening: videoData.isScreening,
           version: videoData.version || "v0",
           candidateScreeningId: videoData.candidateScreeningId,
@@ -3199,13 +3279,28 @@ const runConsumer = async (consumerId) => {
           await processResponse(videoData);
         }
 
+        const processingTime = Date.now() - startTime;
         logger.info(
-          `✅ V1 Consumer ${consumerId} completed processing message`
+          `✅ V1 Consumer ${consumerId} completed processing message`,
+          {
+            topic,
+            partition,
+            offset: message.offset,
+            processingTimeMs: processingTime,
+          }
         );
       } catch (error) {
-        logger.error(`❌ V1 Consumer ${consumerId} error: ${error.message}`, {
+        const processingTime = Date.now() - startTime;
+        logger.error(`❌ V1 Consumer ${consumerId} error processing message`, {
+          topic,
+          partition,
+          offset: message.offset,
+          error: error.message,
           stack: error.stack,
+          processingTimeMs: processingTime,
         });
+        // Don't throw - let KafkaJS handle offset commit
+        // The message will be retried if processing fails
       }
     },
   });

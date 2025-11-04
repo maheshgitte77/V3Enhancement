@@ -507,14 +507,21 @@ const createVersionedScreeningController = (version) => {
         version ? `/${version}` : ""
       } (Version ${version || "V0"})`
     );
-    const { candidateScreeningId, screeningAssessmentId } = req.query;
+    const {
+      candidateScreeningId,
+      screeningAssessmentId,
+      releaseScoreImmediately,
+    } = req.query;
     try {
       const videoData = {
         candidateScreeningId: candidateScreeningId,
         screeningAssessmentId: screeningAssessmentId,
+        releaseScoreImmediately: releaseScoreImmediately === "true",
         isScreening: true,
         version: version || "v0", // Add version information
       };
+
+      // console.log("🔍Processing Screening data:", videoData);
 
       try {
         await producer.connect();

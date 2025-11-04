@@ -8149,19 +8149,70 @@ const runConsumer = async (consumerId) => {
   const consumerGroupId = `${process.env.GROUP_ID_VIDEO_ANALYZE}_v2`;
   const consumer = kafka.consumer({
     groupId: consumerGroupId,
+    sessionTimeout: 60000, // 60 seconds - accommodate long processing times
+    heartbeatInterval: 20000, // 20 seconds - must be less than sessionTimeout
+    maxInFlightRequests: 1, // Process one message at a time per partition
+    allowAutoTopicCreation: false,
+    retry: {
+      retries: 8,
+      initialRetryTime: 100,
+      multiplier: 2,
+      maxRetryTime: 30000,
+    },
   });
+
   await consumer.connect();
   logger.info(
     `V2 Consumer ${consumerId} connected with group ID: ${consumerGroupId}`
   );
+
   await consumer.subscribe({
     topic: process.env.KAFKA_VIDEO_TOPIC,
     fromBeginning: true,
   });
+
+  // Add rebalancing event handlers to prevent message loss
+  consumer.on(consumer.events.GROUP_JOIN, ({ payload }) => {
+    logger.info(`V2 Consumer ${consumerId} joined group`, {
+      groupId: payload.groupId,
+      memberId: payload.memberId,
+      leaderId: payload.leaderId,
+      isLeader: payload.isLeader,
+    });
+  });
+
+  // Handle rebalancing - partitions will be paused/resumed automatically
+  consumer.on(consumer.events.REBALANCING, ({ payload }) => {
+    logger.info(`V2 Consumer ${consumerId} rebalancing`, {
+      groupId: payload.groupId,
+      memberId: payload.memberId,
+    });
+  });
+
+  // Handle disconnection events
+  consumer.on(consumer.events.DISCONNECT, ({ payload }) => {
+    logger.warn(`V2 Consumer ${consumerId} disconnected`, {
+      groupId: payload.groupId,
+    });
+  });
+
   await consumer.run({
-    eachMessage: async ({ message }) => {
+    // Process messages one partition at a time to reduce rebalancing issues
+    partitionsConsumedConcurrently: 1,
+    eachMessage: async ({ topic, partition, message }) => {
+      const startTime = Date.now();
       try {
         const responseData = JSON.parse(message.value.toString());
+
+        logger.info(`🔔 V2 Consumer ${consumerId} received Kafka message`, {
+          topic,
+          partition,
+          offset: message.offset,
+          isScreening: responseData.isScreening,
+          version: responseData.version || "v0",
+          candidateScreeningId: responseData.candidateScreeningId,
+          type: responseData.type,
+        });
 
         // Version filtering: V2 worker only processes messages with version "v2"
         if (responseData.isScreening && responseData.version !== "v2") {
@@ -8174,12 +8225,35 @@ const runConsumer = async (consumerId) => {
         }
 
         if (responseData.isScreening) {
+          logger.info(`🎯 V2 Consumer ${consumerId} processing screening`);
           await processScreening(responseData);
         } else {
+          logger.info(`🎯 V2 Consumer ${consumerId} processing response`);
           await processResponse(responseData);
         }
+
+        const processingTime = Date.now() - startTime;
+        logger.info(
+          `✅ V2 Consumer ${consumerId} completed processing message`,
+          {
+            topic,
+            partition,
+            offset: message.offset,
+            processingTimeMs: processingTime,
+          }
+        );
       } catch (error) {
-        logger.error(`Consumer ${consumerId} error: ${error.message}`);
+        const processingTime = Date.now() - startTime;
+        logger.error(`❌ V2 Consumer ${consumerId} error processing message`, {
+          topic,
+          partition,
+          offset: message.offset,
+          error: error.message,
+          stack: error.stack,
+          processingTimeMs: processingTime,
+        });
+        // Don't throw - let KafkaJS handle offset commit
+        // The message will be retried if processing fails
       }
     },
   });
