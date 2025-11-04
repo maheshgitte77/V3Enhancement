@@ -91,24 +91,21 @@ const V2_CONFIG = {
     smartRetry: true, // Intelligent retry with context
   },
   ai: {
+    model: "gemini-2.0-flash",
+    pricing: {
+      inputRates: {
+        text: 0.1, // per million tokens
+        image: 0.1, // per million tokens
+        video: 0.1, // per million tokens
+        audio: 0.7, // per million tokens
+      },
+      // Output pricing is uniform across all media types
+      outputRate: 0.4, // per million tokens
+    },
     enhancedPrompts: true, // Use advanced prompt engineering
     contextualInstructions: true, // Dynamic instructions based on context
     multiPassAnalysis: false, // Single pass with comprehensive analysis
     confidenceScoring: true, // Include confidence scores in analysis
-  },
-  pricing: {
-    model: "gemini-2.5-pro",
-    // Input pricing based on Gemini 2.5 Pro (for prompts <= 200k tokens)
-    // For prompts > 200k tokens: $2.50 per 1M tokens
-    inputRates: {
-      text: 1.25, // per million tokens
-      image: 1.25, // per million tokens
-      video: 1.25, // per million tokens
-      audio: 1.25, // per million tokens
-    },
-    // Output pricing is uniform across all media types (for prompts <= 200k tokens)
-    // For prompts > 200k tokens: $15.00 per 1M tokens
-    outputRate: 10.0, // per million tokens
   },
 };
 
@@ -237,7 +234,7 @@ const isV2FeatureEnabled = (feature) => {
  * @returns {Object} Cost breakdown with total
  */
 const calculateProcessingCost = (inputTokens, outputTokens, mediaType) => {
-  const config = V2_CONFIG.pricing;
+  const config = V2_CONFIG.ai.pricing;
 
   // Determine input rate based on media type
   let inputRate;
@@ -4575,7 +4572,7 @@ const processResponse = async (responseData) => {
         let result;
         try {
           result = await client.models.generateContent({
-            model: "gemini-2.5-pro",
+            model: V2_CONFIG.ai.model,
             contents: [...fileInput, { text: prompt }],
           });
         } catch (aiError) {
@@ -7783,7 +7780,7 @@ const processScreening = async (screeningData) => {
       // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
-        model: "gemini-2.5-pro",
+        model: V2_CONFIG.ai.model,
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;

@@ -64,6 +64,19 @@ const logger = winston.createLogger({
  * Optimized for minimizing false positives and providing fair assessment
  */
 const V1_CONFIG = {
+  ai: {
+    model: "gemini-2.0-flash",
+    pricing: {
+      inputRates: {
+        text: 0.1, // per million tokens
+        image: 0.1, // per million tokens
+        video: 0.1, // per million tokens
+        audio: 0.7, // per million tokens
+      },
+      // Output pricing is uniform across all media types
+      outputRate: 0.4, // per million tokens
+    },
+  },
   cheating: {
     multipleVoiceConfidence: 0.85, // Very high confidence required
     backgroundNoiseThreshold: 0.75, // More tolerant of noise
@@ -82,20 +95,6 @@ const V1_CONFIG = {
     maxRetries: 3,
     timeoutMs: 90000, // Longer timeout for thorough analysis
     enableCaching: true,
-  },
-  pricing: {
-    model: "gemini-2.5-pro",
-    // Input pricing based on Gemini 2.5 Pro (for prompts <= 200k tokens)
-    // For prompts > 200k tokens: $2.50 per 1M tokens
-    inputRates: {
-      text: 1.25, // per million tokens
-      image: 1.25, // per million tokens
-      video: 1.25, // per million tokens
-      audio: 1.25, // per million tokens
-    },
-    // Output pricing is uniform across all media types (for prompts <= 200k tokens)
-    // For prompts > 200k tokens: $15.00 per 1M tokens
-    outputRate: 10.0, // per million tokens
   },
 };
 
@@ -118,7 +117,7 @@ const RETRY_BASE_DELAY = 2000;
  * @returns {Object} Cost breakdown object
  */
 const calculateProcessingCost = (inputTokens, outputTokens, mediaType) => {
-  const config = V1_CONFIG.pricing;
+  const config = V1_CONFIG.ai.pricing;
 
   let inputRate;
   switch (mediaType.toLowerCase()) {
@@ -1194,7 +1193,7 @@ const processResponse = async (responseData) => {
         );
 
         const result = await client.models.generateContent({
-          model: "gemini-2.5-pro",
+          model: V1_CONFIG.ai.model,
           contents: [...fileInput, { text: prompt }],
         });
         const aiResponse = result.text;
@@ -2658,7 +2657,7 @@ const processScreening = async (screeningData) => {
       // No API call made, so screeningSummaryTokens remains 0
     } else {
       const result = await client.models.generateContent({
-        model: "gemini-2.5-pro",
+        model: V1_CONFIG.ai.model,
         contents: [{ text: prompt }],
       });
       const aiResponse = result.text;
