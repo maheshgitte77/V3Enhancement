@@ -10,6 +10,7 @@ const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 // Bind Candidate model from schema (avoid OverwriteModelError on hot reloads)
 const Candidate = require("../model/Candidate");
+const CandidateJourney = require("../model/CandidateJourney");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -208,6 +209,65 @@ const analyzeResumes = async (req, res) => {
   }
 };
 
+const addJobApplicationJourneyStage = async (jobApplicationId, stage) => {
+  try {
+    if (!jobApplicationId) return;
+
+    const jobAppId =
+      jobApplicationId instanceof ObjectId
+        ? jobApplicationId
+        : new ObjectId(jobApplicationId);
+
+    const journey = await CandidateJourney.findOne({
+      jobApplicationId: jobAppId,
+    });
+
+    if (!journey) {
+      // console.log(
+      //   `📝 Creating new candidate journey - jobApplicationId: ${jobAppId}, stage: ${stage}`
+      // );
+      await CandidateJourney.create({
+        jobApplicationId: jobAppId,
+        candidateScreeningAssessmentIds: [],
+        candidateAssessmentIds: [],
+        candidateInterviewIds: [],
+        journey: [
+          {
+            stage,
+            timestamp: new Date(),
+          },
+        ],
+      });
+      // console.log(
+      //   `✅ New candidate journey created successfully for jobApplicationId: ${jobAppId}`
+      // );
+    } else {
+      // console.log(
+      //   `📝 Updating existing candidate journey - jobApplicationId: ${jobAppId}, stage: ${stage}`
+      // );
+      await CandidateJourney.updateOne(
+        { _id: journey._id },
+        {
+          $push: {
+            journey: {
+              stage,
+              timestamp: new Date(),
+            },
+          },
+          $set: {
+            updatedAt: new Date(),
+          },
+        }
+      );
+      // console.log(
+      //   `✅ Candidate journey updated successfully for jobApplicationId: ${jobAppId}`
+      // );
+    }
+  } catch (error) {
+    console.error("❌ Error adding job application journey stage:", error);
+  }
+};
+
 const getRequestData = async (req, res) => {
   try {
     const { requestId } = req.params;
@@ -312,6 +372,27 @@ const addToJobApplication = async (req, res) => {
       await JobApplication.bulkWrite(bulkOps);
     }
 
+    // Add CandidateJourney entries for each JobApplication
+    try {
+      // Fetch all JobApplications that were just created/updated
+      const jobApplicationQueries = recordsToAdd.map((record) => ({
+        jobId: new ObjectId(record.jobId),
+        email: record.email,
+      }));
+
+      const jobApplications = await JobApplication.find({
+        $or: jobApplicationQueries,
+      });
+
+      // Add journey stage "Added" for each job application
+      for (const jobApp of jobApplications) {
+        if (jobApp && jobApp._id) {
+          await addJobApplicationJourneyStage(jobApp._id, "Added");
+        }
+      }
+    } catch (error) {
+      console.error("Error adding CandidateJourney entries:", error.message, error.stack);
+    }
 
     try {
       // Also upsert into Candidate collection
