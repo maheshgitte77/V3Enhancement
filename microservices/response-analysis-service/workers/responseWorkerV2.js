@@ -1431,7 +1431,7 @@ const generateTextOnlyFallbackAnalysis = (responseData, normalizedType) => {
     answerTime: {
       totalDurationSeconds: parseInt(responseData.questionDuration) || 0,
       effectiveAnswerTimeSeconds: 0,
-      effectiveAnswerTimePercentage: "0%",
+      effectiveAnswerTimePercentage: 0,
     },
     answerEffectiveness: {
       rating: "0.0",
@@ -1808,6 +1808,81 @@ When cheating is detected with strong evidence, ALL fields must reflect this:
 **Job Role**: ${responseData.jobRole}
 **Duration**: ${responseData.questionDuration}
 
+**🚨 CRITICAL: RELEVANCE-BASED SCORING REQUIREMENTS 🚨**
+
+**MANDATORY RELEVANCE CHECK - MUST BE PERFORMED FIRST:**
+Before calculating any scores, you MUST evaluate if the candidate's response is relevant to the question asked.
+
+**IRRELEVANT RESPONSE SCORING RULES:**
+- If the candidate's response is completely irrelevant to the question (e.g., talking about unrelated topics, answering a different question, providing generic statements that don't address the question):
+  - **correctPercentage MUST be set to 0-20%** (maximum 20% only if some technical terms are mentioned, otherwise 0%)
+  - **overallRating MUST be set to 0.0-1.0** (proportional to correctPercentage)
+  - **technicalDepth.rating MUST be set to 0.0-1.0**
+  - **answerRating.rating MUST be set to 0.0-1.0**
+  - **relevanceAssessment.score MUST be set to 0.0-0.2** (0.0 for completely irrelevant, 0.2 if some tangential connection exists)
+  - **responseQuality MUST be set to "low"**
+  - **answerEffectiveness.relevanceBreakdown.relevanceExplanation MUST clearly state**: "Response is not relevant to the question asked. Candidate did not address [specific question topic]."
+
+**PARTIALLY RELEVANT RESPONSE SCORING RULES:**
+- If the response is partially relevant (addresses some aspects but misses key points):
+  - **correctPercentage MUST be capped at 40-50%** (not higher)
+  - **overallRating MUST be capped at 2.0-2.5**
+  - **relevanceAssessment.score MUST be 0.3-0.5**
+  - **responseQuality MUST be "low" or "medium"**
+
+**ANSWER LENGTH AND QUALITY REQUIREMENTS:**
+- **SINGLE SENTENCE RESPONSES**: If the candidate provides only one sentence or very brief response (less than 20 words for video/audio, less than 30 words for subjective):
+  - **correctPercentage MUST be capped at 30-40%** (even if technically correct)
+  - **overallRating MUST be capped at 1.5-2.0**
+  - **technicalDepth.rating MUST be capped at 1.5-2.0** (single sentences cannot demonstrate depth)
+  - **answerRating.rating MUST be capped at 1.5-2.0**
+  - **Reason**: Single sentences cannot adequately address technical questions that require explanation, examples, or detailed understanding
+
+**MINIMUM ANSWER QUALITY THRESHOLDS:**
+- For questions requiring explanation: Minimum 2-3 sentences expected
+- For questions requiring examples: Minimum 3-4 sentences with at least one example
+- For questions requiring technical depth: Minimum 4-5 sentences with detailed explanation
+- If response doesn't meet minimum length for question type, apply length penalty:
+  - **Length Penalty Formula**: If answer is below expected length, multiply correctPercentage by (actual_length / expected_length), with minimum cap at 30%
+
+**EXPECTED ANSWER LENGTH BY QUESTION TYPE:**
+- **Definition questions**: Minimum 2-3 sentences (30-50 words)
+- **How/Why questions**: Minimum 3-4 sentences (50-80 words)
+- **Explain with examples**: Minimum 4-5 sentences (80-120 words)
+- **Compare/Contrast**: Minimum 4-6 sentences (100-150 words)
+- **Complex technical questions**: Minimum 5-7 sentences (150-200 words)
+
+**SCORING PRIORITY ORDER:**
+1. **FIRST**: Check relevance - if irrelevant, scores = 0-20%
+2. **SECOND**: Check answer length - if too short, apply length penalty
+3. **THIRD**: Calculate technical correctness and depth
+4. **FOURTH**: Apply experience adjustment
+
+**CRITICAL EXAMPLES:**
+
+**Example A - Irrelevant Response:**
+- Question: "Explain how HashMap works in Java"
+- Answer: "I have 5 years of experience in web development and I like working with teams"
+- **correctPercentage**: 0% (completely irrelevant)
+- **overallRating**: 0.0
+- **relevanceAssessment.score**: 0.0
+- **Reason**: Response doesn't address the question at all
+
+**Example B - Single Sentence Response:**
+- Question: "Explain how HashMap works in Java"
+- Answer: "HashMap stores key-value pairs using hashing"
+- **correctPercentage**: 30% (technically correct but insufficient)
+- **overallRating**: 1.5
+- **Reason**: Single sentence cannot demonstrate understanding - needs explanation of hashing, collision handling, etc.
+
+**Example C - Partially Relevant:**
+- Question: "Explain how HashMap works in Java"
+- Answer: "HashMap is a data structure. I use it in my projects. It's fast."
+- **correctPercentage**: 40% (mentions HashMap but doesn't explain how it works)
+- **overallRating**: 2.0
+- **relevanceAssessment.score**: 0.4
+- **Reason**: Partially relevant but misses key explanation requirements
+
 **CRITICAL: EXPERIENCE-ADJUSTED CORRECTNESS PERCENTAGE CALCULATION**
 
 **correctPercentage MUST BE CALCULATED AS A COMBINED SCORE:**
@@ -1950,13 +2025,20 @@ When cheating is detected with strong evidence, ALL fields must reflect this:
 **CRITICAL: All rating fields (overallRating, technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating) MUST be proportional to correctPercentage. NO contradictions allowed.**
 
 **VALIDATION CHECK BEFORE SUBMITTING RESPONSE:**
-1. Calculate correctPercentage using formula above
-2. Set overallRating proportionally (correctPercentage / 20)
-3. Set technicalDepth.rating proportionally
-4. Set answerRating.rating proportionally
-5. Verify no contradiction exists (all fields aligned)
+1. **FIRST**: Check if response is relevant to question - if irrelevant, set scores to 0-20% (see Irrelevant Response Scoring Rules above)
+2. **SECOND**: Check answer length - if single sentence or too short, apply length penalty (cap scores appropriately)
+3. **THIRD**: Calculate correctPercentage using formula above (only if response is relevant and meets minimum length)
+4. **FOURTH**: Set overallRating proportionally (correctPercentage / 20)
+5. **FIFTH**: Set technicalDepth.rating proportionally
+6. **SIXTH**: Set answerRating.rating proportionally
+7. **SEVENTH**: Verify no contradiction exists (all fields aligned)
+8. **EIGHTH**: Ensure relevanceAssessment.score reflects actual relevance (0.0-0.2 for irrelevant, 0.3-0.5 for partially relevant, 0.6+ for relevant)
 
 **If cheating is detected**: Set correctPercentage = 0%, all ratings = 0.0
+
+**If response is irrelevant**: Set correctPercentage = 0-20%, overallRating = 0.0-1.0, all other ratings proportionally low, relevanceAssessment.score = 0.0-0.2
+
+**If response is single sentence or too short**: Apply length penalty - cap correctPercentage at 30-40%, cap all ratings at 1.5-2.0
 
 **Analysis Type**: ${
     normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
@@ -2226,6 +2308,7 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 **CRITICAL: If you detect 2+ subtle indicators, consider flagging even if behavioral patterns appear "natural" - sophisticated cheaters can mask obvious signs!**
 
 **TRANSCRIPTION INSTRUCTIONS - CRITICAL:**
+- **MANDATORY: TRANSCRIBE IN ENGLISH ONLY** - Even if the candidate speaks in Hindi, Spanish, or any other language, you MUST provide the transcription in English. Translate the candidate's words to English while preserving the meaning and technical content.
 - ONLY transcribe the CANDIDATE'S voice - the primary speaker answering the question
 - IGNORE all background voices, conversations, whispers, or secondary speakers
 - EXCLUDE environmental sounds, background music, or ambient noise
@@ -2233,11 +2316,13 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 - Focus solely on the main candidate's spoken response to the interview question
 - If multiple people are speaking, transcribe ONLY the primary candidate's words
 - Mark unclear candidate speech as "[inaudible]" rather than guessing from background voices
+- **CRITICAL**: The transcription field must ALWAYS be in English, regardless of the language the candidate actually spoke. If the candidate spoke in Hindi or another language, translate their words to English in the transcription field.
 
 **LANGUAGE DETECTION REQUIREMENTS - MANDATORY:**
 - **MULTI-LANGUAGE ANALYSIS**: Detect ALL languages spoken by the candidate throughout the response
+- **LANGUAGE NAMES - CRITICAL**: MUST use FULL language names (e.g., "English", "Hindi", "Spanish", "French", "German", "Chinese", "Japanese", "Korean", "Arabic", "Portuguese", "Russian", "Italian", "Turkish", "Vietnamese", "Thai", "Indonesian", "Malay", "Bengali", "Tamil", "Telugu", "Marathi", "Gujarati", "Kannada", "Punjabi", "Urdu"). NEVER use language codes like "en", "hi", "es", "fr", "de", "zh", "ja", "ko", "ar", "pt", "ru", "it", "tr", "vi", "th", "id", "ms", "bn", "ta", "te", "mr", "gu", "kn", "pa", "ur"
+- **LANGUAGE PERCENTAGES - CRITICAL**: MUST format percentages to exactly 2 decimal places (e.g., "75.50%", "23.45%", "1.25%"). NEVER use more or fewer decimal places. Examples: Use "75.50%" NOT "75.5%" or "75.678%" or "75%"
 - **LANGUAGE SWITCHING**: Identify when candidate switches between languages (e.g., English to Hindi, Spanish to English)
-- **LANGUAGE PERCENTAGES**: Calculate the percentage of time spent speaking each language
 - **LANGUAGE PROFICIENCY**: Assess fluency and proficiency in each detected language
 - **MIXED LANGUAGE RESPONSES**: Detect responses that mix multiple languages (code-switching)
 - **LANGUAGE CONSISTENCY**: Note if candidate maintains consistent language or switches frequently
@@ -2245,7 +2330,7 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 
 **Response JSON Format:**
 {
-  "transcription": "[CANDIDATE VOICE ONLY - Complete word-for-word transcription of ONLY what the candidate said, excluding all background voices, whispers, coaching, or secondary speakers]",
+  "transcription": "[CANDIDATE VOICE ONLY - Complete word-for-word transcription of ONLY what the candidate said in ENGLISH (translate to English if candidate spoke in Hindi or another language), excluding all background voices, whispers, coaching, or secondary speakers. MUST BE IN ENGLISH ONLY]",
       "communication": "[HR-friendly assessment: Professional presentation, clarity, confidence level, speaking pace. DO NOT mention reading, cheating, or integrity concerns - these are handled separately]",
   "communicationRating": "<String, 0.0–5.0>",
   "isOnlyOnePersonInVideo": [true/false - MANDATORY for video responses - true if only candidate visible, false if people ACTIVELY ASSISTING candidate are detected (ignore accidental background people)],
@@ -2387,8 +2472,8 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
     }
   },
   "languageDetection": {
-    "languages": ["[Language 1]", "[Language 2]", "[Language 3]"],
-    "percentageWise": ["[0-100%]", "[0-100%]", "[0-100%]"],
+    "languages": ["[Language 1 - MUST use FULL language names like 'English', 'Hindi', 'Spanish', NOT codes like 'en', 'hi', 'es']", "[Language 2 - Full name only]", "[Language 3 - Full name only]"],
+    "percentageWise": ["[0.00-100.00% - MUST be formatted to exactly 2 decimal places, e.g., '75.50%' not '75.5%' or '75.678%']", "[0.00-100.00% - 2 decimal places]", "[0.00-100.00% - 2 decimal places]"],
     "languageSwitching": "[true/false - whether candidate switched between languages]",
     "primaryLanguage": "[Primary language used by candidate]",
     "languageProficiency": {
@@ -2435,12 +2520,24 @@ For candidates who may be HIDING their cheating behavior, look for these SUBTLE 
 - **Language Consistency**: Whether candidate maintains one language or switches frequently
 
 **EXAMPLES OF LANGUAGE DETECTION:**
-- "English (80%), Hindi (20%)" - Candidate primarily speaks English but switches to Hindi for some technical terms
-- "Spanish (60%), English (40%)" - Candidate switches between Spanish and English throughout response
-- "English (100%)" - Candidate responds entirely in English
-- "Hindi (70%), English (30%)" - Candidate primarily speaks Hindi but uses English for technical concepts
+- languages: ["English", "Hindi"], percentageWise: ["80.00%", "20.00%"] - Candidate primarily speaks English but switches to Hindi for some technical terms
+- languages: ["Spanish", "English"], percentageWise: ["60.00%", "40.00%"] - Candidate switches between Spanish and English throughout response
+- languages: ["English"], percentageWise: ["100.00%"] - Candidate responds entirely in English
+- languages: ["Hindi", "English"], percentageWise: ["70.00%", "30.00%"] - Candidate primarily speaks Hindi but uses English for technical concepts
+
+**CRITICAL FORMATTING REQUIREMENTS:**
+- Language names: Use full names like "English", "Hindi", "Spanish" - NEVER use codes like "en", "hi", "es"
+- Percentages: Always format to exactly 2 decimal places like "75.50%", "23.45%", "1.25%" - NEVER use "75.5%", "75.678%", or "75%"
 
 **CRITICAL**: Language detection is MANDATORY and must be included in every response analysis. Do not skip this analysis even if the response appears to be in a single language.
+
+**🚨 CRITICAL TRANSCRIPTION REQUIREMENT 🚨**
+**MANDATORY: The transcription field MUST ALWAYS be in English, regardless of the language the candidate actually spoke.**
+- If the candidate speaks in Hindi, Spanish, or any other language, you MUST translate their words to English in the transcription field
+- Preserve the meaning and technical content when translating
+- The languageDetection field should still accurately reflect what languages the candidate actually spoke
+- This ensures consistent analysis regardless of the candidate's language choice
+- Example: If candidate says "मैं Java में काम करता हूं" in Hindi, transcription should be "I work in Java" in English, but languageDetection should show languages: ["Hindi"], percentageWise: ["100.00%"]
 `;
 
   // Add cheating detection context if available
@@ -2671,7 +2768,7 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     answerTime: {
       totalDurationSeconds: 0,
       effectiveAnswerTimeSeconds: 0,
-      effectiveAnswerTimePercentage: "0%",
+      effectiveAnswerTimePercentage: 0,
     },
     answerEffectiveness: {
       rating: "0.0",
@@ -2718,6 +2815,77 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     },
   };
 
+  // V2: Helper function to convert language codes to full names
+  const normalizeLanguageName = (lang) => {
+    if (!lang || typeof lang !== "string") return "English";
+
+    const langLower = lang.trim().toLowerCase();
+
+    // Language code to full name mapping
+    const languageMap = {
+      en: "English",
+      hi: "Hindi",
+      es: "Spanish",
+      fr: "French",
+      de: "German",
+      zh: "Chinese",
+      ja: "Japanese",
+      ko: "Korean",
+      ar: "Arabic",
+      pt: "Portuguese",
+      ru: "Russian",
+      it: "Italian",
+      tr: "Turkish",
+      vi: "Vietnamese",
+      th: "Thai",
+      id: "Indonesian",
+      ms: "Malay",
+      bn: "Bengali",
+      ta: "Tamil",
+      te: "Telugu",
+      mr: "Marathi",
+      gu: "Gujarati",
+      kn: "Kannada",
+      pa: "Punjabi",
+      ur: "Urdu",
+    };
+
+    // If it's a known code, convert it
+    if (languageMap[langLower]) {
+      return languageMap[langLower];
+    }
+
+    // If it's already a full name (capitalized), return as-is
+    // Otherwise, capitalize first letter
+    if (lang.length > 0) {
+      return lang.charAt(0).toUpperCase() + lang.slice(1).toLowerCase();
+    }
+
+    return "English";
+  };
+
+  // V2: Helper function to normalize percentage to 2 decimal places
+  const normalizeLanguagePercentage = (percentage) => {
+    if (!percentage) return "100.00%";
+
+    let num;
+    if (typeof percentage === "string") {
+      // Remove % sign and whitespace
+      const cleaned = percentage.replace(/%/g, "").trim();
+      num = parseFloat(cleaned) || 100;
+    } else if (typeof percentage === "number") {
+      num = percentage;
+    } else {
+      return "100.00%";
+    }
+
+    // Ensure value is between 0 and 100
+    num = Math.max(0, Math.min(100, num));
+
+    // Format to exactly 2 decimal places
+    return `${num.toFixed(2)}%`;
+  };
+
   // V2: Initial transformation with enhanced field handling
   const transformed = {
     ...defaultResponse,
@@ -2725,32 +2893,64 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     cheatingIndicators: Array.isArray(parsedAnalysis.cheatingIndicators)
       ? parsedAnalysis.cheatingIndicators
       : [parsedAnalysis.cheatingIndicators].filter(Boolean),
-    languageDetection: {
-      languages: Array.isArray(parsedAnalysis.languageDetection?.languages)
+    languageDetection: (() => {
+      const rawLanguages = Array.isArray(
+        parsedAnalysis.languageDetection?.languages
+      )
         ? parsedAnalysis.languageDetection.languages
         : [parsedAnalysis.languageDetection?.languages || "English"].filter(
             Boolean
-          ),
-      percentageWise: Array.isArray(
+          );
+
+      const rawPercentages = Array.isArray(
         parsedAnalysis.languageDetection?.percentageWise
       )
         ? parsedAnalysis.languageDetection.percentageWise
         : [parsedAnalysis.languageDetection?.percentageWise || "100%"].filter(
             Boolean
-          ),
-      // Enhanced language detection fields
-      languageSwitching:
-        parsedAnalysis.languageDetection?.languageSwitching || false,
-      primaryLanguage:
+          );
+
+      // Normalize languages to full names
+      const normalizedLanguages = rawLanguages.map(normalizeLanguageName);
+
+      // Normalize percentages to 2 decimal places
+      const normalizedPercentages = rawPercentages.map(
+        normalizeLanguagePercentage
+      );
+
+      // Ensure arrays have same length
+      const maxLength = Math.max(
+        normalizedLanguages.length,
+        normalizedPercentages.length
+      );
+      const languages = [];
+      const percentageWise = [];
+
+      for (let i = 0; i < maxLength; i++) {
+        languages.push(normalizedLanguages[i] || "English");
+        percentageWise.push(normalizedPercentages[i] || "0.00%");
+      }
+
+      // Normalize primaryLanguage
+      const primaryLanguage = normalizeLanguageName(
         parsedAnalysis.languageDetection?.primaryLanguage ||
-        parsedAnalysis.languageDetection?.languages?.[0] ||
-        "English",
-      languageProficiency:
-        parsedAnalysis.languageDetection?.languageProficiency || {},
-      codeSwitching: parsedAnalysis.languageDetection?.codeSwitching || false,
-      languageConsistency:
-        parsedAnalysis.languageDetection?.languageConsistency || "Consistent",
-    },
+          languages[0] ||
+          "English"
+      );
+
+      return {
+        languages,
+        percentageWise,
+        languageSwitching:
+          parsedAnalysis.languageDetection?.languageSwitching || false,
+        primaryLanguage,
+        languageProficiency:
+          parsedAnalysis.languageDetection?.languageProficiency || {},
+        codeSwitching: parsedAnalysis.languageDetection?.codeSwitching || false,
+        languageConsistency:
+          parsedAnalysis.languageDetection?.languageConsistency || "Consistent",
+      };
+    })(),
     answerRating: {
       ...parsedAnalysis.answerRating,
       reasonForDeduction:
@@ -2825,6 +3025,30 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
   transformed.backgroundNoise =
     parsedAnalysis.backgroundNoise || defaultResponse.backgroundNoise;
 
+  // V2: Normalize effectiveAnswerTimePercentage to store only numeric value (no % sign)
+  // This prevents double % signs when AI returns value with % and UI adds another %
+  if (transformed.answerTime?.effectiveAnswerTimePercentage) {
+    const percentageValue =
+      transformed.answerTime.effectiveAnswerTimePercentage;
+    let normalizedValue;
+
+    if (typeof percentageValue === "string") {
+      // Remove all % signs and whitespace, then parse as number
+      const cleaned = percentageValue.replace(/%/g, "").trim();
+      const num = parseFloat(cleaned) || 0;
+      // Ensure value is between 0 and 100
+      normalizedValue = Math.max(0, Math.min(100, num));
+    } else if (typeof percentageValue === "number") {
+      // If it's already a number, clamp it
+      normalizedValue = Math.max(0, Math.min(100, percentageValue));
+    } else {
+      // Fallback to 0
+      normalizedValue = 0;
+    }
+
+    transformed.answerTime.effectiveAnswerTimePercentage = normalizedValue;
+  }
+
   // V2: If behavioral data was provided but fields are missing, generate reasonable defaults
   if (
     context.hasBehavioralData &&
@@ -2862,7 +3086,7 @@ const transformAiResponse = (parsedAnalysis, context = {}) => {
     transformed.answerTime = {
       totalDurationSeconds: behavioralDuration,
       effectiveAnswerTimeSeconds: effectiveTime,
-      effectiveAnswerTimePercentage: `${effectivePercentage}%`,
+      effectiveAnswerTimePercentage: effectivePercentage,
     };
   }
 

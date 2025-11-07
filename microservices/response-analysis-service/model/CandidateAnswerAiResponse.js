@@ -167,7 +167,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     answerTime: {
       totalDurationSeconds: { type: Number },
       effectiveAnswerTimeSeconds: { type: Number },
-      effectiveAnswerTimePercentage: { type: String },
+      effectiveAnswerTimePercentage: { type: Number },
     },
     answerEffectiveness: {
       rating: { type: String },
