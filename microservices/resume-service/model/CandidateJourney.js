@@ -72,6 +72,10 @@ const CandidateJourneySchema = new mongoose.Schema(
         timestamp: {
           type: Date,
         },
+        invitedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
       },
     ],
   },

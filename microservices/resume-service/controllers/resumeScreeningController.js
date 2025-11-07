@@ -209,7 +209,7 @@ const analyzeResumes = async (req, res) => {
   }
 };
 
-const addJobApplicationJourneyStage = async (jobApplicationId, stage) => {
+const addJobApplicationJourneyStage = async (jobApplicationId, stage, addedBy) => {
   try {
     if (!jobApplicationId) return;
 
@@ -218,50 +218,48 @@ const addJobApplicationJourneyStage = async (jobApplicationId, stage) => {
         ? jobApplicationId
         : new ObjectId(jobApplicationId);
 
+    // Convert addedBy to ObjectId if provided
+    const invitedBy = addedBy
+      ? addedBy instanceof ObjectId
+        ? addedBy
+        : new ObjectId(addedBy)
+      : undefined;
+
     const journey = await CandidateJourney.findOne({
       jobApplicationId: jobAppId,
     });
 
+    // Build journey stage object
+    const journeyStage = {
+      stage,
+      timestamp: new Date(),
+    };
+
+    // Add invitedBy if provided
+    if (invitedBy) {
+      journeyStage.invitedBy = invitedBy;
+    }
+
     if (!journey) {
-      // console.log(
-      //   `📝 Creating new candidate journey - jobApplicationId: ${jobAppId}, stage: ${stage}`
-      // );
       await CandidateJourney.create({
         jobApplicationId: jobAppId,
         candidateScreeningAssessmentIds: [],
         candidateAssessmentIds: [],
         candidateInterviewIds: [],
-        journey: [
-          {
-            stage,
-            timestamp: new Date(),
-          },
-        ],
+        journey: [journeyStage],
       });
-      // console.log(
-      //   `✅ New candidate journey created successfully for jobApplicationId: ${jobAppId}`
-      // );
     } else {
-      // console.log(
-      //   `📝 Updating existing candidate journey - jobApplicationId: ${jobAppId}, stage: ${stage}`
-      // );
       await CandidateJourney.updateOne(
         { _id: journey._id },
         {
           $push: {
-            journey: {
-              stage,
-              timestamp: new Date(),
-            },
+            journey: journeyStage,
           },
           $set: {
             updatedAt: new Date(),
           },
         }
       );
-      // console.log(
-      //   `✅ Candidate journey updated successfully for jobApplicationId: ${jobAppId}`
-      // );
     }
   } catch (error) {
     console.error("❌ Error adding job application journey stage:", error);
@@ -296,7 +294,7 @@ const getRequestData = async (req, res) => {
 const addToJobApplication = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { jobId, changeStatus, emails } = req.body;
+    const { jobId, changeStatus, emails, addedBy } = req.body;
     const redis = req.redis;
 
     if (!jobId || !Array.isArray(emails) || emails.length === 0) {
@@ -387,7 +385,7 @@ const addToJobApplication = async (req, res) => {
       // Add journey stage "Added" for each job application
       for (const jobApp of jobApplications) {
         if (jobApp && jobApp._id) {
-          await addJobApplicationJourneyStage(jobApp._id, "Added");
+          await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
         }
       }
     } catch (error) {
