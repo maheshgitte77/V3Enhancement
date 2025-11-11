@@ -23,6 +23,7 @@ const supportedExtensions = new Set([
   "png",
   "tiff",
 ]);
+
 const allowedMimeTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -91,6 +92,7 @@ const analyzeResumes = async (req, res) => {
         createRecord,
         expectedSalary,
         currentSalary,
+        sourceFrom,
         addedBy,
         clientId,
       } = req.body;
@@ -184,6 +186,7 @@ const analyzeResumes = async (req, res) => {
             expectedSalary,
             currentSalary,
             candidateType,
+            sourceFrom,
             // addedBy: addedBy || null,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
@@ -492,6 +495,7 @@ const addToJobApplication = async (req, res) => {
                 record.currency
               ),
               currentSalary: normalizeSalary(record.currentSalary, record.currency),
+              sourceFrom: record.sourceFrom?.trim() || undefined,
               willingnessToRelocate: record.willingnessToRelocate?.trim() || undefined,
               workAuthorization: record.workAuthorization?.trim() || undefined,
               offersInHand: record.offersInHand?.trim() || undefined,
@@ -538,7 +542,7 @@ const addToJobApplication = async (req, res) => {
       if (candidateBulkOps.length > 0) {
         try {
           const result = await Candidate.bulkWrite(candidateBulkOps);
-          console.log(`Successfully processed ${result.upsertedCount || 0} new candidates and updated ${result.modifiedCount || 0} existing candidates`);
+          // console.log(`Successfully processed ${result.upsertedCount || 0} new candidates and updated ${result.modifiedCount || 0} existing candidates`);
         } catch (bulkWriteError) {
           console.error("Error in bulk write operation:", bulkWriteError.message);
           // Try individual operations as fallback

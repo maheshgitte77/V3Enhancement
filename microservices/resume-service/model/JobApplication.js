@@ -273,6 +273,9 @@ const JobApplicationSchema = new mongoose.Schema(
       mobile: String,
       code: String,
     },
+    sourceFrom: {
+      type: String,
+    },
     InvitedOn: {
       type: Date,
     },

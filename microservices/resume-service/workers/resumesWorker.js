@@ -87,6 +87,7 @@ const startConsumers = async () => {
     await createConsumer(i);
   }
 };
+
 const formatDate = (dateString) => {
   if (!dateString) return "";
   const date = new Date(dateString);
@@ -366,6 +367,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     preferredLocations,
     expectedSalary,
     currentSalary,
+    sourceFrom,
     candidateType,
     createRecord = "true",
     clientCoolingPeriod,
@@ -700,6 +702,7 @@ Return the output in the specified JSON format.
           expectedSalary,
           currentSalary,
           candidateType,
+          sourceFrom,
         }
       );
 
@@ -711,7 +714,9 @@ Return the output in the specified JSON format.
         file.originalname,
         null,
         parsedAnalysis.analysis,
-        fileId
+        fileId,
+        null,
+        sourceFrom,
       );
 
       await cleanupFiles(finalFilePath, originalFilePath);
@@ -743,6 +748,7 @@ Return the output in the specified JSON format.
         expectedSalary,
         currentSalary,
         candidateType,
+        sourceFrom,
       },
       candidateStatus?.lastApplicationId || null,
       candidateStatus.coolingData
@@ -758,7 +764,8 @@ Return the output in the specified JSON format.
         candidateStatus.cachedId,
         parsedAnalysis.analysis,
         fileId,
-        candidateStatus?.lastApplicationId || null
+        candidateStatus?.lastApplicationId || null,
+        sourceFrom
       );
       await cleanupFiles(finalFilePath, originalFilePath);
       return;
@@ -783,7 +790,9 @@ Return the output in the specified JSON format.
       file.originalname,
       cacheKey,
       parsedAnalysis.analysis,
-      fileId
+      fileId,
+      null,
+      sourceFrom
     );
 
     await cleanupFiles(finalFilePath, originalFilePath);
@@ -819,6 +828,7 @@ Return the output in the specified JSON format.
         expectedSalary: data.expectedSalary,
         currentSalary: data.currentSalary,
         candidateType: data.candidateType,
+        sourceFrom: data.sourceFrom,
       }
     );
 
@@ -830,7 +840,9 @@ Return the output in the specified JSON format.
       originalFileName,
       null,
       null,
-      files?.fileId
+      files?.fileId,
+      null,
+      sourceFrom
     );
     await cleanupFiles(finalFilePath, originalFilePath);
     if (retryCount < MAX_RETRIES && isTransientError(error)) {
@@ -889,7 +901,8 @@ async function sendResponse(
   cachedId,
   analysis,
   fileId,
-  lastApplicationId
+  lastApplicationId,
+  sourceFrom
 ) {
   await producer.send({
     topic: replyTopic,
@@ -906,6 +919,7 @@ async function sendResponse(
           cachedId,
           analysis,
           fileId,
+          sourceFrom,
         }),
       },
     ],

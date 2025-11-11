@@ -96,4 +96,6 @@ CandidateJourneySchema.index({
   "candidateInterviewIds.candidateInterviewId": 1,
 });
 
-module.exports = CandidateJourneySchema;
+module.exports =
+  mongoose.models.CandidateJourney ||
+  mongoose.model("CandidateJourney", CandidateJourneySchema);
