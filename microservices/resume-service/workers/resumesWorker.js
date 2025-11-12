@@ -367,7 +367,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     preferredLocations,
     expectedSalary,
     currentSalary,
-    sourceFrom,
+    hrSource,
     candidateType,
     createRecord = "true",
     clientCoolingPeriod,
@@ -702,7 +702,7 @@ Return the output in the specified JSON format.
           expectedSalary,
           currentSalary,
           candidateType,
-          sourceFrom,
+          hrSource,
         }
       );
 
@@ -716,7 +716,7 @@ Return the output in the specified JSON format.
         parsedAnalysis.analysis,
         fileId,
         null,
-        sourceFrom,
+        hrSource,
       );
 
       await cleanupFiles(finalFilePath, originalFilePath);
@@ -748,7 +748,7 @@ Return the output in the specified JSON format.
         expectedSalary,
         currentSalary,
         candidateType,
-        sourceFrom,
+        hrSource,
       },
       candidateStatus?.lastApplicationId || null,
       candidateStatus.coolingData
@@ -765,7 +765,7 @@ Return the output in the specified JSON format.
         parsedAnalysis.analysis,
         fileId,
         candidateStatus?.lastApplicationId || null,
-        sourceFrom
+        hrSource
       );
       await cleanupFiles(finalFilePath, originalFilePath);
       return;
@@ -792,7 +792,7 @@ Return the output in the specified JSON format.
       parsedAnalysis.analysis,
       fileId,
       null,
-      sourceFrom
+      hrSource
     );
 
     await cleanupFiles(finalFilePath, originalFilePath);
@@ -828,7 +828,7 @@ Return the output in the specified JSON format.
         expectedSalary: data.expectedSalary,
         currentSalary: data.currentSalary,
         candidateType: data.candidateType,
-        sourceFrom: data.sourceFrom,
+        hrSource: data.hrSource,
       }
     );
 
@@ -842,7 +842,7 @@ Return the output in the specified JSON format.
       null,
       files?.fileId,
       null,
-      sourceFrom
+      hrSource
     );
     await cleanupFiles(finalFilePath, originalFilePath);
     if (retryCount < MAX_RETRIES && isTransientError(error)) {
@@ -902,7 +902,7 @@ async function sendResponse(
   analysis,
   fileId,
   lastApplicationId,
-  sourceFrom
+  hrSource
 ) {
   await producer.send({
     topic: replyTopic,
@@ -919,7 +919,7 @@ async function sendResponse(
           cachedId,
           analysis,
           fileId,
-          sourceFrom,
+          hrSource,
         }),
       },
     ],

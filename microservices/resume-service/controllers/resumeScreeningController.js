@@ -92,7 +92,7 @@ const analyzeResumes = async (req, res) => {
         createRecord,
         expectedSalary,
         currentSalary,
-        sourceFrom,
+        hrSource,
         addedBy,
         clientId,
       } = req.body;
@@ -186,7 +186,7 @@ const analyzeResumes = async (req, res) => {
             expectedSalary,
             currentSalary,
             candidateType,
-            sourceFrom,
+            hrSource,
             // addedBy: addedBy || null,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
@@ -495,7 +495,7 @@ const addToJobApplication = async (req, res) => {
                 record.currency
               ),
               currentSalary: normalizeSalary(record.currentSalary, record.currency),
-              sourceFrom: record.sourceFrom?.trim() || undefined,
+              hrSource: record.hrSource?.trim() || undefined,
               willingnessToRelocate: record.willingnessToRelocate?.trim() || undefined,
               workAuthorization: record.workAuthorization?.trim() || undefined,
               offersInHand: record.offersInHand?.trim() || undefined,
@@ -508,7 +508,7 @@ const addToJobApplication = async (req, res) => {
               preferredCompanyType: record.preferredCompanyType?.trim() || undefined,
               socials: record.socials || undefined,
               resumeSummary: record.resumeSummary?.trim() || undefined,
-              source: record.candidateType?.trim() || record.source?.trim() || undefined,
+              source: "HR Invited",
             };
 
             // Remove undefined and null fields to keep insert clean
