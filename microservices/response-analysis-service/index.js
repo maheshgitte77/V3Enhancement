@@ -21,6 +21,7 @@ const cors = require("cors");
 const connectDB = require("./utils/dbConnect");
 const bodyParser = require("body-parser");
 const responseRoutes = require("./routes/analyzeResponseRoutes");
+const responseRoutesV2_5 = require("./routes/analyzeResponseRoutes.v2.5");
 
 /**
  * Initialize worker modules for different API versions
@@ -34,6 +35,7 @@ console.log(`🔄 Initializing Response Analysis Workers:`);
 console.log(`   ✅ V0 (Default) - responseWorker.js`);
 console.log(`   ✅ V1 - responseWorkerV1.js`);
 console.log(`   ✅ V2 - responseWorkerV2.js`);
+console.log(`   🔗 V2.5 routes loaded (V2.5 initializes independently)`);
 
 /**
  * Express application instance
@@ -63,6 +65,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mount routes
 app.use("/api/response", responseRoutes);
+app.use("/api/response/v2.5", responseRoutesV2_5);
 
 /**
  * Start the server and listen for incoming requests
@@ -80,4 +83,12 @@ app.listen(PORT, () => {
   console.log(`   • /api/response/analyzeScreening (V0 - Default)`);
   console.log(`   • /api/response/analyzeScreening/v1 (V1)`);
   console.log(`   • /api/response/analyzeScreening/v2 (V2)`);
+  console.log(`\n   ⭐ V2.5 Multi-Stage Processing:`);
+  console.log(
+    `   • /api/response/v2.5/analyzeMediaResponse (V2.5 - Multi-Stage)`
+  );
+  console.log(`   • /api/response/v2.5/analyzeSubjective (V2.5 - Multi-Stage)`);
+  console.log(`   • /api/response/v2.5/analyzeScreening (V2.5 - Multi-Stage)`);
+  console.log(`   • /api/response/v2.5/health (V2.5 - Health Check)`);
+  console.log(`   • /api/response/v2.5/ (V2.5 - API Info)`);
 });
