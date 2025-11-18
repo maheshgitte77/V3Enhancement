@@ -33,10 +33,29 @@ Before ANY scoring, FIRST check if the candidate's response addresses the questi
 ✓ Question about "JavaScript prototypal inheritance" → Answer discusses prototypes, __proto__, inheritance chains = RELEVANT
 ✓ Question about "React hooks" → Answer discusses useState, useEffect, hook rules = RELEVANT
 
+**🚨 MANDATORY RELEVANCE RULES (NO EXCEPTIONS):**
 **CHECK NOW:** Does the candidate's response address the specific technology/topic/concept asked in the question?
-- If NO (different language/framework/topic): relevanceAssessment.score = 0.0-0.2, correctPercentage = 0%
-- If PARTIALLY (mentions topic but misses key points): relevanceAssessment.score = 0.3-0.5, cap correctPercentage at 40%
-- If YES (addresses the question): relevanceAssessment.score = 0.6-1.0, proceed to score normally
+
+- **If NO (different language/framework/topic):**
+  → relevanceAssessment.score = 0.0-0.2
+  → correctPercentage = 0 (MUST be exactly 0, do NOT calculate using formula)
+  → overallRating = "0.0"
+  → technicalDepth.rating = "0.0"
+  → answerRating.rating = "0.0"
+  → responseQuality = "low"
+  → DO NOT apply scoring formula - answer is completely irrelevant
+
+- **If PARTIALLY (mentions topic but misses key points):**
+  → relevanceAssessment.score = 0.3-0.5
+  → correctPercentage = MAX 40 (cap at 40 even if formula gives higher value)
+  → overallRating = "2.0"
+  → responseQuality = "low"
+  → Apply scoring formula but ensure result does not exceed 40
+
+- **If YES (addresses the question):**
+  → relevanceAssessment.score = 0.6-1.0
+  → Apply scoring formula normally
+  → No cap on correctPercentage
 `;
 };
 
@@ -47,7 +66,12 @@ const generateScoringInstructions = () => {
   return `
 **STEP 2: CALCULATE CORRECTNESS SCORE (Only if relevant)**
 
-Use this formula:
+🚨 CRITICAL: RELEVANCE OVERRIDES ALL SCORING 🚨
+- **If relevanceAssessment.score <= 0.2:** correctPercentage MUST be 0 (do NOT use formula below)
+- **If relevanceAssessment.score < 0.5:** correctPercentage MUST be capped at 40 (apply formula but cap result)
+- **Only apply the formula below if relevanceAssessment.score >= 0.5**
+
+Use this formula (ONLY if relevanceAssessment.score >= 0.5):
 **correctPercentage** = [(Factual Correctness × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25)] × Experience Factor
 
 **Experience Factor:**
@@ -573,12 +597,13 @@ ${generateRelevanceInstructions(responseData)}
 ${generateScoringInstructions()}
 
 **EVALUATION INSTRUCTIONS:**
-1. **First**: Verify the candidate's answer addresses the question asked (use relevanceAssessment)
-2. **Second**: Assess technical correctness and depth of their answer
-3. **Third**: Consider their experience level (${
+1. **First (MANDATORY)**: Check relevance - Does the answer address the question asked? Set relevanceAssessment.score FIRST
+2. **Second (CONDITIONAL)**: Only if relevanceAssessment.score >= 0.5, assess technical correctness and depth
+3. **Third (CONDITIONAL)**: Only if relevant, consider their experience level (${
     responseData.experience
   } years) when evaluating depth
-4. **Fourth**: Evaluate communication quality and answer effectiveness
+4. **Fourth (CONDITIONAL)**: Only if relevant, evaluate communication quality and answer effectiveness
+5. **CRITICAL**: Apply relevance rules to correctPercentage BEFORE any other scoring
 
 **IMPORTANT NOTES:**
 - Focus PURELY on the technical content of their answer vs. the question
@@ -590,7 +615,7 @@ ${generateScoringInstructions()}
 
 **Response JSON Format:**
 {
-  "correctPercentage": "[0–100] - COMBINED SCORE using formula: (Factual × 0.40 + Depth × 0.35 + Communication × 0.25) × Experience Factor",
+  "correctPercentage": "[0–100] - MUST follow relevance rules: 0 if relevanceAssessment.score <= 0.2, MAX 40 if score < 0.5, otherwise use formula: (Factual × 0.40 + Depth × 0.35 + Communication × 0.25) × Experience Factor",
   "overallRating": "<String, 0.0–5.0> - MUST be proportional to correctPercentage (correctPercentage / 20)",
   "technicalDepth": { 
     "rating": "<String, 0.0–5.0>", 
@@ -624,8 +649,12 @@ ${generateScoringInstructions()}
 }
 
 **CRITICAL REMINDERS:**
+- **RELEVANCE FIRST**: Always check relevance BEFORE calculating any scores
+- **If answer is irrelevant (relevanceAssessment.score <= 0.2):** correctPercentage MUST be 0, do NOT use scoring formula
+- **If answer is partially relevant (relevanceAssessment.score < 0.5):** correctPercentage MUST be capped at 40
+- **Only apply scoring formula if answer is relevant (relevanceAssessment.score >= 0.5)**
 - Focus ONLY on: Did they answer what was asked? How well? What's missing?
-- Be fair and consider their experience level in your evaluation
+- Be fair and consider their experience level in your evaluation (only if answer is relevant)
 `;
 };
 
@@ -723,7 +752,7 @@ ${baseAnswerSection}
 
 **Response JSON Format:**
 {
-  "correctPercentage": "[0–100] - COMBINED SCORE",
+  "correctPercentage": "[0–100] - MUST follow relevance rules: 0 if relevanceAssessment.score <= 0.2, MAX 40 if score < 0.5, otherwise use formula",
   "overallRating": "<String, 0.0–5.0>",
   "technicalDepth": { 
     "rating": "<String, 0.0–5.0>", 
@@ -786,7 +815,12 @@ ${baseAnswerSection}
   }
 }
 
-**CRITICAL**: Focus ONLY on technical content quality. Behavioral/integrity analysis is handled separately.
+**CRITICAL REMINDERS:**
+- **RELEVANCE FIRST**: Always check relevance BEFORE calculating any scores
+- **If answer is irrelevant (relevanceAssessment.score <= 0.2):** correctPercentage MUST be 0, do NOT use scoring formula
+- **If answer is partially relevant (relevanceAssessment.score < 0.5):** correctPercentage MUST be capped at 40
+- **Only apply scoring formula if answer is relevant (relevanceAssessment.score >= 0.5)**
+- Focus ONLY on technical content quality. Behavioral/integrity analysis is handled separately.
 `;
 };
 
