@@ -276,6 +276,10 @@ const JobApplicationSchema = new mongoose.Schema(
     hrSource: {
       type: String,
     },
+    source: {
+      type: String,
+      default: "HR Invited",
+    },
     InvitedOn: {
       type: Date,
     },
