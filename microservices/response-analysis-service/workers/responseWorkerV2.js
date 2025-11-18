@@ -891,48 +891,120 @@ const calculateAdaptiveScoring = (analysis, context = {}) => {
 };
 
 /**
- * Intelligent relevance assessment
+ * V2.2: MINIMAL Pre-check - Only detects OBVIOUS technology mismatches
+ * Relies on AI for semantic relevance assessment
  * @param {string} response - Candidate response
  * @param {string} question - Question asked
- * @returns {Object} Relevance assessment
+ * @returns {Object} Basic pre-check result
  */
 const assessIntelligentRelevance = (response, question) => {
   if (!V2_CONFIG.evaluation.intelligentRelevance) {
-    return { score: 0.5, explanation: "Standard relevance assessment" };
+    return {
+      score: 0.5,
+      explanation: "Will be assessed by AI",
+      shouldTrustAI: true,
+    };
   }
 
-  // V2: Simple keyword-based relevance (can be enhanced with NLP)
-  const questionKeywords = question.toLowerCase().match(/\b\w{4,}\b/g) || [];
-  const responseKeywords = response.toLowerCase().match(/\b\w{4,}\b/g) || [];
+  // Normalize inputs
+  const questionLower = question.toLowerCase();
+  const responseLower = response.toLowerCase();
 
-  const matchingKeywords = questionKeywords.filter((keyword) =>
-    responseKeywords.some(
-      (respKeyword) =>
-        respKeyword.includes(keyword) || keyword.includes(respKeyword)
-    )
-  );
+  // V2.2: ONLY check for OBVIOUS different programming languages
+  // This catches clear mismatches like Java answer for JavaScript question
+  // IMPORTANT: Order matters! Check longer/more specific keywords FIRST
+  // to avoid false positives (e.g., "java" matching inside "javascript")
+  const primaryLanguages = [
+    // Check JavaScript FIRST (before Java) to avoid substring match
+    {
+      lang: "javascript",
+      keywords: ["javascript", "ecmascript"],
+      patterns: [/\bjavascript\b/i, /\bjs\b/i, /\becmascript\b/i],
+    },
+    {
+      lang: "java",
+      keywords: ["java", "jvm"],
+      patterns: [/\bjava\b/i, /\bjvm\b/i],
+    },
+    { lang: "python", keywords: ["python"], patterns: [/\bpython\b/i] },
+    {
+      lang: "csharp",
+      keywords: ["c#", "csharp"],
+      patterns: [/\bc#\b/i, /\bcsharp\b/i],
+    },
+    { lang: "ruby", keywords: ["ruby"], patterns: [/\bruby\b/i] },
+    { lang: "php", keywords: ["php"], patterns: [/\bphp\b/i] },
+    {
+      lang: "cpp",
+      keywords: ["c++", "cpp"],
+      patterns: [/\bc\+\+\b/i, /\bcpp\b/i],
+    },
+    {
+      lang: "go",
+      keywords: ["golang", "go "],
+      patterns: [/\bgolang\b/i, /\bgo\s/i],
+    },
+    { lang: "rust", keywords: ["rust"], patterns: [/\brust\b/i] },
+    { lang: "swift", keywords: ["swift"], patterns: [/\bswift\b/i] },
+    { lang: "kotlin", keywords: ["kotlin"], patterns: [/\bkotlin\b/i] },
+  ];
 
-  const relevanceScore =
-    questionKeywords.length > 0
-      ? matchingKeywords.length / questionKeywords.length
-      : 0;
+  // Detect if question explicitly asks about a specific language
+  // Use word boundaries to avoid substring matches
+  let questionLanguage = null;
+  let responseLanguage = null;
 
-  let explanation = "";
-  if (relevanceScore > 0.7) {
-    explanation = "Highly relevant response with strong keyword alignment";
-  } else if (relevanceScore > 0.4) {
-    explanation = "Moderately relevant response with some keyword matches";
-  } else if (relevanceScore > 0.1) {
-    explanation = "Partially relevant response with limited keyword alignment";
-  } else {
-    explanation = "Low relevance - response may be off-topic";
+  for (const { lang, patterns } of primaryLanguages) {
+    // Check question - use word boundaries to match complete words only
+    if (patterns.some((pattern) => pattern.test(questionLower))) {
+      if (!questionLanguage) questionLanguage = lang; // Take first match
+    }
+    // Check response - use word boundaries to match complete words only
+    if (patterns.some((pattern) => pattern.test(responseLower))) {
+      if (!responseLanguage) responseLanguage = lang; // Take first match
+    }
   }
 
+  // V2.2: CRITICAL - Only flag OBVIOUS mismatches
+  // Both languages must be explicitly mentioned AND different
+  let obviousTechnologyMismatch = false;
+  if (
+    questionLanguage &&
+    responseLanguage &&
+    questionLanguage !== responseLanguage
+  ) {
+    obviousTechnologyMismatch = true;
+    logger.warn("V2.2: OBVIOUS TECHNOLOGY MISMATCH DETECTED", {
+      questionLanguage,
+      responseLanguage,
+      questionPreview: question.substring(0, 80),
+      responsePreview: response.substring(0, 80),
+      warning: "Different programming languages explicitly mentioned",
+    });
+  }
+
+  // V2.2: If obvious mismatch, return low score
+  // Otherwise, return neutral score and let AI decide
+  if (obviousTechnologyMismatch) {
+    return {
+      score: 0.1,
+      explanation: `OBVIOUS MISMATCH: Response discusses ${responseLanguage} but question asks about ${questionLanguage}`,
+      questionLanguage,
+      responseLanguage,
+      obviousTechnologyMismatch: true,
+      shouldTrustAI: false, // We're confident about this mismatch
+    };
+  }
+
+  // V2.2: No obvious mismatch - trust AI for semantic relevance
   return {
-    score: relevanceScore,
-    explanation,
-    matchingKeywords: matchingKeywords.length,
-    totalKeywords: questionKeywords.length,
+    score: 0.5, // Neutral - let AI decide
+    explanation:
+      "Pre-check passed - relying on AI for semantic relevance assessment",
+    questionLanguage,
+    responseLanguage,
+    obviousTechnologyMismatch: false,
+    shouldTrustAI: true, // Let AI do the real assessment
   };
 };
 
@@ -1575,470 +1647,88 @@ const generateV2Prompt = (
   processingContext = {}
 ) => {
   const basePrompt = `
-You are an advanced AI evaluator using BALANCED & CONTEXT-AWARE analysis. Your goal is to provide accurate, fair assessment with intelligent contextual understanding.
+You are an expert technical interviewer evaluating candidate responses. Provide accurate, fair, and contextual assessments.
 
-**🚨 CRITICAL WARNING: FOR VIDEO RESPONSES, YOU MUST ANALYZE LIP SYNC FIRST 🚨**
-**BEFORE analyzing reading behaviors, eye movements, or any other behaviors, you MUST complete the mandatory lip sync analysis. Same-gender proxy speaking (male-male, female-female) is extremely common and MUST be detected. Do not let other behaviors distract you from this critical analysis.**
+**🎯 CRITICAL: RELEVANCE-FIRST EVALUATION 🎯**
 
-**V2 CORE PRINCIPLES:**
-- **LIP SYNC PRIORITY**: For video responses, lip sync analysis is MANDATORY and must be performed FIRST
-- CONTEXTUAL ANALYSIS: Consider situation, experience level, and response quality
-- BALANCED APPROACH: Neither too lenient nor too strict - find the right balance
-- MULTI-FACTOR DECISIONS: Use multiple signals before making judgments
-- ADAPTIVE THRESHOLDS: Adjust expectations based on context
-- INTELLIGENT RELEVANCE: Smart assessment of response appropriateness
-- HR-FRIENDLY LANGUAGE: Use clear, actionable language that HR professionals can understand
-- COMPLETE EVALUATION: Every field must be thoroughly evaluated - NO placeholder values like "Not evaluated"
-- **MANDATORY: LIP SYNC ANALYSIS FIRST**: For video responses, you MUST perform lip sync analysis BEFORE analyzing any other behaviors. This is the #1 priority. Proxy speaking (someone else speaking while candidate moves lips) is the most serious form of cheating and MUST be detected regardless of other behaviors present.
+**STEP 1: CHECK RELEVANCE (MANDATORY FIRST STEP)**
+Before ANY scoring, FIRST check if the candidate's response addresses the question asked:
 
-**CRITICAL LIP SYNC CHECKLIST - MANDATORY FOR ALL VIDEO RESPONSES:**
-✓ Step 1: Does the voice gender match the visible person's gender?
-✓ Step 2: Does the voice age/maturity match the visible person's apparent age?
-✓ Step 3: Do the lip movements sync EXACTLY with the audio timing?
-✓ Step 4: Do the mouth shapes correspond to the consonants and vowels being spoken?
-✓ Step 5: Does the voice tone/pitch match what you'd expect from the visible person?
-✓ Step 6: Are there any timing delays between lip movement and audio?
-✓ Step 7: Does the voice remain consistent throughout the entire response?
-✓ Step 8: Does the environmental audio match the video environment?
+**EXAMPLES OF IRRELEVANT RESPONSES (Score = 0%, relevanceAssessment.score = 0.0-0.2):**
+❌ Question about "JavaScript prototypal inheritance" → Answer discusses "Java method overloading" = COMPLETELY IRRELEVANT (different language!)
+❌ Question about "React hooks" → Answer discusses "Angular directives" = COMPLETELY IRRELEVANT (different framework!)
+❌ Question about "Database normalization" → Answer discusses "Array sorting algorithms" = COMPLETELY IRRELEVANT (different topic!)
 
-**IF ANY OF THESE FAIL, SET isLipSync = FALSE IMMEDIATELY**
+**EXAMPLES OF PARTIALLY RELEVANT (Cap at 40%, relevanceAssessment.score = 0.3-0.5):**
+⚠️ Question about "JavaScript closures" → Answer mentions functions but misses scope/variable retention = PARTIALLY RELEVANT
+⚠️ Question about "REST API design" → Answer discusses HTTP methods but ignores REST principles = PARTIALLY RELEVANT
 
-**MANDATORY V2 FIELDS - MUST ALWAYS BE POPULATED:**
-- cheatingConfidence: Always provide 0-100 score, even when no cheating detected (0 means no concerns)
-- contextualFactors: Always provide array with assessment reasoning and environmental factors
-- backgroundNoise.contextualImpact: Always assess environmental impact on evaluation
-- technicalDepth.experienceAdjusted: Mark true when experience level considered in evaluation
-- behavioralInsights: Always provide professional behavior observations
-- responseQuality: Always rate as high/medium/low based on coherence and relevance
-- answerRating.rating: Always provide overall answer quality rating (0.0-5.0)
-- answerRating.reasonForDeduction: Always provide specific reasons when rating < 4.0
+**EXAMPLES OF RELEVANT (Score normally, relevanceAssessment.score = 0.6-1.0):**
+✓ Question about "JavaScript prototypal inheritance" → Answer discusses prototypes, __proto__, inheritance chains = RELEVANT
+✓ Question about "React hooks" → Answer discusses useState, useEffect, hook rules = RELEVANT
 
-**CRITICAL: READING DETECTION IS PRIMARY FOCUS - DO NOT MISS OBVIOUS CASES**
-Flag cheating when strong evidence exists OR any extended reading patterns (over 3 seconds) with context:
-
-**SPECIAL FOCUS FOR AUDIO/VIDEO QUESTIONS:**
-- **Audio Questions**: Focus on speech patterns, word repetitions, unnatural pauses, reading rhythm vs natural speech
-- **Video Questions**: Focus on eye movement patterns, looking down/away from camera, alternating between source and camera, AND CRITICALLY analyze for multiple persons in the video frame
-- **Both Types**: Look for content-delivery mismatches (high accuracy with poor flow)
-- **MANDATORY: LIP SYNC ANALYSIS - PERFORM THIS FIRST**: For video responses, perform DETAILED audio-video synchronization analysis BEFORE analyzing any other behaviors:
-
-**MANDATORY LIP SYNC ANALYSIS PROTOCOL:**
-  - **STEP 1**: **TIMING SYNCHRONIZATION** - Watch lip movements frame by frame - do they match the EXACT timing of spoken words? Even 0.3 second delays indicate proxy speaking
-  - **STEP 2**: **VOICE CHARACTERISTICS MATCHING** - Does the voice match the person's gender, age, accent, tone, pitch, speech patterns? SAME GENDER people can have very different voice characteristics
-  - **STEP 3**: **LIP-SOUND CORRESPONDENCE** - Do the lip shapes and movements correspond to the specific consonants and vowels being made? Watch for: P/B sounds (lips together), F/V sounds (teeth on lip), TH sounds (tongue visible)
-  - **STEP 4**: **AUDIO-VIDEO CONSISTENCY** - Is there consistent synchronization throughout the ENTIRE video? Check beginning, middle, and end
-  - **STEP 5**: **SAME-GENDER PROXY DETECTION** - Is someone else speaking while the candidate moves lips? CRITICAL: This commonly occurs with SAME GENDER individuals - look for voice tone/pitch differences even within same gender
-  - **STEP 6**: **PRE-RECORDED DETECTION** - Does the audio seem disconnected from the video? Look for unnatural consistency or environmental audio mismatches
-  
-**CRITICAL INDICATORS - ANY ONE OF THESE = isLipSync FALSE:**
-    * **Same-gender proxy speaking**: Voice tone/pitch doesn't match visible person (male-male or female-female proxy speaking)
-    * **Timing delays**: Lip movements occur before/after corresponding audio (even 0.3s delays are suspicious)
-    * **Lip-sound mismatch**: Mouth shapes don't match the specific sounds being produced
-    * **Voice inconsistency**: Voice characteristics change during the response indicating multiple speakers
-    * **Environmental audio mismatch**: Background noise in audio doesn't match video environment
-    * **Gender mismatch**: Male voice with female candidate, female voice with male candidate
-    * **Age mismatch**: Young voice with older candidate, mature voice with young candidate
-  
-**MANDATORY REQUIREMENT**: You MUST analyze lip sync FIRST before reading behaviors, eye movements, or any other analysis. If you detect ANY lip sync issues, set isLipSync = FALSE regardless of other behaviors present.
-
-- **PRIMARY FOCUS**: Detect candidates reading from external sources (phones, notes, screens, papers, scripts)
-- **Key Reading Indicators**: ANY sustained downward/off-screen looking (>3 seconds), repeated glances to same location, systematic eye patterns
-- **Reading Eye Patterns**: Looking down/away from camera consistently, alternating between source and camera, eyes tracking text, frequent downward glances
-- **Reading Speech Patterns**: Word repetitions ("from from", "other other"), hesitations mid-sentence, unnatural pauses, reading rhythm vs natural speech
-- **Content vs Delivery Mismatch**: High technical accuracy with poor delivery flow, stuttering on complex terms, perfect answers with hesitant delivery
-- **Timing Clues**: Long thinking pauses followed by accurate technical delivery, consistent patterns of pause-then-perfect-answer
-
-**CRITICAL: DO NOT FLAG NORMAL BEHAVIORS:**
-- Brief face touching, nose scratching, chin resting (these are normal human gestures)
-- Natural thinking pauses and eye movements
-- Adjusting posture or position
-- Brief glances away during natural thought processes
-- Environmental reactions (sounds, lighting)
-
-**SPECIFIC BEHAVIORAL CHEATING INDICATORS TO DETECT:**
-
-**1. EXTERNAL SOURCE READING (HIGHEST PRIORITY - DO NOT MISS):**
-- Eye Movement Patterns: ANY sustained downward/off-screen looking (>5 seconds), "alternating between camera and looking off-screen", repeated glances to same location, "looking down and to the left", systematic patterns, eyes "drifting" away from camera consistently
-- Speaking Tone: Word repetitions during reading difficulty ("from from", "other other", "means you means you"), hesitations mid-word, unnatural pauses mid-sentence, reading rhythm vs natural speech
-- Response Flow: High technical accuracy with delivery problems, stuttering on technical terms, word repetitions, perfect definitions with poor flow
-- Timing Patterns: Extended periods looking away (>10 seconds), consistent "thinking" patterns that involve looking down, reading-then-delivering rhythm
-- Physical Indicators: Consistent downward gaze, "alternating" patterns between source and camera, systematic eye movements
-
-**2. CONVERSATIONAL ASSISTANCE:**
-- Audio Cues: Background voices, whispered prompts, keyboard typing sounds, phone notifications
-- Response Patterns: Answers that don't match candidate's established knowledge level, sudden topic shifts, external prompting responses
-- Communication Style: Candidate responding to off-camera questions, looking away during answers, unnatural conversation flow
-- **CRITICAL: ACTIVE ASSISTANCE DETECTION**: For video responses, focus ONLY on people who are ACTIVELY HELPING the candidate:
-  - **IGNORE**: People accidentally walking by in background, family members passing through, pets, or brief appearances
-  - **DETECT**: People actively assisting with answers, providing prompts, or collaborating with candidate
-  - **Key Indicators of Active Assistance**:
-    * Person looking at candidate while candidate is speaking (suggesting prompting/coaching)
-    * Person gesturing or pointing while candidate answers (suggesting assistance)
-    * Person holding notes, phone, or device visible to candidate
-    * Candidate repeatedly looking at someone off-camera for answers
-    * Person whispering or speaking to candidate during response
-    * Person appearing to read from notes/screen to help candidate
-    * Sustained presence of person in frame during entire response (not just passing by)
-
-**3. AI TOOL USAGE:**
-- Content Quality: Perfect grammar in spoken responses, overly formal language, technical accuracy beyond experience level
-- Response Structure: Bullet-point style delivery, structured format typical of AI responses, lack of personal examples
-- Knowledge Gaps: Inconsistent depth - perfect on some topics, basic on others
-
-**4. COPY-PASTE/REFERENCE MATERIAL:**
-- Delivery Style: Reading verbatim definitions, no personal interpretation, lack of spontaneous examples
-- Content Accuracy: 100% textbook accuracy without understanding demonstration, missing practical application knowledge
-- Response Timing: Long pauses followed by rapid, accurate delivery
-
-**DETECTION CONFIDENCE SCORING (READING-FOCUSED APPROACH - ENHANCED SENSITIVITY):**
-- 95-100%: Device visible OR sustained off-screen looking (>8 seconds) + word repetitions + high technical accuracy with poor delivery
-- 90-94%: Sustained downward/off-screen looking (>6 seconds) + word repetitions ("from from", "other other") + technical accuracy mismatch
-- 80-89%: Extended periods looking away from camera (>5 seconds) + delivery problems with good technical content
-- 70-79%: Consistent "alternating" eye patterns + word repetitions OR high accuracy with hesitations OR continuous looking down (>4 seconds)
-- 60-69%: Sustained off-screen looking (>4 seconds) + delivery inconsistencies OR frequent downward glances
-- 50-59%: Moderate off-screen looking patterns (>3 seconds) with some delivery concerns OR reading rhythm detected
-- 40-49%: Brief but repeated reading indicators (multiple 3+ second patterns) requiring validation
-- 30-39%: Consistent patterns that could indicate reading behavior
-- 20-29%: Minor patterns that could be normal thinking behavior
-- 0-19%: Clear normal interview behavior with natural eye contact
-
-**CRITICAL: Default to 0% confidence unless you have CLEAR, SUSTAINED evidence of actual cheating behavior. Normal human behaviors should NEVER be flagged as cheating.**
-
-**IGNORE NORMAL HUMAN BEHAVIORS:**
-- Natural gestures: touching face, adjusting posture, hand movements while speaking
-- Thinking behaviors: brief pauses, looking up/away while formulating thoughts
-- Comfort adjustments: shifting position, adjusting clothing/hair
-- Normal eye contact variations: brief glances away during natural speech
-- Environmental responses: reacting to sounds, lighting adjustments
-
-**BEHAVIORAL ANALYSIS REQUIREMENTS:**
-For video responses, ALWAYS analyze in this MANDATORY ORDER:
-
-**PRIORITY 1 - MANDATORY LIP SYNC ANALYSIS (MUST BE DONE FIRST):**
-- **CRITICAL: Lip sync analysis** - Perform comprehensive audio-video synchronization analysis BEFORE any other analysis:
-  * **TIMING PRECISION**: Check if lip movements match spoken words timing (even 0.3s delays are suspicious)
-  * **VOICE CHARACTERISTICS**: Verify voice matches candidate's apparent gender, age, tone, pitch, accent
-  * **SAME-GENDER PROXY DETECTION**: Detect if someone else is speaking while candidate moves lips (even same gender) - this is COMMON
-  * **LIP-SOUND CORRESPONDENCE**: Verify mouth shapes match the specific sounds being produced (P/B, F/V, TH, etc.)
-  * **CONSISTENCY ANALYSIS**: Check for consistent synchronization throughout entire video
-  * **ENVIRONMENTAL MATCHING**: Ensure audio environment matches video environment
-  * **VOICE PATTERN ANALYSIS**: Look for changes in voice characteristics during response
-  * Flag any timing delays, voice mismatches, or proxy speaking scenarios regardless of gender
-
-**PRIORITY 2 - OTHER BEHAVIORAL ANALYSIS (ONLY AFTER LIP SYNC ANALYSIS):**
-- Eye movement patterns and camera engagement
-- Speaking rhythm and tone naturalness
-- Response delivery style (conversational vs reading)
-- Timing patterns and pause analysis
-- Facial expressions and body language
-- Environmental audio cues
-- **CRITICAL: Active assistance detection** - Identify people ACTIVELY HELPING the candidate (ignore accidental background people)
-
-**CRITICAL REMINDER**: If you find ANY lip sync issues in Priority 1 analysis, set isLipSync = FALSE immediately. Do not let other behaviors override lip sync findings.
-
-**TIMESTAMP ANALYSIS REQUIREMENTS:**
-For each behavioral observation, provide specific timestamps:
-- When suspicious behavior starts and ends (in seconds from video start)
-- Duration of each behavioral pattern
-- Assessment level for each observation (Strong/Moderate/Low)
-- Detailed description of what was observed at that time
-- Category classification (cheating/technical/environmental/behavioral)
-
-**EXAMPLE TIMESTAMP FORMAT:**
-- "0:15-0:45 (30s): Frequent downward glances detected with 85% confidence - candidate appears to be reading from device below camera"
-- "1:20-1:35 (15s): Monotone delivery pattern with 70% confidence - unnatural speaking rhythm suggesting script reading"
-- "2:10-2:25 (15s): Unnatural pause before technical answer with 90% confidence - suggests external assistance or reference checking"
-- "0:30-1:00 (30s): Person actively assisting candidate with 95% confidence - person gesturing and looking at candidate while they answer"
-- "1:45-2:00 (15s): Lip sync mismatch detected with 90% confidence - audio playing without corresponding lip movement, suggests pre-recorded content"
-- "0:10-0:50 (40s): Voice-face mismatch detected with 95% confidence - female voice heard while male candidate appears to mouth words, indicates proxy speaking"
-- "2:15-2:30 (15s): Audio-video delay detected with 80% confidence - lip movements occur before corresponding audio, suggests synchronization issues"
-- "0:30-1:15 (45s): Same-gender proxy speaking detected with 85% confidence - male voice tone and pitch don't match visible male candidate's apparent voice characteristics"
-- "1:20-1:45 (25s): Lip-sound mismatch detected with 80% confidence - mouth movements don't correspond to consonant and vowel sounds being produced"
-- "0:05-0:35 (30s): Voice inconsistency detected with 75% confidence - voice characteristics change mid-response suggesting different speakers"
-
-**CONTEXTUAL FACTORS TO CONSIDER:**
-- Candidate experience level: ${responseData.experience} years
-- Job role expectations: ${responseData.jobRole || "Not specified"}
-- **LANGUAGE CONTEXT**: Consider if candidate is responding in their native language or second language
-- **MULTILINGUAL ASSESSMENT**: Evaluate technical competency regardless of language used
-- **LANGUAGE PROFICIENCY**: Assess if language barriers affect technical communication
-- Response quality and coherence
-- Environmental vs. intentional assistance
-- Timing patterns and behavioral indicators
-- Communication style appropriate for role level
-
-**ADAPTIVE EVALUATION GUIDELINES:**
-- Adjust technical expectations based on experience level (mark experienceAdjusted: true when done)
-- Consider communication style appropriate for role
-- Evaluate relevance intelligently, not just keyword matching
-- Account for different valid approaches to answering
-- Provide contextual insights in behavioralInsights array
-- Rate responseQuality as high/medium/low based on coherence and relevance
-
-**RESPONSE QUALITY INDICATORS:**
-- High Quality: Coherent, relevant, technically sound, well-structured
-- Medium Quality: Partially relevant, some technical merit, adequate structure
-- Low Quality: Unclear, irrelevant, minimal content, poor structure
-
-**HR-FRIENDLY MESSAGING REQUIREMENTS:**
-- Cheating Detection: Use "No integrity concerns detected" instead of "No cheating detected"
-- Technical Skills: Provide clear skill level assessments (Excellent/Good/Fair/Needs Improvement)
-- Communication: Focus on clarity, confidence, and professional presentation
-- Overall Assessment: Provide actionable insights for hiring decisions
-- Avoid technical jargon - use business language that HR can understand
-
-**CRITICAL CONSISTENCY REQUIREMENT:**
-When cheating is detected with strong evidence, ALL fields must reflect this:
-- facialExpressions: Must mention integrity concerns, not "professional presentation"
-- eyeMovement: Must describe the actual suspicious patterns detected
-- technicalDepth.asPerExplanation: Must include integrity disclaimer
-- overallContentQuality: Must prominently mention cheating concerns
-- Ratings should reflect the delivery method impact, not just content accuracy
-- No contradictory data: If cheating detected, metrics should align with detection
-
-**CONTEXTUAL ANALYSIS REQUIREMENTS:**
-- Always populate contextualFactors array with reasoning
-- Provide cheatingConfidence score (0-100)
-- Include behavioralInsights based on patterns observed
-- Assess relevanceAssessment with intelligent scoring
-- Consider contextualImpact of background noise
-
-**Question**: ${responseData.question}
-**Experience**: ${responseData.experience} years
+**YOUR TASK:**
+**Question Asked**: ${responseData.question}
+**Candidate Experience**: ${responseData.experience} years
 **Job Role**: ${responseData.jobRole}
-**Duration**: ${responseData.questionDuration}
 
-**🚨 CRITICAL: RELEVANCE-BASED SCORING REQUIREMENTS 🚨**
+**CHECK NOW:** Does the candidate's response address the specific technology/topic/concept asked in the question?
+- If NO (different language/framework/topic): relevanceAssessment.score = 0.0-0.2, correctPercentage = 0%
+- If PARTIALLY (mentions topic but misses key points): relevanceAssessment.score = 0.3-0.5, cap correctPercentage at 40%
+- If YES (addresses the question): relevanceAssessment.score = 0.6-1.0, proceed to score normally
 
-**MANDATORY RELEVANCE CHECK - MUST BE PERFORMED FIRST:**
-Before calculating any scores, you MUST evaluate if the candidate's response is relevant to the question asked.
+**STEP 2: CALCULATE CORRECTNESS SCORE (Only if relevant)**
 
-**IRRELEVANT RESPONSE SCORING RULES:**
-- If the candidate's response is completely irrelevant to the question (e.g., talking about unrelated topics, answering a different question, providing generic statements that don't address the question):
-  - **correctPercentage MUST be set to 0-20%** (maximum 20% only if some technical terms are mentioned, otherwise 0%)
-  - **overallRating MUST be set to 0.0-1.0** (proportional to correctPercentage)
-  - **technicalDepth.rating MUST be set to 0.0-1.0**
-  - **answerRating.rating MUST be set to 0.0-1.0**
-  - **relevanceAssessment.score MUST be set to 0.0-0.2** (0.0 for completely irrelevant, 0.2 if some tangential connection exists)
-  - **responseQuality MUST be set to "low"**
-  - **answerEffectiveness.relevanceBreakdown.relevanceExplanation MUST clearly state**: "Response is not relevant to the question asked. Candidate did not address [specific question topic]."
+Use this formula:
+**correctPercentage** = [(Factual Correctness × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25)] × Experience Factor
 
-**PARTIALLY RELEVANT RESPONSE SCORING RULES:**
-- If the response is partially relevant (addresses some aspects but misses key points):
-  - **correctPercentage MUST be capped at 40-50%** (not higher)
-  - **overallRating MUST be capped at 2.0-2.5**
-  - **relevanceAssessment.score MUST be 0.3-0.5**
-  - **responseQuality MUST be "low" or "medium"**
+**Experience Factor:**
+- Junior (0-2 years): 1.15 bonus if basic answer (< 50 depth), 1.0 if good answer
+- Mid-level (3-5 years): 1.0 always
+- Senior (6+ years): 0.85 penalty if shallow (< 60 depth), 1.0 if good, 1.05 if exceptional (100 depth)
 
-**ANSWER LENGTH AND QUALITY REQUIREMENTS:**
-- **SINGLE SENTENCE RESPONSES**: If the candidate provides only one sentence or very brief response (less than 20 words for video/audio, less than 30 words for subjective):
-  - **correctPercentage MUST be capped at 30-40%** (even if technically correct)
-  - **overallRating MUST be capped at 1.5-2.0**
-  - **technicalDepth.rating MUST be capped at 1.5-2.0** (single sentences cannot demonstrate depth)
-  - **answerRating.rating MUST be capped at 1.5-2.0**
-  - **Reason**: Single sentences cannot adequately address technical questions that require explanation, examples, or detailed understanding
+**STEP 3: ALIGN ALL RATINGS WITH correctPercentage**
+- correctPercentage 90-100% → ratings 4.5-5.0
+- correctPercentage 80-89% → ratings 4.0-4.4
+- correctPercentage 70-79% → ratings 3.5-3.9
+- correctPercentage 60-69% → ratings 3.0-3.4
+- correctPercentage 50-59% → ratings 2.5-2.9
+- correctPercentage 40-49% → ratings 2.0-2.4
+- correctPercentage 0-39% → ratings 0.0-1.9
 
-**MINIMUM ANSWER QUALITY THRESHOLDS:**
-- For questions requiring explanation: Minimum 2-3 sentences expected
-- For questions requiring examples: Minimum 3-4 sentences with at least one example
-- For questions requiring technical depth: Minimum 4-5 sentences with detailed explanation
-- If response doesn't meet minimum length for question type, apply length penalty:
-  - **Length Penalty Formula**: If answer is below expected length, multiply correctPercentage by (actual_length / expected_length), with minimum cap at 30%
+**🚨 VIDEO RESPONSES: LIP SYNC ANALYSIS PRIORITY 🚨**
 
-**EXPECTED ANSWER LENGTH BY QUESTION TYPE:**
-- **Definition questions**: Minimum 2-3 sentences (30-50 words)
-- **How/Why questions**: Minimum 3-4 sentences (50-80 words)
-- **Explain with examples**: Minimum 4-5 sentences (80-120 words)
-- **Compare/Contrast**: Minimum 4-6 sentences (100-150 words)
-- **Complex technical questions**: Minimum 5-7 sentences (150-200 words)
+For video responses, analyze lip sync BEFORE other behaviors:
+1. Does voice match person's gender, age, tone, pitch?
+2. Do lip movements sync precisely with audio timing (< 0.3s delay)?
+3. Do mouth shapes match the sounds being produced?
+4. Is voice consistent throughout?
+5. Does environmental audio match video?
 
-**SCORING PRIORITY ORDER:**
-1. **FIRST**: Check relevance - if irrelevant, scores = 0-20%
-2. **SECOND**: Check answer length - if too short, apply length penalty
-3. **THIRD**: Calculate technical correctness and depth
-4. **FOURTH**: Apply experience adjustment
+**Set isLipSync = false if ANY issue detected** (including same-gender proxy speaking)
 
-**CRITICAL EXAMPLES:**
+**BEHAVIORAL CHEATING DETECTION**
 
-**Example A - Irrelevant Response:**
-- Question: "Explain how HashMap works in Java"
-- Answer: "I have 5 years of experience in web development and I like working with teams"
-- **correctPercentage**: 0% (completely irrelevant)
-- **overallRating**: 0.0
-- **relevanceAssessment.score**: 0.0
-- **Reason**: Response doesn't address the question at all
+Flag cheating ONLY with strong evidence (80%+ confidence):
+- **Reading from external sources**: Sustained downward/off-screen looking (>5 seconds), alternating patterns, word repetitions
+- **Active assistance**: Person actively helping candidate (ignore accidental background people)
+- **Lip sync mismatch**: Audio-video desynchronization, proxy speaking, voice mismatches
+- **Copy-paste behavior**: High paste percentage (>100%), question copying, external interactions
 
-**Example B - Single Sentence Response:**
-- Question: "Explain how HashMap works in Java"
-- Answer: "HashMap stores key-value pairs using hashing"
-- **correctPercentage**: 30% (technically correct but insufficient)
-- **overallRating**: 1.5
-- **Reason**: Single sentence cannot demonstrate understanding - needs explanation of hashing, collision handling, etc.
+**DO NOT flag**: Brief face touching, natural pauses, posture adjustments, thinking behaviors, normal eye movements
 
-**Example C - Partially Relevant:**
-- Question: "Explain how HashMap works in Java"
-- Answer: "HashMap is a data structure. I use it in my projects. It's fast."
-- **correctPercentage**: 40% (mentions HashMap but doesn't explain how it works)
-- **overallRating**: 2.0
-- **relevanceAssessment.score**: 0.4
-- **Reason**: Partially relevant but misses key explanation requirements
+**LANGUAGE DETECTION (MANDATORY)**
+- Detect all languages used in the response
+- Use FULL language names (e.g., "English", "Hindi", "Spanish") NOT codes
+- Format percentages to exactly 2 decimal places (e.g., "75.50%")
+- Transcription MUST ALWAYS be in English (translate if candidate spoke other language)
 
-**CRITICAL: EXPERIENCE-ADJUSTED CORRECTNESS PERCENTAGE CALCULATION**
+**TYPING ANALYSIS (For Subjective Questions)**
+If typing data provided:
+- High paste percentage (>100%) = likely cheating (90%+ confidence)
+- Question copying detected = systematic cheating (95%+ confidence)
+- Consider keystroke-to-character ratio and external interactions
 
-**correctPercentage MUST BE CALCULATED AS A COMBINED SCORE:**
-
-**Formula**: correctPercentage = (Factual Correctness × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25) × Experience Adjustment Factor
-
-**Component Breakdown:**
-
-1. **Factual Correctness (0-100 points, weight 40%)**: 
-   - Did candidate answer what was asked?
-   - Are the facts/methods/concepts mentioned correct?
-   - Is the information accurate?
-   - 100 points = All facts correct
-   - 75 points = Most facts correct, minor errors
-   - 50 points = Partially correct
-   - 25 points = Many errors
-   - 0 points = Wrong or no answer
-
-2. **Technical Depth (0-100 points, weight 35%)**:
-   - How deep is the technical understanding?
-   - Are use cases, examples, edge cases provided?
-   - Does response show practical application knowledge?
-   - Is the explanation comprehensive or just surface-level?
-   - 100 points = Comprehensive with examples, use cases, best practices
-   - 75 points = Good depth with some practical examples
-   - 50 points = Basic understanding, minimal examples
-   - 25 points = Very shallow, just definitions
-   - 0 points = No depth at all
-
-3. **Communication Effectiveness (0-100 points, weight 25%)**:
-   - How well was the answer communicated?
-   - Is it clear, structured, and coherent?
-   - Does it flow logically?
-   - 100 points = Excellent communication, clear and structured
-   - 75 points = Good communication with minor issues
-   - 50 points = Adequate but could be clearer
-   - 25 points = Poor communication, unclear
-   - 0 points = Incomprehensible
-
-**Experience Adjustment Factor (CONTEXTUAL - NOT BLANKET):**
-
-**IMPORTANT**: Experience adjustment should be applied based on ANSWER QUALITY, not blanket penalty/bonus.
-
-- **0-2 years (Junior)**: 
-  - **Basic/Shallow answers**: Multiply by 1.15 (15% bonus for effort)
-  - **Good/Excellent answers**: Multiply by 1.0 (no adjustment needed)
-  - Cap at 100%
-  - Rationale: Encourage juniors showing foundational knowledge, but don't over-reward excellent answers
-
-- **3-5 years (Mid-level)**:
-  - **All answers**: Multiply by 1.0 (no adjustment)
-  - Standard expectations for all answer qualities
-  
-- **6+ years (Senior/Expert)**:
-  - **Basic/Shallow answers**: Multiply by 0.85 (15% penalty for insufficient depth)
-  - **Good/Excellent answers**: Multiply by 1.0 (no penalty - they deserve full credit)
-  - **Outstanding answers**: Consider 1.05 bonus (5% bonus for exceptional depth)
-  - Rationale: Penalize shallow answers but reward excellent senior performance
-
-**CONTEXTUAL ADJUSTMENT DECISION TREE:**
-
-**Step 1: Calculate Raw Score** = (Factual × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25)
-
-**Step 2: Determine Experience Adjustment Factor:**
-
-**For Junior (0-2 years):**
-- IF Technical Depth < 50 points → Apply 1.15 bonus (encourage effort)
-- IF Technical Depth ≥ 70 points → Apply 1.0 (no bonus needed - already good)
-- ELSE → Apply 1.0 (standard)
-
-**For Mid-level (3-5 years):**
-- ALWAYS apply 1.0 (no adjustment)
-
-**For Senior (6+ years):**
-- IF Technical Depth < 60 points → Apply 0.85 penalty (insufficient depth for senior)
-- IF Technical Depth ≥ 80 points → Apply 1.0 (no penalty - deserves full credit)
-- IF Technical Depth = 100 points → Apply 1.05 bonus (exceptional depth)
-- ELSE → Apply 1.0 (standard)
-
-**Step 3: Apply Adjustment** = Raw Score × Adjustment Factor
-
-**Step 4: Cap at 100%** (if result > 100%, set to 100%)
-
-**CRITICAL**: This ensures excellent answers get excellent scores regardless of experience level!
-
-**CRITICAL EXAMPLES:**
-
-**Example 1 - Senior Role, Basic Answer (SHOULD BE PENALIZED):**
-- Question: "List Character class methods"
-- Answer: "isLetter, isDigit, toUpperCase, toLowerCase" (just names, brief descriptions)
-- Factual Correctness: 100 points (all methods correct)
-- Technical Depth: 40 points (no use cases, examples, or depth) ← SHALLOW
-- Communication: 75 points (clear but basic)
-- Raw Score: (100 × 0.40) + (40 × 0.35) + (75 × 0.25) = 40 + 14 + 18.75 = 72.75
-- Experience Adjustment (6+ years, Technical Depth < 60): 72.75 × 0.85 = **61.84% ← correctPercentage**
-- overallRating: 3.1/5.0 (proportional to 61.84%)
-- Result: **Aligned - both show room for improvement**
-
-**Example 2 - Junior Role, Basic Answer (SHOULD GET BONUS):**
-- Same answer as Example 1
-- Raw Score: 72.75
-- Experience Adjustment (0-2 years, Technical Depth < 50): 72.75 × 1.15 = **83.66% ← correctPercentage**
-- overallRating: 4.2/5.0 (proportional)
-- Result: **Aligned - shows good performance for junior**
-
-**Example 3 - Senior Role, Comprehensive Answer (SHOULD GET FULL CREDIT):**
-- Question: "List Character class methods"
-- Answer: Includes methods + use cases + examples + best practices + edge cases
-- Factual Correctness: 100 points
-- Technical Depth: 95 points ← EXCELLENT DEPTH
-- Communication: 90 points
-- Raw Score: (100 × 0.40) + (95 × 0.35) + (90 × 0.25) = 40 + 33.25 + 22.5 = 95.75
-- Experience Adjustment (6+ years, Technical Depth ≥ 80): 95.75 × 1.0 = **95.75% ← correctPercentage**
-- overallRating: 4.8/5.0 (proportional)
-- Result: **Aligned - both show excellent performance**
-
-**Example 4 - Senior Role, Outstanding Answer (SHOULD GET BONUS):**
-- Question: "List Character class methods"
-- Answer: Comprehensive with advanced examples, performance considerations, edge cases, best practices
-- Factual Correctness: 100 points
-- Technical Depth: 100 points ← OUTSTANDING DEPTH
-- Communication: 95 points
-- Raw Score: (100 × 0.40) + (100 × 0.35) + (95 × 0.25) = 40 + 35 + 23.75 = 98.75
-- Experience Adjustment (6+ years, Technical Depth = 100): 98.75 × 1.05 = **103.69% → 100% ← correctPercentage**
-- overallRating: 5.0/5.0 (proportional)
-- Result: **Aligned - both show outstanding performance**
-
-**ALIGNMENT REQUIREMENT:**
-
-**After calculating correctPercentage, ENSURE these fields are proportionally aligned:**
-
-- correctPercentage 90-100% → overallRating 4.5-5.0, technicalDepth 4.5-5.0, answerRating 4.5-5.0
-- correctPercentage 80-89% → overallRating 4.0-4.4, technicalDepth 4.0-4.4, answerRating 4.0-4.4
-- correctPercentage 70-79% → overallRating 3.5-3.9, technicalDepth 3.5-3.9, answerRating 3.5-3.9
-- correctPercentage 60-69% → overallRating 3.0-3.4, technicalDepth 3.0-3.4, answerRating 3.0-3.4
-- correctPercentage 50-59% → overallRating 2.5-2.9, technicalDepth 2.5-2.9, answerRating 2.5-2.9
-- correctPercentage 40-49% → overallRating 2.0-2.4, technicalDepth 2.0-2.4, answerRating 2.0-2.4
-- correctPercentage 0-39% → overallRating 0.0-1.9, technicalDepth 0.0-1.9, answerRating 0.0-1.9
-
-**CRITICAL: All rating fields (overallRating, technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating) MUST be proportional to correctPercentage. NO contradictions allowed.**
-
-**VALIDATION CHECK BEFORE SUBMITTING RESPONSE:**
-1. **FIRST**: Check if response is relevant to question - if irrelevant, set scores to 0-20% (see Irrelevant Response Scoring Rules above)
-2. **SECOND**: Check answer length - if single sentence or too short, apply length penalty (cap scores appropriately)
-3. **THIRD**: Calculate correctPercentage using formula above (only if response is relevant and meets minimum length)
-4. **FOURTH**: Set overallRating proportionally (correctPercentage / 20)
-5. **FIFTH**: Set technicalDepth.rating proportionally
-6. **SIXTH**: Set answerRating.rating proportionally
-7. **SEVENTH**: Verify no contradiction exists (all fields aligned)
-8. **EIGHTH**: Ensure relevanceAssessment.score reflects actual relevance (0.0-0.2 for irrelevant, 0.3-0.5 for partially relevant, 0.6+ for relevant)
-
-**If cheating is detected**: Set correctPercentage = 0%, all ratings = 0.0
-
-**If response is irrelevant**: Set correctPercentage = 0-20%, overallRating = 0.0-1.0, all other ratings proportionally low, relevanceAssessment.score = 0.0-0.2
-
-**If response is single sentence or too short**: Apply length penalty - cap correctPercentage at 30-40%, cap all ratings at 1.5-2.0
 
 **Analysis Type**: ${
     normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
@@ -2053,280 +1743,31 @@ ${
 ${
   normalizedType === "subjective" && responseData.typingAnalysis
     ? `
-**TYPING ANALYSIS DATA PROVIDED (PHASE 1 - ENHANCED FORMAT):**
-${
-  responseData.typingAnalysis.riskScore
-    ? `
-**Frontend Analysis Results:**
-- Overall Risk Score: ${responseData.typingAnalysis.riskScore}/100
-- Session Duration: ${Math.round(
-        (responseData.typingAnalysis.totalDuration || 0) / 1000
-      )} seconds
-- Total Characters: ${responseData.typingAnalysis.totalCharacters || 0}
-- Keystroke Count: ${responseData.typingAnalysis.keystrokeCount || 0}
-
-**Copy-Paste Analysis:**
-- Paste Events: ${responseData.typingAnalysis.pasteEventCount || 0}
-- Paste Percentage: ${
+**Typing Data**: Paste: ${
+        responseData.typingAnalysis.pasteEventCount || 0
+      } events (${
         responseData.typingAnalysis.pasteAnalysis?.pastePercentage || 0
-      }%
-- Risk Level: ${
-        responseData.typingAnalysis.pasteAnalysis?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }
-- Has Code Patterns: ${
-        responseData.typingAnalysis.pasteAnalysis?.hasCodePatterns
-          ? "YES"
-          : "NO"
-      }
-- Has Formatting: ${
-        responseData.typingAnalysis.pasteAnalysis?.hasFormatting ? "YES" : "NO"
-      }
-
-**Typing Speed Analysis:**
-- Average Speed: ${
-        responseData.typingAnalysis.typingAnalysis?.averageTypingSpeed || 0
-      } chars/sec
-- Typing Bursts: ${
-        responseData.typingAnalysis.typingAnalysis?.typingBursts || 0
-      }
-- Speed Risk Level: ${
-        responseData.typingAnalysis.typingAnalysis?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }
-
-**Focus & Attention Analysis:**
-- Focus Loss Count: ${
-        responseData.typingAnalysis.focusAnalysis?.focusLossCount || 0
-      }
-- Focus Risk Level: ${
-        responseData.typingAnalysis.focusAnalysis?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }
-
-**Quality Analysis:**
-- Words per Minute: ${
-        responseData.typingAnalysis.qualityAnalysis?.averageWordsPerMinute || 0
-      }
-- Quality Score: ${
-        responseData.typingAnalysis.qualityAnalysis?.qualityScore || 0
-      }
-- Quality Risk Level: ${
-        responseData.typingAnalysis.qualityAnalysis?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }
-
-**Global Event Analysis (CRITICAL FOR CHEATING DETECTION):**
-- Global Copy Count: ${
-        responseData.typingAnalysis.globalEventAnalysis?.globalCopyCount || 0
-      }
-- Question Copy Count: ${
-        responseData.typingAnalysis.globalEventAnalysis?.questionCopyCount || 0
-      }
-- External Interactions: ${
-        responseData.typingAnalysis.globalEventAnalysis
-          ?.externalInteractionCount || 0
-      }
-- Has Question Copying: ${
+      }%), Question copying: ${
         responseData.typingAnalysis.globalEventAnalysis?.hasQuestionCopying
-          ? "YES - CRITICAL"
-          : "NO"
-      }
-- High Risk Copying: ${
-        responseData.typingAnalysis.globalEventAnalysis?.hasHighRiskCopying
-          ? "YES - CRITICAL"
-          : "NO"
-      }
-- Suspicious Patterns: ${
-        responseData.typingAnalysis.globalEventAnalysis
-          ?.suspiciousPatternCount || 0
-      }
-- Global Risk Level: ${
-        responseData.typingAnalysis.globalEventAnalysis?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }
-
-**Copy-Paste Correlations (ADVANCED CHEATING DETECTION):**
-- Total Correlations: ${
-        responseData.typingAnalysis.copyPasteCorrelations?.totalCorrelations ||
-        0
-      }
-- Question Paste Count: ${
-        responseData.typingAnalysis.copyPasteCorrelations?.questionPasteCount ||
-        0
-      }
-- Average Time Between: ${
-        responseData.typingAnalysis.copyPasteCorrelations?.averageTimeBetween
-          ? Math.round(
-              responseData.typingAnalysis.copyPasteCorrelations
-                .averageTimeBetween / 1000
-            ) + "s"
-          : "N/A"
-      }
-- Correlation Risk Level: ${
-        responseData.typingAnalysis.copyPasteCorrelations?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }
-
-**SOPHISTICATED CHEATING PATTERNS TO LOOK FOR:**
-1. **Copy-Paste-Edit Pattern**: High paste percentage (>150%) + low keystrokes (<15) + multiple paste events
-2. **Question Research Pattern**: Question copying events + external interactions + correlated paste timing
-3. **Single Large Paste**: Very high paste percentage (>100%) + minimal typing for substantial content
-4. **Systematic Cheating**: Multiple high-risk indicators across paste, global, and correlation analyses
-5. **Professional Cheating**: High-quality response with impossibly low typing effort
-
-**CRITICAL ANALYSIS INSTRUCTIONS FOR SUBJECTIVE RESPONSES:**
-- If paste percentage > 100%: AUTOMATICALLY flag as high-risk cheating (90%+ confidence)
-- If question copying detected: AUTOMATICALLY flag as systematic cheating (95%+ confidence) 
-- If correlation count > 2: AUTOMATICALLY consider external source usage (85%+ confidence)
-- Consider keystroke-to-character ratio: <20 keystrokes for >300 characters = likely cheating
-- Multiple paste events with high percentage = copy-paste-edit behavior
-- External interactions + correlations = coordinated cheating attempt
-
-**TYPING ANALYSIS INTEGRATION:**
-This typing analysis data should be considered alongside content quality. A candidate showing:
-- High paste percentage + good technical content = Likely copied from external sources
-- Low keystroke count + comprehensive answer = Possible cheating
-- Question copying + quick response = Research-based cheating
-- Multiple correlations + formatted content = Systematic external source usage
-
-The typing analysis provides behavioral evidence that should SIGNIFICANTLY influence your cheating confidence score.
-      }
-- Varied Vocabulary: ${
-        responseData.typingAnalysis.qualityAnalysis?.hasVariedVocabulary
           ? "YES"
           : "NO"
-      }
-- Quality Risk Level: ${
-        responseData.typingAnalysis.qualityAnalysis?.riskLevel?.toUpperCase() ||
-        "LOW"
-      }`
-    : `
-**Legacy Typing Data:**
-- Keystroke Count: ${responseData.typingAnalysis.keystrokes?.length || 0}
-- Paste Events: ${
-        responseData.typingAnalysis.pasteEvents?.length || 0
-      } paste operations detected
-- Total Duration: ${Math.round(
-        (responseData.typingAnalysis.totalTypingDuration || 0) / 1000
-      )} seconds`
-}
-
-**Backend Analysis Results:**
-**Typing Analysis Confidence**: ${
-        processingContext.typingAnalysis?.confidence || 0
-      }%
-**Primary Typing Concerns**: ${
-        processingContext.typingAnalysis?.analysis?.primaryConcern ||
-        "No concerns detected"
-      }
-**Backend Risk Assessment**: ${
-        processingContext.typingAnalysis?.analysis?.summary?.riskLevel || "LOW"
-      }
-
-**CRITICAL: Use this typing analysis as PRIMARY evidence for cheating detection in subjective responses.**
-**Key Indicators**: ${(processingContext.typingAnalysis?.indicators || [])
-        .slice(0, 3)
-        .join("; ")}
-
-**PROCTORING INTEGRATION**: 
-- Tab Switches: ${responseData.tabSwitchCount || 0}
-- Full Screen Exits: ${responseData.fullScreenExitCount || 0}
-- Integrated Analysis: ${
-        processingContext.typingAnalysis?.integratedWithProctoring
-          ? "YES"
-          : "NO"
-      }
-- Enhanced Format: ${
-        processingContext.typingAnalysis?.enhancedFormat ? "YES" : "NO"
-      }
-`
+      }, Risk: ${responseData.typingAnalysis.riskScore || 0}/100`
     : ""
 }
-
 ${
   responseData.eyeMovementPattern
     ? `
-**BEHAVIORAL ANALYSIS DATA PROVIDED:**
-**Eye Movement Pattern**: ${responseData.eyeMovementPattern}
-**Speaking Tone**: ${responseData.speakingTone}
-**Response Delivery**: ${responseData.responseDelivery}
-**Timing Patterns**: ${responseData.timingPatterns}
-**Suspicious Indicators**: ${JSON.stringify(
-        responseData.suspiciousIndicators,
-        null,
-        2
-      )}
-**Behavioral Timestamps**: ${JSON.stringify(
-        responseData.behavioralTimestamps,
-        null,
-        2
-      )}
-
-**CRITICAL: Use this behavioral data to inform your analysis. Generate all missing fields (answerTime, answerEffectiveness, backgroundNoise, confidenceLevel, responseCoherence, environmentalSuitability) based on this behavioral analysis and the video/audio content.**
-`
+**Behavioral Data**: Eye movement: ${responseData.eyeMovementPattern}, Speaking: ${responseData.speakingTone}, Delivery: ${responseData.responseDelivery}`
     : ""
 }
 
-Provide comprehensive analysis with contextual understanding and confidence scores.
 
-**CRITICAL: Every field must be thoroughly evaluated - NO "Not evaluated" or placeholder responses!**
-
-**MANDATORY FIELDS THAT MUST ALWAYS BE POPULATED:**
-- answerTime.totalDurationSeconds: Actual video/audio duration in seconds
-- answerTime.effectiveAnswerTimeSeconds: Time spent actually answering the question  
-- answerTime.effectiveAnswerTimePercentage: Percentage of time spent on relevant content
-- answerEffectiveness.rating: Overall answer quality (0.0-5.0)
-- answerEffectiveness.relevanceBreakdown: Detailed breakdown of relevance
-- backgroundNoise.level: Audio quality assessment (low/medium/high)
-- backgroundNoise.description: Environmental audio description
-- backgroundNoise.contextualImpact: Impact on assessment
-- confidenceLevel: Candidate's confidence level (0.0-5.0)
-- responseCoherence: How well-structured the response is (0.0-5.0)
-- environmentalSuitability: Interview environment quality (0.0-5.0)
-
-**BEHAVIORAL ANALYSIS VALIDATION:**
-- All behavioralAnalysis fields MUST use EXACT enum values as specified
-- Do NOT use descriptive sentences - use only the predefined options
-- If uncertain, use "Mixed patterns observed" or "Not assessed"
-
-**CRITICAL CHEATING DETECTION SAFETY RULES:**
-1. NEVER flag normal human behaviors as cheating (touching face, brief pauses, natural gestures)
-2. ONLY set isCheatingDetected=true for sustained reading patterns (>5 seconds) with 80%+ confidence
-3. Environmental factors (reflections, lighting) are NOT cheating behaviors
-4. Default to "No integrity concerns detected" unless you have clear, sustained evidence
-5. When in doubt, err on the side of NOT detecting cheating - false positives harm candidates unfairly
-
-**SOPHISTICATED CHEATING DETECTION GUIDELINES:**
-For candidates who may be HIDING their cheating behavior, look for these SUBTLE indicators:
-1. **Linguistic Patterns**: Perfect grammar in spoken response, overly formal language, high technical jargon density, structured response typical of written content
-2. **Repetition Patterns**: Immediate word repetitions (e.g., "method overloading method overloading"), phrase repetitions suggesting reading difficulty
-3. **Quality vs Delivery Inconsistency**: High technical accuracy (4.0+ rating) with subtle behavioral concerns, unusually complete responses with measured delivery
-4. **Detailed Behavior Analysis**: "Natural" engagement with moderate assessment levels, screen reflections in glasses during "natural" behavior, unusually consistent behavior for long durations
-5. **Response Structure**: Too organized for spontaneous speech, numbered points or bullet-like structure, definition→explanation→example pattern
-
-**CRITICAL: If you detect 2+ subtle indicators, consider flagging even if behavioral patterns appear "natural" - sophisticated cheaters can mask obvious signs!**
-
-**TRANSCRIPTION INSTRUCTIONS - CRITICAL:**
-- **MANDATORY: TRANSCRIBE IN ENGLISH ONLY** - Even if the candidate speaks in Hindi, Spanish, or any other language, you MUST provide the transcription in English. Translate the candidate's words to English while preserving the meaning and technical content.
-- ONLY transcribe the CANDIDATE'S voice - the primary speaker answering the question
-- IGNORE all background voices, conversations, whispers, or secondary speakers
-- EXCLUDE environmental sounds, background music, or ambient noise
-- DO NOT include interviewer prompts, coaching voices, or off-camera conversations
-- Focus solely on the main candidate's spoken response to the interview question
-- If multiple people are speaking, transcribe ONLY the primary candidate's words
-- Mark unclear candidate speech as "[inaudible]" rather than guessing from background voices
-- **CRITICAL**: The transcription field must ALWAYS be in English, regardless of the language the candidate actually spoke. If the candidate spoke in Hindi or another language, translate their words to English in the transcription field.
-
-**LANGUAGE DETECTION REQUIREMENTS - MANDATORY:**
-- **MULTI-LANGUAGE ANALYSIS**: Detect ALL languages spoken by the candidate throughout the response
-- **LANGUAGE NAMES - CRITICAL**: MUST use FULL language names (e.g., "English", "Hindi", "Spanish", "French", "German", "Chinese", "Japanese", "Korean", "Arabic", "Portuguese", "Russian", "Italian", "Turkish", "Vietnamese", "Thai", "Indonesian", "Malay", "Bengali", "Tamil", "Telugu", "Marathi", "Gujarati", "Kannada", "Punjabi", "Urdu"). NEVER use language codes like "en", "hi", "es", "fr", "de", "zh", "ja", "ko", "ar", "pt", "ru", "it", "tr", "vi", "th", "id", "ms", "bn", "ta", "te", "mr", "gu", "kn", "pa", "ur"
-- **LANGUAGE PERCENTAGES - CRITICAL**: MUST format percentages to exactly 2 decimal places (e.g., "75.50%", "23.45%", "1.25%"). NEVER use more or fewer decimal places. Examples: Use "75.50%" NOT "75.5%" or "75.678%" or "75%"
-- **LANGUAGE SWITCHING**: Identify when candidate switches between languages (e.g., English to Hindi, Spanish to English)
-- **LANGUAGE PROFICIENCY**: Assess fluency and proficiency in each detected language
-- **MIXED LANGUAGE RESPONSES**: Detect responses that mix multiple languages (code-switching)
-- **LANGUAGE CONSISTENCY**: Note if candidate maintains consistent language or switches frequently
-- **CRITICAL**: Language detection is MANDATORY for all video and audio responses - do not skip this analysis
+**OUTPUT REQUIREMENTS:**
+- Transcription MUST be in English (translate if candidate spoke other language)
+- Language names must be FULL names ("English", "Hindi") NOT codes ("en", "hi")
+- Percentages must have exactly 2 decimal places ("75.50%" not "75.5%")
+- Default to "No integrity concerns detected" unless strong evidence of cheating
+- Use predefined enum values for behavioral fields (see JSON format below)
 
 **Response JSON Format:**
 {
@@ -4571,28 +4012,47 @@ const processResponse = async (responseData) => {
       );
     }
 
-    // V2: Intelligent relevance pre-assessment for text responses (if enabled)
-    if (
-      normalizedType === "subjective" &&
-      responseData.textAnswer &&
-      isV2FeatureEnabled("intelligent_relevance")
-    ) {
-      const relevanceAssessment = assessIntelligentRelevance(
+    // V2.2: MINIMAL Pre-AI check - Only detects OBVIOUS language mismatches
+    // Relies on AI for semantic relevance assessment
+    let preAiRelevanceCheck = null;
+
+    if (normalizedType === "subjective" && responseData.textAnswer) {
+      preAiRelevanceCheck = assessIntelligentRelevance(
         responseData.textAnswer,
         responseData.question
       );
-      processingContext.relevanceScore = relevanceAssessment.score;
-      processingContext.responseQuality =
-        relevanceAssessment.score > 0.7
-          ? "high"
-          : relevanceAssessment.score > 0.4
-          ? "medium"
-          : "low";
 
-      logger.info("V2: Pre-assessment completed", {
-        relevanceScore: relevanceAssessment.score,
-        responseQuality: processingContext.responseQuality,
-        intelligentRelevanceEnabled: true,
+      processingContext.preAiRelevanceScore = preAiRelevanceCheck.score;
+      processingContext.shouldTrustAI = preAiRelevanceCheck.shouldTrustAI;
+
+      logger.info("V2.2: Pre-AI minimal check completed (subjective)", {
+        obviousMismatch: preAiRelevanceCheck.obviousTechnologyMismatch,
+        questionLanguage: preAiRelevanceCheck.questionLanguage,
+        responseLanguage: preAiRelevanceCheck.responseLanguage,
+        shouldTrustAI: preAiRelevanceCheck.shouldTrustAI,
+        explanation: preAiRelevanceCheck.explanation,
+      });
+
+      // CRITICAL: Only warn if OBVIOUS language mismatch detected
+      if (preAiRelevanceCheck.obviousTechnologyMismatch) {
+        logger.warn(
+          "V2.2: PRE-AI WARNING - Obvious language mismatch detected!",
+          {
+            questionLanguage: preAiRelevanceCheck.questionLanguage,
+            responseLanguage: preAiRelevanceCheck.responseLanguage,
+            questionPreview: responseData.question.substring(0, 100),
+            answerPreview: responseData.textAnswer.substring(0, 100),
+          }
+        );
+      }
+    } else if (
+      (normalizedType === "video" || normalizedType === "audio") &&
+      responseData.question
+    ) {
+      // For video/audio, we'll check after transcription
+      logger.info("V2.2: Pre-AI check - will validate after transcription", {
+        responseType: normalizedType,
+        questionPreview: responseData.question.substring(0, 80),
       });
     }
 
@@ -4950,6 +4410,19 @@ const processResponse = async (responseData) => {
           );
         }
 
+        // Log JSON match extraction - using both logger and console for visibility
+        const logData = {
+          hasJsonMatch: !!jsonMatch[1],
+          jsonMatchLength: jsonMatch[1]?.length || 0,
+          jsonMatchPreview: jsonMatch[1]?.substring(0, 200) || "No content",
+          questionId: responseData?.questionId,
+          attempt: attempt,
+        };
+
+        logger.info("V2: JSON match extracted successfully", logData);
+        // Fallback console.log to ensure visibility
+        console.log("[V2 JSON MATCH]", JSON.stringify(logData, null, 2));
+
         let parsedAnalysis;
         try {
           parsedAnalysis = JSON.parse(jsonMatch[1].trim());
@@ -4967,6 +4440,10 @@ const processResponse = async (responseData) => {
         // V2: CRITICAL VALIDATION - Ensure no contradictions between correctPercentage and ratings
         // Helper function to normalize correctPercentage to number with 2 decimal places
         const normalizeCorrectPercentage = (value) => {
+          console.log("V2: Normalizing correct percentage", {
+            value,
+            type: typeof value,
+          });
           if (typeof value === "number") {
             return parseFloat(value.toFixed(2));
           }
@@ -5014,17 +4491,28 @@ const processResponse = async (responseData) => {
             willAutoCorrect: true,
           });
 
-          // Auto-correct: Recalculate correctPercentage from ratings (most reliable)
-          const avgRating =
-            (overallRatingValue + technicalDepthValue + answerRatingValue) / 3;
-          const correctedPercentage = parseFloat((avgRating * 20).toFixed(2));
+          // FIXED: Auto-correct ratings FROM correctPercentage (correctPercentage is source of truth)
+          // Ratings should be derived from correctPercentage, not the other way around
+          const expectedRating = parseFloat(
+            (correctPercentageValue / 20).toFixed(1)
+          );
 
-          parsedAnalysis.correctPercentage = correctedPercentage;
+          // Adjust ratings to match correctPercentage
+          parsedAnalysis.overallRating = String(expectedRating);
+          parsedAnalysis.technicalDepth.rating = String(expectedRating);
+          parsedAnalysis.answerRating.rating = String(expectedRating);
 
-          logger.info("V2: Auto-corrected correctPercentage", {
-            original: correctPercentageValue,
-            corrected: correctedPercentage,
-            basedOnAvgRating: avgRating.toFixed(1),
+          // Also update technicalDepthAsPerExperience if it exists
+          if (parsedAnalysis.technicalDepthAsPerExperience) {
+            parsedAnalysis.technicalDepthAsPerExperience.rating =
+              String(expectedRating);
+          }
+
+          logger.info("V2: Auto-corrected ratings based on correctPercentage", {
+            correctPercentage: correctPercentageValue,
+            correctedRating: expectedRating,
+            reason:
+              "Ratings adjusted to align with correctPercentage (source of truth)",
           });
         } else {
           // Normalize correctPercentage to number with 2 decimal places (even if no contradiction)
@@ -5043,6 +4531,187 @@ const processResponse = async (responseData) => {
         // V2: Validate and sanitize parsed analysis structure
         if (!parsedAnalysis || typeof parsedAnalysis !== "object") {
           throw new ProcessingError("AI response must be a valid JSON object");
+        }
+
+        // V2.2: CRITICAL SAFETY NET - Enforce relevance-based scoring
+        // Relies on AI assessment + minimal code check for obvious language mismatches
+        logger.info("V2.2: Starting relevance safety net check", {
+          hasRelevanceAssessment: !!parsedAnalysis.relevanceAssessment,
+          aiRelevanceScore: parsedAnalysis.relevanceAssessment?.score,
+          correctPercentage: parsedAnalysis.correctPercentage,
+          overallRating: parsedAnalysis.overallRating,
+        });
+
+        if (parsedAnalysis.relevanceAssessment?.score !== undefined) {
+          const relevanceScore = parsedAnalysis.relevanceAssessment.score;
+
+          logger.info("V2.2: AI-provided relevance assessment", {
+            relevanceScore,
+            explanation: parsedAnalysis.relevanceAssessment.explanation,
+            currentCorrectPercentage: parsedAnalysis.correctPercentage,
+            currentOverallRating: parsedAnalysis.overallRating,
+          });
+
+          // V2.2: DOUBLE-CHECK with transcription for video/audio responses
+          if (
+            (normalizedType === "video" || normalizedType === "audio") &&
+            parsedAnalysis.transcription
+          ) {
+            const transcriptionRelevanceCheck = assessIntelligentRelevance(
+              parsedAnalysis.transcription,
+              responseData.question
+            );
+
+            logger.info("V2.2: Post-transcription relevance double-check", {
+              aiRelevanceScore: relevanceScore,
+              preCheckScore: transcriptionRelevanceCheck.score,
+              obviousMismatch:
+                transcriptionRelevanceCheck.obviousTechnologyMismatch,
+              questionLanguage: transcriptionRelevanceCheck.questionLanguage,
+              responseLanguage: transcriptionRelevanceCheck.responseLanguage,
+              shouldTrustAI: transcriptionRelevanceCheck.shouldTrustAI,
+              explanation: transcriptionRelevanceCheck.explanation,
+            });
+
+            // V2.2: ONLY override if we detect OBVIOUS language mismatch
+            // (e.g., Java answer for JavaScript question)
+            if (transcriptionRelevanceCheck.obviousTechnologyMismatch) {
+              logger.warn(
+                "V2.2: CODE OVERRIDE - Obvious language mismatch detected!",
+                {
+                  aiRelevanceScore: relevanceScore,
+                  questionLanguage:
+                    transcriptionRelevanceCheck.questionLanguage,
+                  responseLanguage:
+                    transcriptionRelevanceCheck.responseLanguage,
+                  reason:
+                    "Different programming languages explicitly mentioned",
+                  forcingZeroScores: true,
+                }
+              );
+
+              // Override AI's relevance assessment
+              parsedAnalysis.relevanceAssessment.score =
+                transcriptionRelevanceCheck.score;
+              parsedAnalysis.relevanceAssessment.explanation =
+                transcriptionRelevanceCheck.explanation;
+              parsedAnalysis.relevanceAssessment.codeOverride = true;
+              parsedAnalysis.relevanceAssessment.obviousTechnologyMismatch = true;
+              parsedAnalysis.relevanceAssessment.questionLanguage =
+                transcriptionRelevanceCheck.questionLanguage;
+              parsedAnalysis.relevanceAssessment.responseLanguage =
+                transcriptionRelevanceCheck.responseLanguage;
+            } else {
+              // V2.2: No obvious mismatch - trust AI's assessment
+              logger.info(
+                "V2.2: Trusting AI relevance assessment - no obvious mismatch",
+                {
+                  aiRelevanceScore: relevanceScore,
+                  reason: transcriptionRelevanceCheck.explanation,
+                }
+              );
+            }
+          }
+
+          // Now apply safety net based on final relevance score
+          const finalRelevanceScore = parsedAnalysis.relevanceAssessment.score;
+
+          // Force zero scores for completely irrelevant responses
+          if (finalRelevanceScore < 0.2) {
+            logger.warn(
+              "V2.2: SAFETY NET - Forcing zero scores due to very low relevance",
+              {
+                relevanceScore: finalRelevanceScore,
+                originalCorrectPercentage: parsedAnalysis.correctPercentage,
+                originalOverallRating: parsedAnalysis.overallRating,
+                reason:
+                  "Response is completely irrelevant to the question asked (AI assessment or obvious mismatch)",
+                obviousTechnologyMismatch:
+                  parsedAnalysis.relevanceAssessment.obviousTechnologyMismatch,
+                codeOverride: parsedAnalysis.relevanceAssessment.codeOverride,
+              }
+            );
+
+            parsedAnalysis.correctPercentage = 0;
+            parsedAnalysis.overallRating = "0.0";
+            parsedAnalysis.technicalDepth.rating = "0.0";
+            if (parsedAnalysis.technicalDepthAsPerExperience) {
+              parsedAnalysis.technicalDepthAsPerExperience.rating = "0.0";
+            }
+            parsedAnalysis.answerRating.rating = "0.0";
+            parsedAnalysis.communicationRating = "0.0";
+            parsedAnalysis.responseQuality = "low";
+
+            // Add clear explanation
+            if (!parsedAnalysis.answerRating.reasonForDeduction) {
+              parsedAnalysis.answerRating.reasonForDeduction = [];
+            }
+            parsedAnalysis.answerRating.reasonForDeduction.unshift(
+              parsedAnalysis.relevanceAssessment.explanation ||
+                "Response is completely irrelevant to the question asked - different topic/technology discussed"
+            );
+
+            // Update detailed summary to reflect irrelevance
+            parsedAnalysis.detailedSummary = `Response Assessment: The candidate's answer is completely irrelevant to the question asked. ${
+              parsedAnalysis.relevanceAssessment.explanation ||
+              "The response discusses a different topic/technology and does not address the core concepts required."
+            } Score: 0% (Irrelevant response). ${
+              parsedAnalysis.detailedSummary || ""
+            }`;
+          }
+          // Cap scores for partially relevant responses
+          else if (finalRelevanceScore < 0.5) {
+            const currentPercentage =
+              parseFloat(parsedAnalysis.correctPercentage) || 0;
+
+            if (currentPercentage > 40) {
+              logger.warn("V2.2: Capping scores due to low relevance", {
+                relevanceScore: finalRelevanceScore,
+                originalCorrectPercentage: currentPercentage,
+                cappedAt: 40,
+                reason:
+                  "Response is only partially relevant to the question (AI assessment)",
+              });
+
+              // Cap at 40% for partially relevant responses
+              parsedAnalysis.correctPercentage = 40;
+              parsedAnalysis.overallRating = "2.0";
+              parsedAnalysis.technicalDepth.rating = "2.0";
+              if (parsedAnalysis.technicalDepthAsPerExperience) {
+                parsedAnalysis.technicalDepthAsPerExperience.rating = "2.0";
+              }
+              parsedAnalysis.answerRating.rating = "2.0";
+              parsedAnalysis.responseQuality = "low";
+
+              // Add explanation
+              if (!parsedAnalysis.answerRating.reasonForDeduction) {
+                parsedAnalysis.answerRating.reasonForDeduction = [];
+              }
+              if (
+                !parsedAnalysis.answerRating.reasonForDeduction.some((r) =>
+                  r.includes("partially relevant")
+                )
+              ) {
+                parsedAnalysis.answerRating.reasonForDeduction.unshift(
+                  "Response is only partially relevant - misses key concepts or addresses different aspects"
+                );
+              }
+            }
+          } else {
+            logger.info("V2.2: Relevance check passed - response is relevant", {
+              relevanceScore: finalRelevanceScore,
+              correctPercentage: parsedAnalysis.correctPercentage,
+              trustingAI: true,
+            });
+          }
+        } else {
+          logger.warn(
+            "V2.2: AI did not provide relevanceAssessment - this is a problem!",
+            {
+              correctPercentage: parsedAnalysis.correctPercentage,
+              overallRating: parsedAnalysis.overallRating,
+            }
+          );
         }
 
         // V2: Debug log to check AI response completeness
@@ -12895,6 +12564,30 @@ const processResponseTypeSpecific = async (responseData) => {
   return result;
 };
 
+/**
+ * ===== V2.5 MULTI-STAGE TYPE-SPECIFIC PROCESSING =====
+ * New multi-stage processing architecture with separate behavioral, scoring, and cheating stages
+ * V2.5 is completely independent from V2 with its own configuration and lifecycle
+ */
+
+// Import V2.5 processor module
+const v2_5Processor = require("./response.processor.v2.5");
+
+// Initialize V2.5 processor with dependencies (V2.5 uses its own internal config)
+v2_5Processor.initializeV2_5Processor({
+  logger,
+  client,
+  models: {
+    CandidateAnswerAiResponse,
+    CandidateScreeningResult,
+  },
+  typingAnalyzer: analyzeSubjectiveTypingPatterns,
+  // Note: V2.5 uses its own V2_5_CONFIG internally - no dependency on V2_CONFIG
+});
+
+// Export V2.5 processing function
+const { processTypeWiseResponse } = v2_5Processor;
+
 module.exports = {
   processResponse,
   processScreening,
@@ -12902,4 +12595,8 @@ module.exports = {
   generateTypeSpecificContextualFactors,
   createTypeSpecificRecord,
   processResponseTypeSpecific,
+  // V2.5 Multi-stage exports
+  processTypeWiseResponse,
+  // Shared utilities for V2.5
+  analyzeSubjectiveTypingPatterns,
 };
