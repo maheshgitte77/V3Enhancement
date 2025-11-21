@@ -1105,14 +1105,30 @@ const detectCheating = (
   // Make decision based on cross-validation AND composite confidence
   // ENHANCED: Consider both cross-validation score and composite confidence from deep analysis
   const crossValidationScore = crossValidation.validationScore;
+  
+  // FIX: Validate that composite confidence aligns with flaggable evidence
+  // Ensure at least one analysis contributing to composite confidence would trigger a flag
+  const hasFlaggableCompositeEvidence =
+    eyeMovementAnalysis.hasEvidence || // Would trigger EyesMovement or ReadingFromExternal
+    speakingToneAnalysis.hasEvidence || // Would trigger SuspiciousPatterns
+    deliveryAnalysis.hasEvidence || // Would trigger ReadingFromExternal
+    timingAnalysis.hasEvidence || // Would trigger SuspiciousPatterns
+    sustainedAnalysis.hasSustainedCheating || // Would trigger SuspiciousPatterns
+    (type === "audio" && checkAudioBehavioralReading(behavioralAnalysis)); // Would trigger ReadingFromExternal
+
+  // Only use composite confidence if it's backed by flaggable evidence
+  const adjustedCompositeConfidence = hasFlaggableCompositeEvidence
+    ? compositeConfidence
+    : Math.min(compositeConfidence, 59); // Cap at 59 if no flaggable evidence
+
   const combinedScore = Math.max(
     crossValidationScore,
-    compositeConfidence / 100 // Convert composite confidence to 0-1 scale
+    adjustedCompositeConfidence / 100 // Convert composite confidence to 0-1 scale
   );
 
   const shouldFlag =
     (crossValidation.isValidated && crossValidationScore >= 0.75) ||
-    (compositeConfidence >= 60 && hasBehavioralReadingEvidence) || // Lower threshold if we have evidence
+    (adjustedCompositeConfidence >= 60 && hasBehavioralReadingEvidence) || // Lower threshold if we have evidence
     combinedScore >= 0.7;
 
   const finalConfidence = shouldFlag
@@ -1139,6 +1155,16 @@ const detectCheating = (
         "No integrity concerns detected - candidate followed proper interview guidelines",
       ];
 
+  // Always store analysis results for flag system to use (performance optimization)
+  const analysisDetails = {
+    eyeMovementAnalysis,
+    speakingToneAnalysis,
+    deliveryAnalysis,
+    timingAnalysis,
+    sustainedAnalysis,
+    compositeConfidence: Math.round(compositeConfidence),
+  };
+
   return {
     isCheatingDetected: shouldFlag,
     cheatingConfidence: finalConfidence,
@@ -1146,16 +1172,7 @@ const detectCheating = (
     contextualFactors,
     flagResults: [], // Will be populated by flag system
     crossValidation,
-    analysisDetails: shouldFlag
-      ? {
-          eyeMovementAnalysis,
-          speakingToneAnalysis,
-          deliveryAnalysis,
-          timingAnalysis,
-          sustainedAnalysis,
-          compositeConfidence: Math.round(compositeConfidence),
-        }
-      : undefined,
+    analysisDetails: shouldFlag ? analysisDetails : analysisDetails, // Always include for caching
   };
 };
 
@@ -1167,7 +1184,8 @@ const processEnhancedFlags = (
   analysis,
   responseData,
   type,
-  existingAnalysis = null
+  existingAnalysis = null,
+  cachedAnalysis = null
 ) => {
   // Flag mapping with dual messages
   const flagMapping = {
@@ -1309,7 +1327,8 @@ const processEnhancedFlags = (
       flagKey,
       analysis,
       responseData,
-      type
+      type,
+      cachedAnalysis
     );
     const message =
       flagMapping[flagKey][isDetected ? "detected" : "notDetected"];
@@ -1332,8 +1351,13 @@ const processEnhancedFlags = (
 
 /**
  * Check individual flag detection
+ * @param {string} flagKey - Flag identifier
+ * @param {Object} analysis - Analysis data
+ * @param {Object} responseData - Response data
+ * @param {string} type - Response type
+ * @param {Object} cachedAnalysis - Optional cached analysis results for performance
  */
-const checkFlagDetection = (flagKey, analysis, responseData, type) => {
+const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysis = null) => {
   switch (flagKey) {
     case "LipSyncMismatch":
       return analysis.isLipSync === false;
@@ -1350,10 +1374,9 @@ const checkFlagDetection = (flagKey, analysis, responseData, type) => {
         behavioralAnalysisEyes.eyeMovementPattern ===
           "Reading from external source detected";
 
-      // NEW: Check deep timestamp event analysis
-      const eyeMovementAnalysisEyes = analyzeEyeMovementEvents(
-        behavioralTimestampsEyes.eyeMovementEvents
-      );
+      // Use cached analysis if available, otherwise calculate
+      const eyeMovementAnalysisEyes = cachedAnalysis?.eyeMovementAnalysis ||
+        analyzeEyeMovementEvents(behavioralTimestampsEyes.eyeMovementEvents);
 
       return summaryFieldMatchEyes || eyeMovementAnalysisEyes.hasEvidence;
 
@@ -1368,18 +1391,24 @@ const checkFlagDetection = (flagKey, analysis, responseData, type) => {
           "Reading from external source detected" ||
         behavioralAnalysis.responseDelivery === "Reading word-for-word style";
 
-      // NEW: Check deep timestamp event analysis
-      const eyeMovementAnalysis = analyzeEyeMovementEvents(
-        behavioralTimestamps.eyeMovementEvents
-      );
-      const deliveryAnalysis = analyzeResponseDeliveryEvents(
-        behavioralTimestamps.responseDeliveryEvents
-      );
-      const speakingToneAnalysis = analyzeSpeakingToneEvents(
-        behavioralTimestamps.speakingToneEvents
-      );
-      const sustainedAnalysis =
+      // Use cached analysis if available, otherwise calculate
+      const eyeMovementAnalysis = cachedAnalysis?.eyeMovementAnalysis ||
+        analyzeEyeMovementEvents(behavioralTimestamps.eyeMovementEvents);
+      const deliveryAnalysis = cachedAnalysis?.deliveryAnalysis ||
+        analyzeResponseDeliveryEvents(behavioralTimestamps.responseDeliveryEvents);
+      const speakingToneAnalysis = cachedAnalysis?.speakingToneAnalysis ||
+        analyzeSpeakingToneEvents(behavioralTimestamps.speakingToneEvents);
+      const sustainedAnalysis = cachedAnalysis?.sustainedAnalysis ||
         analyzeSustainedCheatingPatterns(behavioralTimestamps);
+
+      // FIX: Add audio-specific behavioral reading check
+      // This ensures audio behavioral reading detection aligns with flag system
+      if (type === "audio") {
+        const audioReadingDetected = checkAudioBehavioralReading(behavioralAnalysis);
+        if (audioReadingDetected) {
+          return true;
+        }
+      }
 
       return (
         summaryFieldMatch ||
@@ -1497,22 +1526,17 @@ const checkFlagDetection = (flagKey, analysis, responseData, type) => {
       const hasHighSuspiciousTime =
         (behavioralTimestampsSusp.totalSuspiciousTime || 0) > 10;
 
-      // NEW: Check deep timestamp event analysis
-      const eyeMovementAnalysisSusp = analyzeEyeMovementEvents(
-        behavioralTimestampsSusp.eyeMovementEvents
-      );
-      const speakingToneAnalysisSusp = analyzeSpeakingToneEvents(
-        behavioralTimestampsSusp.speakingToneEvents
-      );
-      const deliveryAnalysisSusp = analyzeResponseDeliveryEvents(
-        behavioralTimestampsSusp.responseDeliveryEvents
-      );
-      const timingAnalysisSusp = analyzeTimingPatternEvents(
-        behavioralTimestampsSusp.timingPatternEvents
-      );
-      const sustainedAnalysisSusp = analyzeSustainedCheatingPatterns(
-        behavioralTimestampsSusp
-      );
+      // Use cached analysis if available, otherwise calculate
+      const eyeMovementAnalysisSusp = cachedAnalysis?.eyeMovementAnalysis ||
+        analyzeEyeMovementEvents(behavioralTimestampsSusp.eyeMovementEvents);
+      const speakingToneAnalysisSusp = cachedAnalysis?.speakingToneAnalysis ||
+        analyzeSpeakingToneEvents(behavioralTimestampsSusp.speakingToneEvents);
+      const deliveryAnalysisSusp = cachedAnalysis?.deliveryAnalysis ||
+        analyzeResponseDeliveryEvents(behavioralTimestampsSusp.responseDeliveryEvents);
+      const timingAnalysisSusp = cachedAnalysis?.timingAnalysis ||
+        analyzeTimingPatternEvents(behavioralTimestampsSusp.timingPatternEvents);
+      const sustainedAnalysisSusp = cachedAnalysis?.sustainedAnalysis ||
+        analyzeSustainedCheatingPatterns(behavioralTimestampsSusp);
 
       return (
         hasSuspiciousIndicators ||
@@ -1576,6 +1600,71 @@ const checkFlagDetection = (flagKey, analysis, responseData, type) => {
         hasExternalAssistanceEvents
       );
 
+    case "AICopied":
+      // Check if analysis contains AI detection data
+      // FIX: Add explicit NaN check to prevent parseFloat errors
+      const aiMatchValue = analysis.percentOfAnswerMatchWithAiModel;
+      const aiMatch = aiMatchValue
+        ? parseFloat(String(aiMatchValue).replace("%", "") || "0")
+        : 0;
+      return (
+        (!isNaN(aiMatch) && aiMatch > 80) ||
+        (Array.isArray(analysis.cheatingIndicators) &&
+          analysis.cheatingIndicators.some((indicator) =>
+            typeof indicator === "string" &&
+            (indicator.toLowerCase().includes("ai content") ||
+              indicator.toLowerCase().includes("ai-generated"))
+          )) ||
+        false
+      );
+
+    case "CopiedFromWebsite":
+      // Check for web content copying indicators
+      return (
+        analysis.cheatingIndicators?.some((indicator) =>
+          typeof indicator === "string" &&
+          (indicator.toLowerCase().includes("website") ||
+            indicator.toLowerCase().includes("web content") ||
+            indicator.toLowerCase().includes("copied from"))
+        ) || false
+      );
+
+    case "OtherRelevantNoise":
+      // Check for background noise/assistance indicators
+      const behavioralAnalysisNoise = analysis.behavioralAnalysis || {};
+      return (
+        behavioralAnalysisNoise.suspiciousIndicators?.some((indicator) =>
+          typeof indicator === "string" &&
+          (indicator.toLowerCase().includes("background") ||
+            indicator.toLowerCase().includes("noise") ||
+            indicator.toLowerCase().includes("external assistance"))
+        ) || false
+      );
+
+    case "MobileDeviceDetected":
+      // Check for mobile device indicators
+      return (
+        analysis.cheatingIndicators?.some((indicator) =>
+          typeof indicator === "string" &&
+          (indicator.toLowerCase().includes("mobile") ||
+            indicator.toLowerCase().includes("device") ||
+            indicator.toLowerCase().includes("phone"))
+        ) || false
+      );
+
+    case "ResearchBehavior":
+      // Check for research behavior in typing analysis
+      // FIX: Add explicit null check to prevent undefined errors
+      const researchIndicators = responseData?.typingAnalysis?.globalEventAnalysis;
+      if (!researchIndicators || typeof researchIndicators !== "object") {
+        return false;
+      }
+      return (
+        researchIndicators.hasResearchBehavior === true ||
+        (typeof researchIndicators.researchBehaviorCount === "number" &&
+          researchIndicators.researchBehaviorCount > 0)
+      );
+
     default:
       return false;
   }
@@ -1617,6 +1706,7 @@ const refineCheatingDetection = (
         behavioralAnalysis.behavioralTimestamps || {};
 
       // Check if any flag would be triggered by this evidence
+      // FIX: Added audio behavioral reading check to ensure flag consistency
       const hasFlaggableEvidence =
         // SuspiciousPatterns would trigger
         indicatorValidation.genuine.length >= 1 ||
@@ -1640,7 +1730,9 @@ const refineCheatingDetection = (
           behavioralTimestamps.responseDeliveryEvents
         ).hasEvidence ||
         analyzeSustainedCheatingPatterns(behavioralTimestamps)
-          .hasSustainedCheating;
+          .hasSustainedCheating ||
+        // Audio behavioral reading check (naturally returns false for non-audio types)
+        checkAudioBehavioralReading(behavioralAnalysis);
 
       if (hasFlaggableEvidence) {
         return {
@@ -1660,6 +1752,71 @@ const refineCheatingDetection = (
   return stage3Results;
 };
 
+/**
+ * Validates sync between isCheatingDetected and flag system
+ * Ensures if cheating is detected, at least one flag is set
+ * @param {Object} cheatingResults - Results from detectCheating()
+ * @param {Array} flagResults - Results from processEnhancedFlags()
+ * @returns {Object} Sync validation result with status and auto-corrected flags if needed
+ */
+const validateCheatingFlagSync = (cheatingResults, flagResults) => {
+  if (
+    cheatingResults.isCheatingDetected &&
+    cheatingResults.cheatingConfidence > 0
+  ) {
+    const detectedFlags = flagResults.filter((f) => f.detected);
+
+    if (detectedFlags.length === 0) {
+      console.warn(
+        "[SYNC WARNING] isCheatingDetected=true but no flags set",
+        {
+          cheatingConfidence: cheatingResults.cheatingConfidence,
+          cheatingIndicators: cheatingResults.cheatingIndicators,
+          totalFlags: flagResults.length,
+        }
+      );
+
+      // Auto-correct: Set SuspiciousPatterns flag if cheating detected but no flags
+      // This ensures consistency between detection and flag system
+      const autoCorrectedFlags = flagResults.map((flag) => {
+        if (flag.flag === "SuspiciousPatterns") {
+          return {
+            ...flag,
+            detected: true,
+            message: "Suspicious Behavioral Patterns", // Use detected message
+            autoCorrected: true,
+            syncReason:
+              "Auto-corrected to maintain sync with isCheatingDetected=true",
+          };
+        }
+        return flag;
+      });
+
+      return {
+        isSynced: false,
+        wasAutoCorrected: true,
+        flagResults: autoCorrectedFlags,
+        syncIssue: "isCheatingDetected=true but no flags detected",
+      };
+    }
+
+    return {
+      isSynced: true,
+      wasAutoCorrected: false,
+      flagResults: flagResults,
+      detectedFlagsCount: detectedFlags.length,
+    };
+  }
+
+  // If not cheating detected, sync is valid (no flags needed)
+  return {
+    isSynced: true,
+    wasAutoCorrected: false,
+    flagResults: flagResults,
+    detectedFlagsCount: 0,
+  };
+};
+
 module.exports = {
   detectCheating,
   processEnhancedFlags,
@@ -1669,6 +1826,7 @@ module.exports = {
   crossValidateCheatingDetection,
   checkFlagDetection,
   checkAudioBehavioralReading,
+  validateCheatingFlagSync,
   // NEW: Export new analysis functions for testing/debugging
   analyzeEyeMovementEvents,
   analyzeSpeakingToneEvents,

@@ -153,12 +153,14 @@ const processSubjectiveResponse = async (responseData) => {
       cheatingConfidence: cheatingResults.cheatingConfidence,
     });
 
-    // Process flags
+    // Process flags with cached analysis for performance
+    const cachedAnalysis = cheatingResults.analysisDetails || null;
     const flagResults = cheatingDetector.processEnhancedFlags(
       { ...scoringResults, ...cheatingResults },
       responseData,
       "subjective",
-      null
+      null,
+      cachedAnalysis
     );
 
     const flagStats = {

@@ -265,12 +265,14 @@ const processVideoResponse = async (responseData) => {
       stage1Results
     );
 
-    // Process flags
+    // Process flags with cached analysis for performance
+    const cachedAnalysis = finalCheatingResults.analysisDetails || null;
     const flagResults = cheatingDetector.processEnhancedFlags(
       { ...stage1Results, ...stage2Results, ...finalCheatingResults },
       responseData,
       "video",
-      null
+      null,
+      cachedAnalysis
     );
 
     const flagStats = {
