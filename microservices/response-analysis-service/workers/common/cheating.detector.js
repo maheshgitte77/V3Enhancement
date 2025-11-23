@@ -648,94 +648,112 @@ const crossValidateCheatingDetection = (data) => {
   }
 
   // 2. Behavioral Pattern Consistency Check with Severity Scoring
+  // FIX: Only use severity scoring if we have timestamp evidence to back it up
+  // This prevents false positives from summary fields alone
   if (behavioralAnalysis) {
-    // Assign severity scores to each behavioral pattern
-    // HIGH severity = 3 points, MEDIUM severity = 2 points, LOW severity = 1 point
-    let severityScore = 0;
-    const detectedPatterns = [];
+    const behavioralTimestamps = behavioralAnalysis.behavioralTimestamps || {};
 
-    // Eye movement scoring
-    if (
-      behavioralAnalysis.eyeMovementPattern ===
-      "Reading from external source detected"
-    ) {
-      severityScore += 3;
-      detectedPatterns.push("Reading from external source (HIGH)");
-    } else if (
-      behavioralAnalysis.eyeMovementPattern === "Frequent downward glances"
-    ) {
-      severityScore += 2;
-      detectedPatterns.push("Frequent downward glances (MEDIUM)");
-    } else if (
-      behavioralAnalysis.eyeMovementPattern === "Limited camera engagement"
-    ) {
-      severityScore += 1;
-      detectedPatterns.push("Limited camera engagement (LOW)");
-    }
+    // Check if we have timestamp evidence (events that would trigger flags)
+    const hasTimestampEvidence =
+      behavioralTimestamps.eyeMovementEvents?.length > 0 ||
+      behavioralTimestamps.speakingToneEvents?.length > 0 ||
+      behavioralTimestamps.responseDeliveryEvents?.length > 0 ||
+      behavioralTimestamps.timingPatternEvents?.length > 0 ||
+      behavioralTimestamps.suspiciousEvents?.length > 0;
 
-    // Speaking tone scoring
-    if (behavioralAnalysis.speakingTone === "Reading rhythm detected") {
-      severityScore += 3;
-      detectedPatterns.push("Reading rhythm (HIGH)");
-    } else if (
-      behavioralAnalysis.speakingTone === "Unnatural speaking rhythm"
-    ) {
-      severityScore += 2;
-      detectedPatterns.push("Unnatural speaking rhythm (MEDIUM)");
-    } else if (behavioralAnalysis.speakingTone === "Monotone delivery") {
-      severityScore += 1;
-      detectedPatterns.push("Monotone delivery (LOW)");
-    }
+    // Only use summary field severity scoring if we have timestamp evidence
+    // This ensures summary fields are validated by actual event data
+    if (hasTimestampEvidence) {
+      // Assign severity scores to each behavioral pattern
+      // HIGH severity = 3 points, MEDIUM severity = 2 points, LOW severity = 1 point
+      let severityScore = 0;
+      const detectedPatterns = [];
 
-    // Response delivery scoring
-    if (behavioralAnalysis.responseDelivery === "Reading word-for-word style") {
-      severityScore += 3;
-      detectedPatterns.push("Reading word-for-word (HIGH)");
-    } else if (
-      behavioralAnalysis.responseDelivery === "Structured presentation"
-    ) {
-      severityScore += 1;
-      detectedPatterns.push("Structured presentation (LOW)");
-    }
+      // Eye movement scoring
+      if (
+        behavioralAnalysis.eyeMovementPattern ===
+        "Reading from external source detected"
+      ) {
+        severityScore += 3;
+        detectedPatterns.push("Reading from external source (HIGH)");
+      } else if (
+        behavioralAnalysis.eyeMovementPattern === "Frequent downward glances"
+      ) {
+        severityScore += 2;
+        detectedPatterns.push("Frequent downward glances (MEDIUM)");
+      } else if (
+        behavioralAnalysis.eyeMovementPattern === "Limited camera engagement"
+      ) {
+        severityScore += 1;
+        detectedPatterns.push("Limited camera engagement (LOW)");
+      }
 
-    // Timing patterns scoring
-    if (
-      behavioralAnalysis.timingPatterns === "Unnatural pauses before answers"
-    ) {
-      severityScore += 2;
-      detectedPatterns.push("Unnatural pauses (MEDIUM)");
-    } else if (
-      behavioralAnalysis.timingPatterns === "Regular pauses before answers"
-    ) {
-      severityScore += 1;
-      detectedPatterns.push("Regular pauses (LOW)");
-    }
+      // Speaking tone scoring
+      if (behavioralAnalysis.speakingTone === "Reading rhythm detected") {
+        severityScore += 3;
+        detectedPatterns.push("Reading rhythm (HIGH)");
+      } else if (
+        behavioralAnalysis.speakingTone === "Unnatural speaking rhythm"
+      ) {
+        severityScore += 2;
+        detectedPatterns.push("Unnatural speaking rhythm (MEDIUM)");
+      } else if (behavioralAnalysis.speakingTone === "Monotone delivery") {
+        severityScore += 1;
+        detectedPatterns.push("Monotone delivery (LOW)");
+      }
 
-    // Scoring thresholds (max possible: 11 points)
-    // 7-11: Very high suspicion (multiple HIGH severity indicators)
-    // 5-6: High suspicion (mix of HIGH and MEDIUM indicators)
-    // 3-4: Medium suspicion (multiple MEDIUM/LOW indicators)
-    if (severityScore >= 7) {
-      validationScore += 0.5;
-      validationFactors.push(
-        `Very strong behavioral evidence suggests reading from prepared material (severity: ${severityScore}/11, patterns: ${detectedPatterns.join(
-          ", "
-        )})`
-      );
-    } else if (severityScore >= 5) {
-      validationScore += 0.3;
-      validationFactors.push(
-        `Multiple behavioral patterns indicate possible external assistance (severity: ${severityScore}/11, patterns: ${detectedPatterns.join(
-          ", "
-        )})`
-      );
-    } else if (severityScore >= 3) {
-      validationScore += 0.2;
-      validationFactors.push(
-        `Some behavioral patterns detected that may indicate rehearsed responses (severity: ${severityScore}/11, patterns: ${detectedPatterns.join(
-          ", "
-        )})`
-      );
+      // Response delivery scoring
+      if (
+        behavioralAnalysis.responseDelivery === "Reading word-for-word style"
+      ) {
+        severityScore += 3;
+        detectedPatterns.push("Reading word-for-word (HIGH)");
+      } else if (
+        behavioralAnalysis.responseDelivery === "Structured presentation"
+      ) {
+        severityScore += 1;
+        detectedPatterns.push("Structured presentation (LOW)");
+      }
+
+      // Timing patterns scoring
+      if (
+        behavioralAnalysis.timingPatterns === "Unnatural pauses before answers"
+      ) {
+        severityScore += 2;
+        detectedPatterns.push("Unnatural pauses (MEDIUM)");
+      } else if (
+        behavioralAnalysis.timingPatterns === "Regular pauses before answers"
+      ) {
+        severityScore += 1;
+        detectedPatterns.push("Regular pauses (LOW)");
+      }
+
+      // Scoring thresholds (max possible: 11 points)
+      // 7-11: Very high suspicion (multiple HIGH severity indicators)
+      // 5-6: High suspicion (mix of HIGH and MEDIUM indicators)
+      // 3-4: Medium suspicion (multiple MEDIUM/LOW indicators)
+      if (severityScore >= 7) {
+        validationScore += 0.5;
+        validationFactors.push(
+          `Very strong behavioral evidence suggests reading from prepared material (severity: ${severityScore}/11, patterns: ${detectedPatterns.join(
+            ", "
+          )})`
+        );
+      } else if (severityScore >= 5) {
+        validationScore += 0.3;
+        validationFactors.push(
+          `Multiple behavioral patterns indicate possible external assistance (severity: ${severityScore}/11, patterns: ${detectedPatterns.join(
+            ", "
+          )})`
+        );
+      } else if (severityScore >= 3) {
+        validationScore += 0.2;
+        validationFactors.push(
+          `Some behavioral patterns detected that may indicate rehearsed responses (severity: ${severityScore}/11, patterns: ${detectedPatterns.join(
+            ", "
+          )})`
+        );
+      }
     }
   }
 
@@ -776,12 +794,26 @@ const crossValidateCheatingDetection = (data) => {
     );
   }
 
+  // CRITICAL FIX: Only validate if there's actual flaggable evidence
+  // Cross-validation score can accumulate from various sources, but we need evidence that would trigger flags
+  // Check if we have evidence that would trigger SuspiciousPatterns, ReadingFromExternal, or ExternalAssistance flags
+  const hasFlaggableEvidenceInCrossValidation =
+    sustainedAnalysis.hasSustainedCheating || // Would trigger SuspiciousPatterns flag
+    (indicatorValidation.hasGenuineCheating &&
+      indicatorValidation.genuine.length >= 2) || // Would trigger SuspiciousPatterns or ExternalAssistance flags
+    behavioralAnalysis?.behavioralTimestamps?.suspiciousEvents?.some(
+      (event) => event.category === "concerning" && event.confidence >= 85
+    ) ||
+    false; // Would trigger SuspiciousPatterns flag
+
   return {
-    isValidated: validationScore >= 0.65,
+    isValidated:
+      validationScore >= 0.65 && hasFlaggableEvidenceInCrossValidation, // CRITICAL FIX: Require flaggable evidence
     validationScore,
     validationFactors,
     sustainedAnalysis,
     indicatorValidation,
+    hasFlaggableEvidence: hasFlaggableEvidenceInCrossValidation, // Expose for debugging
   };
 };
 
@@ -942,6 +974,9 @@ const detectCheating = (
     (type === "audio" && checkAudioBehavioralReading(behavioralAnalysis));
 
   // Calculate composite confidence score (NEW)
+  // IMPORTANT: compositeConfidence is calculated ONLY from timestamp events that have hasEvidence === true
+  // If no timestamp events meet the evidence threshold, compositeConfidence will be 0
+  // This ensures summary fields alone cannot contribute to confidence scoring
   let compositeConfidence = 0;
   const confidenceFactors = [];
 
@@ -1011,15 +1046,40 @@ const detectCheating = (
   const hasMultiplePersons = stage1Results?.isOnlyOnePersonInVideo === false;
   const hasMultipleVoices = stage1Results?.isOnlyOneVoiceInAudio === false;
 
+  // FIX: Check if hasBehavioralReadingEvidence is from summary fields only (no timestamp events)
+  const hasTimestampEvidence =
+    eyeMovementAnalysis.hasEvidence ||
+    speakingToneAnalysis.hasEvidence ||
+    deliveryAnalysis.hasEvidence ||
+    timingAnalysis.hasEvidence ||
+    sustainedAnalysis.hasSustainedCheating;
+
+  const hasSummaryFieldEvidence =
+    hasBehavioralReadingEvidence && !hasTimestampEvidence;
+
   // If clear evidence, flag immediately
+  // CRITICAL FIX: Only set isCheatingDetected when there's actual flaggable evidence
+  // Summary fields alone are not sufficient - require timestamp evidence that would trigger flags
+  // NOTE: (hasSummaryFieldEvidence && compositeConfidence >= 60) is contradictory because:
+  // - hasSummaryFieldEvidence means no timestamp evidence (hasTimestampEvidence === false)
+  // - compositeConfidence is calculated ONLY from events with hasEvidence === true
+  // - If there's no timestamp evidence, compositeConfidence will be 0
+  // Therefore, this condition can never be true and is removed to prevent false positives
   if (
-    hasBehavioralReadingEvidence ||
-    hasLipSyncIssue ||
-    hasMultiplePersons ||
-    hasMultipleVoices
+    hasLipSyncIssue || // Would trigger LipSyncMismatch flag
+    hasMultiplePersons || // Would trigger MultiplePersonsDetected flag
+    hasMultipleVoices || // Would trigger MultipleVoiceDetected flag
+    (hasBehavioralReadingEvidence && hasTimestampEvidence) // Would trigger ReadingFromExternal or SuspiciousPatterns flags
+    // REMOVED: (hasSummaryFieldEvidence && compositeConfidence >= 60) - Contradictory condition
   ) {
     const reasons = [];
-    if (hasBehavioralReadingEvidence) {
+
+    // Only flag behavioral reading if we have timestamp evidence
+    // CRITICAL FIX: Remove compositeConfidence check - if hasTimestampEvidence is false, no flags would trigger
+    if (
+      hasBehavioralReadingEvidence &&
+      hasTimestampEvidence // REMOVED: || compositeConfidence >= 60
+    ) {
       reasons.push("Reading from external sources detected");
       // Add detailed indicators from analysis
       if (eyeMovementAnalysis.hasEvidence) {
@@ -1042,16 +1102,28 @@ const detectCheating = (
           `Sustained suspicious behavior (${sustainedAnalysis.sustainedDuration}s across ${sustainedAnalysis.eventCount} events)`
         );
       }
+
+      // REMOVED: Summary field evidence note - we only flag with timestamp evidence now
     }
+
     if (hasLipSyncIssue) reasons.push("Lip sync mismatch detected");
     if (hasMultiplePersons) reasons.push("Multiple persons detected");
     if (hasMultipleVoices) reasons.push("Multiple voices detected");
 
-    // Use composite confidence if available, otherwise default to 85
-    const finalConfidence = Math.max(
-      Math.round(compositeConfidence),
-      hasBehavioralReadingEvidence ? 85 : 80
-    );
+    // Use composite confidence if available, otherwise default based on evidence type
+    let finalConfidence;
+    if (hasTimestampEvidence) {
+      // Has timestamp evidence - use composite confidence or default 85
+      finalConfidence = Math.max(
+        Math.round(compositeConfidence),
+        hasBehavioralReadingEvidence ? 85 : 80
+      );
+    } else {
+      // REMOVED: Summary-only path - if hasTimestampEvidence is false, compositeConfidence is 0
+      // This path was contradictory and could lead to false positives
+      // Other issues (lip sync, multiple persons, etc.)
+      finalConfidence = 80;
+    }
 
     return {
       isCheatingDetected: true,
@@ -1105,7 +1177,7 @@ const detectCheating = (
   // Make decision based on cross-validation AND composite confidence
   // ENHANCED: Consider both cross-validation score and composite confidence from deep analysis
   const crossValidationScore = crossValidation.validationScore;
-  
+
   // FIX: Validate that composite confidence aligns with flaggable evidence
   // Ensure at least one analysis contributing to composite confidence would trigger a flag
   const hasFlaggableCompositeEvidence =
@@ -1126,10 +1198,28 @@ const detectCheating = (
     adjustedCompositeConfidence / 100 // Convert composite confidence to 0-1 scale
   );
 
+  // CRITICAL FIX: Only set isCheatingDetected when there's clear evidence that would trigger flags
+  // Define what constitutes direct flaggable evidence
+  const hasDirectFlaggableEvidence =
+    hasLipSyncIssue || // Would trigger LipSyncMismatch flag
+    hasMultiplePersons || // Would trigger MultiplePersonsDetected flag
+    hasMultipleVoices || // Would trigger MultipleVoiceDetected flag
+    hasFlaggableCompositeEvidence; // Would trigger ReadingFromExternal, SuspiciousPatterns, or EyesMovement flags
+
+  // CRITICAL FIX: Cross-validation must be backed by actual flaggable evidence
+  // Cross-validation can accumulate scores from various sources, but we need evidence that would trigger flags
+  const crossValidationWithEvidence =
+    crossValidation.isValidated &&
+    crossValidationScore >= 0.75 &&
+    hasDirectFlaggableEvidence; // Require flaggable evidence
+
   const shouldFlag =
-    (crossValidation.isValidated && crossValidationScore >= 0.75) ||
-    (adjustedCompositeConfidence >= 60 && hasBehavioralReadingEvidence) || // Lower threshold if we have evidence
-    combinedScore >= 0.7;
+    crossValidationWithEvidence || // Cross-validation with clear evidence
+    (adjustedCompositeConfidence >= 60 &&
+      hasBehavioralReadingEvidence &&
+      hasTimestampEvidence &&
+      hasFlaggableCompositeEvidence) || // Composite confidence with clear evidence
+    (combinedScore >= 0.7 && hasDirectFlaggableEvidence); // Combined score with clear evidence
 
   const finalConfidence = shouldFlag
     ? Math.min(100, Math.round(combinedScore * 100))
@@ -1357,7 +1447,13 @@ const processEnhancedFlags = (
  * @param {string} type - Response type
  * @param {Object} cachedAnalysis - Optional cached analysis results for performance
  */
-const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysis = null) => {
+const checkFlagDetection = (
+  flagKey,
+  analysis,
+  responseData,
+  type,
+  cachedAnalysis = null
+) => {
   switch (flagKey) {
     case "LipSyncMismatch":
       return analysis.isLipSync === false;
@@ -1367,51 +1463,50 @@ const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysi
       const behavioralTimestampsEyes =
         behavioralAnalysisEyes.behavioralTimestamps || {};
 
-      // Check summary fields (existing)
-      const summaryFieldMatchEyes =
-        behavioralAnalysisEyes.eyeMovementPattern ===
-          "Frequent downward glances" ||
-        behavioralAnalysisEyes.eyeMovementPattern ===
-          "Reading from external source detected";
-
       // Use cached analysis if available, otherwise calculate
-      const eyeMovementAnalysisEyes = cachedAnalysis?.eyeMovementAnalysis ||
+      const eyeMovementAnalysisEyes =
+        cachedAnalysis?.eyeMovementAnalysis ||
         analyzeEyeMovementEvents(behavioralTimestampsEyes.eyeMovementEvents);
 
-      return summaryFieldMatchEyes || eyeMovementAnalysisEyes.hasEvidence;
+      // FIX: Only flag if we have timestamp evidence
+      // Summary fields alone are not reliable enough - require actual event evidence
+      // This aligns with cheating detection logic that requires timestamp evidence
+      return eyeMovementAnalysisEyes.hasEvidence;
 
     case "ReadingFromExternal":
       const behavioralAnalysis = analysis.behavioralAnalysis || {};
       const behavioralTimestamps =
         behavioralAnalysis.behavioralTimestamps || {};
 
-      // Check summary fields (existing)
-      const summaryFieldMatch =
-        behavioralAnalysis.eyeMovementPattern ===
-          "Reading from external source detected" ||
-        behavioralAnalysis.responseDelivery === "Reading word-for-word style";
-
       // Use cached analysis if available, otherwise calculate
-      const eyeMovementAnalysis = cachedAnalysis?.eyeMovementAnalysis ||
+      const eyeMovementAnalysis =
+        cachedAnalysis?.eyeMovementAnalysis ||
         analyzeEyeMovementEvents(behavioralTimestamps.eyeMovementEvents);
-      const deliveryAnalysis = cachedAnalysis?.deliveryAnalysis ||
-        analyzeResponseDeliveryEvents(behavioralTimestamps.responseDeliveryEvents);
-      const speakingToneAnalysis = cachedAnalysis?.speakingToneAnalysis ||
+      const deliveryAnalysis =
+        cachedAnalysis?.deliveryAnalysis ||
+        analyzeResponseDeliveryEvents(
+          behavioralTimestamps.responseDeliveryEvents
+        );
+      const speakingToneAnalysis =
+        cachedAnalysis?.speakingToneAnalysis ||
         analyzeSpeakingToneEvents(behavioralTimestamps.speakingToneEvents);
-      const sustainedAnalysis = cachedAnalysis?.sustainedAnalysis ||
+      const sustainedAnalysis =
+        cachedAnalysis?.sustainedAnalysis ||
         analyzeSustainedCheatingPatterns(behavioralTimestamps);
 
       // FIX: Add audio-specific behavioral reading check
       // This ensures audio behavioral reading detection aligns with flag system
       if (type === "audio") {
-        const audioReadingDetected = checkAudioBehavioralReading(behavioralAnalysis);
+        const audioReadingDetected =
+          checkAudioBehavioralReading(behavioralAnalysis);
         if (audioReadingDetected) {
           return true;
         }
       }
 
+      // FIX: Require timestamp evidence - summary fields alone not sufficient
+      // This aligns with cheating detection logic that requires timestamp evidence
       return (
-        summaryFieldMatch ||
         eyeMovementAnalysis.hasEvidence ||
         deliveryAnalysis.hasEvidence ||
         speakingToneAnalysis.hasEvidence ||
@@ -1520,33 +1615,44 @@ const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysi
       const behavioralTimestampsSusp =
         behavioralAnalysisSusp.behavioralTimestamps || {};
 
-      // Check summary fields (existing)
-      const hasSuspiciousIndicators =
-        behavioralAnalysisSusp.suspiciousIndicators?.length > 0;
-      const hasHighSuspiciousTime =
-        (behavioralTimestampsSusp.totalSuspiciousTime || 0) > 10;
-
       // Use cached analysis if available, otherwise calculate
-      const eyeMovementAnalysisSusp = cachedAnalysis?.eyeMovementAnalysis ||
+      const eyeMovementAnalysisSusp =
+        cachedAnalysis?.eyeMovementAnalysis ||
         analyzeEyeMovementEvents(behavioralTimestampsSusp.eyeMovementEvents);
-      const speakingToneAnalysisSusp = cachedAnalysis?.speakingToneAnalysis ||
+      const speakingToneAnalysisSusp =
+        cachedAnalysis?.speakingToneAnalysis ||
         analyzeSpeakingToneEvents(behavioralTimestampsSusp.speakingToneEvents);
-      const deliveryAnalysisSusp = cachedAnalysis?.deliveryAnalysis ||
-        analyzeResponseDeliveryEvents(behavioralTimestampsSusp.responseDeliveryEvents);
-      const timingAnalysisSusp = cachedAnalysis?.timingAnalysis ||
-        analyzeTimingPatternEvents(behavioralTimestampsSusp.timingPatternEvents);
-      const sustainedAnalysisSusp = cachedAnalysis?.sustainedAnalysis ||
+      const deliveryAnalysisSusp =
+        cachedAnalysis?.deliveryAnalysis ||
+        analyzeResponseDeliveryEvents(
+          behavioralTimestampsSusp.responseDeliveryEvents
+        );
+      const timingAnalysisSusp =
+        cachedAnalysis?.timingAnalysis ||
+        analyzeTimingPatternEvents(
+          behavioralTimestampsSusp.timingPatternEvents
+        );
+      const sustainedAnalysisSusp =
+        cachedAnalysis?.sustainedAnalysis ||
         analyzeSustainedCheatingPatterns(behavioralTimestampsSusp);
 
-      return (
-        hasSuspiciousIndicators ||
-        hasHighSuspiciousTime ||
+      // FIX: Require timestamp evidence when only summary indicators present
+      // Check for timestamp-based evidence
+      const hasTimestampEvidence =
         eyeMovementAnalysisSusp.hasEvidence ||
         speakingToneAnalysisSusp.hasEvidence ||
         deliveryAnalysisSusp.hasEvidence ||
         timingAnalysisSusp.hasEvidence ||
-        sustainedAnalysisSusp.hasSustainedCheating
-      );
+        sustainedAnalysisSusp.hasSustainedCheating ||
+        (behavioralTimestampsSusp.totalSuspiciousTime || 0) > 10;
+
+      const hasSuspiciousIndicators =
+        behavioralAnalysisSusp.suspiciousIndicators?.length > 0;
+
+      // Only flag if we have timestamp evidence
+      // Summary indicators alone are not sufficient - require actual event evidence
+      // This aligns with cheating detection logic that requires timestamp evidence
+      return hasTimestampEvidence;
 
     case "ExternalAssistance":
       // Check for external assistance indicators
@@ -1554,29 +1660,12 @@ const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysi
       const behavioralTimestampsExt =
         behavioralAnalysisExt.behavioralTimestamps || {};
 
-      // Check suspicious indicators for external assistance keywords
-      const hasExternalAssistanceIndicators =
-        behavioralAnalysisExt.suspiciousIndicators?.some((indicator) => {
-          if (typeof indicator !== "string") return false;
-          const lower = indicator.toLowerCase();
-          return (
-            lower.includes("external") ||
-            lower.includes("assistance") ||
-            lower.includes("coaching") ||
-            lower.includes("help") ||
-            lower.includes("whisper") ||
-            lower.includes("background voice") ||
-            lower.includes("multiple voices") ||
-            lower.includes("other person")
-          );
-        }) || false;
-
-      // Check for multiple persons/voices (direct indicators)
+      // Check for multiple persons/voices (direct indicators - always valid)
       const hasMultiplePersonsOrVoices =
         analysis.isOnlyOneVoiceInAudio === false ||
         analysis.isOnlyOnePersonInVideo === false;
 
-      // Check suspicious events for external assistance patterns
+      // Check suspicious events for external assistance patterns (timestamp evidence)
       const suspiciousEvents = behavioralTimestampsExt.suspiciousEvents || [];
       const hasExternalAssistanceEvents = suspiciousEvents.some((event) => {
         if (event.category !== "concerning") return false;
@@ -1594,10 +1683,30 @@ const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysi
         );
       });
 
+      // FIX: Check suspicious indicators for external assistance keywords
+      // But only use them if we also have event evidence
+      const hasExternalAssistanceIndicators =
+        behavioralAnalysisExt.suspiciousIndicators?.some((indicator) => {
+          if (typeof indicator !== "string") return false;
+          const lower = indicator.toLowerCase();
+          return (
+            lower.includes("external") ||
+            lower.includes("assistance") ||
+            lower.includes("coaching") ||
+            lower.includes("help") ||
+            lower.includes("whisper") ||
+            lower.includes("background voice") ||
+            lower.includes("multiple voices") ||
+            lower.includes("other person")
+          );
+        }) || false;
+
+      // FIX: Require event evidence when only indicators present
+      // This aligns with cheating detection logic that requires timestamp evidence
       return (
-        hasExternalAssistanceIndicators ||
         hasMultiplePersonsOrVoices ||
-        hasExternalAssistanceEvents
+        hasExternalAssistanceEvents ||
+        (hasExternalAssistanceIndicators && hasExternalAssistanceEvents)
       );
 
     case "AICopied":
@@ -1610,10 +1719,11 @@ const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysi
       return (
         (!isNaN(aiMatch) && aiMatch > 80) ||
         (Array.isArray(analysis.cheatingIndicators) &&
-          analysis.cheatingIndicators.some((indicator) =>
-            typeof indicator === "string" &&
-            (indicator.toLowerCase().includes("ai content") ||
-              indicator.toLowerCase().includes("ai-generated"))
+          analysis.cheatingIndicators.some(
+            (indicator) =>
+              typeof indicator === "string" &&
+              (indicator.toLowerCase().includes("ai content") ||
+                indicator.toLowerCase().includes("ai-generated"))
           )) ||
         false
       );
@@ -1621,41 +1731,72 @@ const checkFlagDetection = (flagKey, analysis, responseData, type, cachedAnalysi
     case "CopiedFromWebsite":
       // Check for web content copying indicators
       return (
-        analysis.cheatingIndicators?.some((indicator) =>
-          typeof indicator === "string" &&
-          (indicator.toLowerCase().includes("website") ||
-            indicator.toLowerCase().includes("web content") ||
-            indicator.toLowerCase().includes("copied from"))
+        analysis.cheatingIndicators?.some(
+          (indicator) =>
+            typeof indicator === "string" &&
+            (indicator.toLowerCase().includes("website") ||
+              indicator.toLowerCase().includes("web content") ||
+              indicator.toLowerCase().includes("copied from"))
         ) || false
       );
 
     case "OtherRelevantNoise":
       // Check for background noise/assistance indicators
       const behavioralAnalysisNoise = analysis.behavioralAnalysis || {};
-      return (
-        behavioralAnalysisNoise.suspiciousIndicators?.some((indicator) =>
-          typeof indicator === "string" &&
-          (indicator.toLowerCase().includes("background") ||
-            indicator.toLowerCase().includes("noise") ||
-            indicator.toLowerCase().includes("external assistance"))
-        ) || false
-      );
+      const behavioralTimestampsNoise =
+        behavioralAnalysisNoise.behavioralTimestamps || {};
+
+      // FIX: Check for suspicious events (timestamp evidence) related to noise
+      const suspiciousEventsNoise =
+        behavioralTimestampsNoise.suspiciousEvents || [];
+      const hasNoiseEvents = suspiciousEventsNoise.some((event) => {
+        if (
+          event.category !== "concerning" &&
+          event.category !== "environmental"
+        )
+          return false;
+        const behavior = (event.behavior || "").toLowerCase();
+        const description = (event.description || "").toLowerCase();
+        return (
+          behavior.includes("background") ||
+          behavior.includes("noise") ||
+          behavior.includes("external assistance") ||
+          description.includes("background") ||
+          description.includes("noise") ||
+          description.includes("external")
+        );
+      });
+
+      const hasNoiseIndicators =
+        behavioralAnalysisNoise.suspiciousIndicators?.some(
+          (indicator) =>
+            typeof indicator === "string" &&
+            (indicator.toLowerCase().includes("background") ||
+              indicator.toLowerCase().includes("noise") ||
+              indicator.toLowerCase().includes("external assistance"))
+        ) || false;
+
+      // FIX: Require event evidence when only indicators present
+      // This aligns with cheating detection logic that requires timestamp evidence
+      return hasNoiseEvents || (hasNoiseIndicators && hasNoiseEvents);
 
     case "MobileDeviceDetected":
       // Check for mobile device indicators
       return (
-        analysis.cheatingIndicators?.some((indicator) =>
-          typeof indicator === "string" &&
-          (indicator.toLowerCase().includes("mobile") ||
-            indicator.toLowerCase().includes("device") ||
-            indicator.toLowerCase().includes("phone"))
+        analysis.cheatingIndicators?.some(
+          (indicator) =>
+            typeof indicator === "string" &&
+            (indicator.toLowerCase().includes("mobile") ||
+              indicator.toLowerCase().includes("device") ||
+              indicator.toLowerCase().includes("phone"))
         ) || false
       );
 
     case "ResearchBehavior":
       // Check for research behavior in typing analysis
       // FIX: Add explicit null check to prevent undefined errors
-      const researchIndicators = responseData?.typingAnalysis?.globalEventAnalysis;
+      const researchIndicators =
+        responseData?.typingAnalysis?.globalEventAnalysis;
       if (!researchIndicators || typeof researchIndicators !== "object") {
         return false;
       }
@@ -1706,11 +1847,12 @@ const refineCheatingDetection = (
         behavioralAnalysis.behavioralTimestamps || {};
 
       // Check if any flag would be triggered by this evidence
-      // FIX: Added audio behavioral reading check to ensure flag consistency
+      // FIX: Only use timestamp analysis, not summary fields
+      // Summary fields alone are not reliable - require actual event evidence
       const hasFlaggableEvidence =
-        // SuspiciousPatterns would trigger
+        // SuspiciousPatterns would trigger (genuine indicators from timestamp events)
         indicatorValidation.genuine.length >= 1 ||
-        // ExternalAssistance would trigger
+        // ExternalAssistance would trigger (genuine indicators with external keywords)
         indicatorValidation.genuine.some((ind) => {
           const lower = ind.original.toLowerCase();
           return (
@@ -1719,11 +1861,7 @@ const refineCheatingDetection = (
             lower.includes("coaching")
           );
         }) ||
-        // ReadingFromExternal would trigger (check behavioral patterns)
-        behavioralAnalysis.eyeMovementPattern ===
-          "Reading from external source detected" ||
-        behavioralAnalysis.responseDelivery === "Reading word-for-word style" ||
-        // Deep timestamp analysis would trigger
+        // Deep timestamp analysis would trigger (actual event evidence)
         analyzeEyeMovementEvents(behavioralTimestamps.eyeMovementEvents)
           .hasEvidence ||
         analyzeResponseDeliveryEvents(
@@ -1767,14 +1905,11 @@ const validateCheatingFlagSync = (cheatingResults, flagResults) => {
     const detectedFlags = flagResults.filter((f) => f.detected);
 
     if (detectedFlags.length === 0) {
-      console.warn(
-        "[SYNC WARNING] isCheatingDetected=true but no flags set",
-        {
-          cheatingConfidence: cheatingResults.cheatingConfidence,
-          cheatingIndicators: cheatingResults.cheatingIndicators,
-          totalFlags: flagResults.length,
-        }
-      );
+      console.warn("[SYNC WARNING] isCheatingDetected=true but no flags set", {
+        cheatingConfidence: cheatingResults.cheatingConfidence,
+        cheatingIndicators: cheatingResults.cheatingIndicators,
+        totalFlags: flagResults.length,
+      });
 
       // Auto-correct: Set SuspiciousPatterns flag if cheating detected but no flags
       // This ensures consistency between detection and flag system

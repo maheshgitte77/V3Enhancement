@@ -24,6 +24,9 @@ Before ANY scoring, FIRST check if the candidate's response addresses the questi
 ❌ Question about "JavaScript prototypal inheritance" → Answer discusses "Java method overloading" = COMPLETELY IRRELEVANT (different language!)
 ❌ Question about "React hooks" → Answer discusses "Angular directives" = COMPLETELY IRRELEVANT (different framework!)
 ❌ Question about "Database normalization" → Answer discusses "Array sorting algorithms" = COMPLETELY IRRELEVANT (different topic!)
+❌ Question about "API design" → Answer is random text like "hello world" or "I don't know" = COMPLETELY IRRELEVANT (random text!)
+❌ Question about "Programming concepts" → Answer discusses cooking recipes or unrelated topic = COMPLETELY IRRELEVANT (different domain!)
+❌ Question about "Technical topic" → Answer is gibberish or nonsensical text = COMPLETELY IRRELEVANT (nonsensical!)
 
 **EXAMPLES OF PARTIALLY RELEVANT (Cap at 40%, relevanceAssessment.score = 0.3-0.5):**
 ⚠️ Question about "JavaScript closures" → Answer mentions functions but misses scope/variable retention = PARTIALLY RELEVANT
@@ -56,6 +59,13 @@ Before ANY scoring, FIRST check if the candidate's response addresses the questi
   → relevanceAssessment.score = 0.6-1.0
   → Apply scoring formula normally
   → No cap on correctPercentage
+
+**🚨 CRITICAL SAFEGUARD: MID-LEVEL SCORING GUIDANCE 🚨**
+**IMPORTANT**: Mid-level scoring guidance (85-95% for good answers) ONLY applies if answer is RELEVANT (relevanceAssessment.score >= 0.6).
+- **DO NOT apply mid-level scoring guidance to irrelevant answers** - they MUST be 0% regardless of experience level
+- **DO NOT apply mid-level scoring guidance to random text, gibberish, or unrelated topics** - they MUST be 0%
+- **Relevance check happens FIRST** - before any scoring considerations or experience-level adjustments
+- **Only after confirming relevance** (score >= 0.6) should you consider experience level and apply mid-level scoring guidance
 `;
 };
 
@@ -74,10 +84,32 @@ const generateScoringInstructions = () => {
 Use this formula (ONLY if relevanceAssessment.score >= 0.5):
 **correctPercentage** = [(Factual Correctness × 0.40) + (Technical Depth × 0.35) + (Communication × 0.25)] × Experience Factor
 
-**Experience Factor:**
+**Experience Factor (ONLY applies if relevanceAssessment.score >= 0.6):**
 - Junior (0-2 years): 1.15 bonus if basic answer (< 50 depth), 1.0 if good answer
-- Mid-level (3-5 years): 1.0 always
+- Mid-level (3-5 years): 1.0 always (standard expectations, not perfectionist - see mid-level scoring guidance below)
 - Senior (6+ years): 0.85 penalty if shallow (< 60 depth), 1.0 if good, 1.05 if exceptional (100 depth)
+
+**🎯 MID-LEVEL (3-5 YEARS) SCORING GUIDANCE (ONLY if relevanceAssessment.score >= 0.6):**
+For candidates with 3-5 years of experience, use these scoring expectations:
+
+**Component Scoring Guidelines:**
+- **Factual Correctness**: If answer is technically correct → rate 4.0-5.0 (don't penalize for minor omissions)
+- **Technical Depth**: If answer shows reasonable depth for 4 years experience → rate 4.0-5.0 (don't expect expert-level depth)
+- **Communication**: If answer is clear and structured → rate 4.0-5.0 (don't penalize for not being perfectly eloquent)
+
+**Expected Score Ranges for Mid-Level:**
+- Answer covers all key points correctly with reasonable depth → **85-95%** (this is the target range for good mid-level answers)
+- Answer covers most points with minor gaps → **75-85%**
+- Answer is partially correct with some errors → **60-75%**
+- Answer has significant errors or major gaps → **Below 60%**
+
+**CRITICAL**: Only reduce below 85% for mid-level candidates if there are:
+- Significant technical errors
+- Major gaps in understanding
+- Missing critical concepts
+- Incorrect fundamental understanding
+
+**REMINDER**: This mid-level guidance ONLY applies if relevanceAssessment.score >= 0.6. Irrelevant answers MUST be 0% regardless of experience level.
 
 **STEP 3: ALIGN ALL RATINGS WITH correctPercentage**
 - correctPercentage 90-100% → ratings 4.5-5.0
@@ -87,6 +119,12 @@ Use this formula (ONLY if relevanceAssessment.score >= 0.5):
 - correctPercentage 50-59% → ratings 2.5-2.9
 - correctPercentage 40-49% → ratings 2.0-2.4
 - correctPercentage 0-39% → ratings 0.0-1.9
+
+**🚨 SAFEGUARD REMINDER 🚨**
+**This scoring guidance (including mid-level expectations) ONLY applies to RELEVANT answers (relevanceAssessment.score >= 0.6).**
+- Irrelevant answers, random text, gibberish, or unrelated topics MUST receive 0% regardless of experience level
+- Experience factors and mid-level scoring guidance are conditional on relevance
+- Always check relevance FIRST before applying any scoring formula or experience adjustments
 `;
 };
 
@@ -599,19 +637,31 @@ ${generateScoringInstructions()}
 **EVALUATION INSTRUCTIONS:**
 1. **First (MANDATORY)**: Check relevance - Does the answer address the question asked? Set relevanceAssessment.score FIRST
 2. **Second (CONDITIONAL)**: Only if relevanceAssessment.score >= 0.5, assess technical correctness and depth
-3. **Third (CONDITIONAL)**: Only if relevant, consider their experience level (${
+3. **Third (CONDITIONAL)**: Only if relevant (relevanceAssessment.score >= 0.6), consider their experience level (${
     responseData.experience
   } years) when evaluating depth
 4. **Fourth (CONDITIONAL)**: Only if relevant, evaluate communication quality and answer effectiveness
 5. **CRITICAL**: Apply relevance rules to correctPercentage BEFORE any other scoring
 
+**MID-LEVEL (3-5 YEARS) SCORING GUIDANCE (ONLY if relevanceAssessment.score >= 0.6):**
+If candidate has 3-5 years experience AND answer is relevant:
+- **Recognize what's good FIRST**: Identify what the candidate covered well, what concepts they demonstrated correctly
+- **Then identify gaps**: Note what's missing or could be improved, but don't over-penalize minor omissions
+- **Expected scores for good answers**: If answer covers key points correctly with reasonable depth → **85-95%**
+- **Only reduce below 85%** for significant errors, major gaps, or incorrect fundamental understanding
+- **Component expectations**: 
+  - Factual Correctness: 4.0-5.0 if technically correct (don't penalize minor omissions)
+  - Technical Depth: 4.0-5.0 if shows reasonable depth for 4 years (don't expect expert-level depth)
+  - Communication: 4.0-5.0 if clear and structured (don't penalize for not being perfectly eloquent)
+
 **IMPORTANT NOTES:**
 - Focus PURELY on the technical content of their answer vs. the question
-- Consider whether the answer demonstrates appropriate knowledge for ${
+- **For relevant answers**: Consider whether the answer demonstrates appropriate knowledge for ${
     responseData.experience
   } years experience
-- Identify what was covered well and what was missing or incorrect
-- Provide constructive improvement suggestions based on the gap between their answer and an ideal response
+- **Balance assessment**: Identify what was covered well FIRST, then note what was missing or incorrect
+- Provide constructive improvement suggestions, but recognize good answers appropriately
+- **CRITICAL**: Mid-level scoring guidance ONLY applies if answer is relevant (relevanceAssessment.score >= 0.6). Irrelevant answers = 0% regardless of experience
 
 **Response JSON Format:**
 {
@@ -653,8 +703,10 @@ ${generateScoringInstructions()}
 - **If answer is irrelevant (relevanceAssessment.score <= 0.2):** correctPercentage MUST be 0, do NOT use scoring formula
 - **If answer is partially relevant (relevanceAssessment.score < 0.5):** correctPercentage MUST be capped at 40
 - **Only apply scoring formula if answer is relevant (relevanceAssessment.score >= 0.5)**
+- **MID-LEVEL SCORING GUIDANCE ONLY APPLIES IF ANSWER IS RELEVANT (relevanceAssessment.score >= 0.6)**: Irrelevant answers = 0% regardless of experience
 - Focus ONLY on: Did they answer what was asked? How well? What's missing?
 - Be fair and consider their experience level in your evaluation (only if answer is relevant)
+- For mid-level candidates with relevant answers: Recognize good answers (85-95%) before identifying gaps
 `;
 };
 
@@ -748,7 +800,17 @@ ${generateTextLanguageDetectionInstructions()}
 ${typingContext}
 ${baseAnswerSection}
 
-
+**MID-LEVEL (3-5 YEARS) SCORING GUIDANCE (ONLY if relevanceAssessment.score >= 0.6):**
+If candidate has 3-5 years experience AND answer is relevant:
+- **Recognize what's good FIRST**: Identify what the candidate covered well, what concepts they demonstrated correctly
+- **Then identify gaps**: Note what's missing or could be improved, but don't over-penalize minor omissions
+- **Expected scores for good answers**: If answer covers key points correctly with reasonable depth → **85-95%**
+- **Only reduce below 85%** for significant errors, major gaps, or incorrect fundamental understanding
+- **Component expectations**: 
+  - Factual Correctness: 4.0-5.0 if technically correct (don't penalize minor omissions)
+  - Technical Depth: 4.0-5.0 if shows reasonable depth for 4 years (don't expect expert-level depth)
+  - Communication: 4.0-5.0 if clear and structured (don't penalize for not being perfectly eloquent)
+- **Balance feedback**: Provide improvement suggestions, but recognize good answers appropriately
 
 **Response JSON Format:**
 {
@@ -820,7 +882,9 @@ ${baseAnswerSection}
 - **If answer is irrelevant (relevanceAssessment.score <= 0.2):** correctPercentage MUST be 0, do NOT use scoring formula
 - **If answer is partially relevant (relevanceAssessment.score < 0.5):** correctPercentage MUST be capped at 40
 - **Only apply scoring formula if answer is relevant (relevanceAssessment.score >= 0.5)**
+- **MID-LEVEL SCORING GUIDANCE ONLY APPLIES IF ANSWER IS RELEVANT (relevanceAssessment.score >= 0.6)**: Random text or irrelevant answers = 0% regardless of experience
 - Focus ONLY on technical content quality. Behavioral/integrity analysis is handled separately.
+- For mid-level candidates with relevant answers: Recognize good answers (85-95%) before identifying gaps
 `;
 };
 
