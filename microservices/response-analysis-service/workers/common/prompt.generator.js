@@ -895,7 +895,9 @@ const generateScreeningSummaryPrompt = (
   candidateFitScore,
   screeningResult,
   aiResponses,
-  questionData
+  questionData,
+  recommendation,
+  integrityScore
 ) => {
   let prompt = `
 You are an HR Analytics AI tasked with creating concise, decision-oriented candidate evaluation summaries. Analyze the screening data and provide clear, actionable insights for hiring decisions.
@@ -948,6 +950,9 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 
 **Candidate Screening Data:**
 - **Candidate Fit Score**: ${candidateFitScore}% (Use this for fit category determination)
+- **Final Recommendation**: ${recommendation} (CRITICAL: Your fit summary MUST align with this recommendation)
+- **Integrity Score**: ${integrityScore}% (Lower scores indicate integrity concerns that may affect recommendation)
+- **Cheating Detected**: ${screeningResult.isCheatingDetected ? 'Yes' : 'No'} (If Yes, this significantly impacts recommendation)
 `;
 
   // Add all question data
@@ -974,10 +979,12 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 **IMPORTANT GUIDELINES:**
 - Keep screeningSummary points concise and factual
 - Use fit score ranges to determine appropriate fitScorePointers category
+- **CRITICAL: The "Fit for Role Type" recommendation MUST match the Final Recommendation provided above**
+- If Final Recommendation is "Not Recommended", the fit summary should reflect this even if fit score seems good
 - Include actual skill names and performance indicators
 - Focus on decision-making value for HR
 - Maintain professional, objective tone
-- If cheating detected, prioritize integrity concerns in summary
+- If cheating detected or integrity score is low, prioritize integrity concerns in summary
 `;
 
   return prompt;

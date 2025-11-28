@@ -238,7 +238,9 @@ const analyzeTimingPatternEvents = (timingPatternEvents = []) => {
     }
   });
 
-  return { hasEvidence: suspicionScore >= 1.0, suspicionScore, indicators };
+  // ENHANCED: Increased threshold from 1.0 to 1.5 to align with other analysis thresholds
+  // This reduces false positives from single brief pauses while maintaining detection of sustained patterns
+  return { hasEvidence: suspicionScore >= 1.5, suspicionScore, indicators };
 };
 
 /**
@@ -1638,13 +1640,41 @@ const checkFlagDetection = (
 
       // FIX: Require timestamp evidence when only summary indicators present
       // Check for timestamp-based evidence
+      
+      // ENHANCED: Add confidence requirement for totalSuspiciousTime to reduce false positives
+      // Calculate average confidence from suspicious events if using totalSuspiciousTime
+      const totalSuspiciousTime = behavioralTimestampsSusp.totalSuspiciousTime || 0;
+      let hasTotalSuspiciousTimeEvidence = false;
+      
+      if (totalSuspiciousTime > 10) {
+        // Calculate average confidence from all suspicious events
+        const suspiciousEvents = behavioralTimestampsSusp.suspiciousEvents || [];
+        if (suspiciousEvents.length > 0) {
+          const totalConfidence = suspiciousEvents.reduce((sum, event) => {
+            const conf = event.confidence || 0;
+            // Convert confidence string to number if needed
+            const numConf = typeof conf === 'string' 
+              ? parseFloat(conf.replace('%', '')) || 0 
+              : conf;
+            return sum + numConf;
+          }, 0);
+          const avgConfidence = totalConfidence / suspiciousEvents.length;
+          // Require average confidence >= 50% when using totalSuspiciousTime
+          hasTotalSuspiciousTimeEvidence = avgConfidence >= 50;
+        } else {
+          // If no suspicious events but totalSuspiciousTime > 10, still allow it
+          // (fallback for cases where time is tracked but events aren't)
+          hasTotalSuspiciousTimeEvidence = true;
+        }
+      }
+      
       const hasTimestampEvidence =
         eyeMovementAnalysisSusp.hasEvidence ||
         speakingToneAnalysisSusp.hasEvidence ||
         deliveryAnalysisSusp.hasEvidence ||
         timingAnalysisSusp.hasEvidence ||
         sustainedAnalysisSusp.hasSustainedCheating ||
-        (behavioralTimestampsSusp.totalSuspiciousTime || 0) > 10;
+        hasTotalSuspiciousTimeEvidence;
 
       const hasSuspiciousIndicators =
         behavioralAnalysisSusp.suspiciousIndicators?.length > 0;
