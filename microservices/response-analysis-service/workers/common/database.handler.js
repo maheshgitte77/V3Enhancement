@@ -538,20 +538,73 @@ const saveToDatabase = async (
       ? question.isCheatingDetected
       : questionAiResponse.isCheatingDetected;
 
-  // Standardized cheatingAnalysis field
+  // Merge cheatingAnalysis instead of overwriting (preserve webcam snapshot processing results)
+  const existingCheatingAnalysis = question.cheatingAnalysis || {};
+  const existingFlagResults = existingCheatingAnalysis.flagResults || [];
+  const newFlagResults = flagResults || [];
+
+  // Merge flag results, avoiding duplicates based on flag key
+  const flagMap = new Map();
+  
+  // First, add existing flags (from webcam snapshot processing)
+  existingFlagResults.forEach((flag) => {
+    if (flag.flagKey) {
+      flagMap.set(flag.flagKey, flag);
+    } else {
+      // Fallback: use message as key if flagKey doesn't exist
+      const key = flag.message || JSON.stringify(flag);
+      flagMap.set(key, flag);
+    }
+  });
+
+  // Then, add/override with new flags (from audio/video/subjective processing)
+  newFlagResults.forEach((flag) => {
+    if (flag.flagKey) {
+      flagMap.set(flag.flagKey, flag); // New flags override old ones with same key
+    } else {
+      // Fallback: use message as key if flagKey doesn't exist
+      const key = flag.message || JSON.stringify(flag);
+      flagMap.set(key, flag);
+    }
+  });
+
+  const mergedFlagResults = Array.from(flagMap.values());
+  const mergedFlaggedChecks = mergedFlagResults.filter((f) => f.detected).length;
+  const mergedClearChecks = mergedFlagResults.filter((f) => !f.detected).length;
+
   question.cheatingAnalysis = {
-    flagResults: flagResults || [],
-    flaggedChecks: flagStats?.flaggedChecks || 0,
-    clearChecks: flagStats?.clearChecks || 0,
-    totalChecks: flagStats?.totalChecks || 0,
+    flagResults: mergedFlagResults,
+    flaggedChecks: mergedFlaggedChecks,
+    clearChecks: mergedClearChecks,
+    totalChecks: mergedFlagResults.length,
     processingTimestamp: new Date().toISOString(),
-    flagSystemVersion: "2.5.0",
+    flagSystemVersion: existingCheatingAnalysis.flagSystemVersion || "2.5.0",
   };
+
+  // ENHANCED: Flag verification - ensure consistency between isCheatingDetected and flags
+  // If isCheatingDetected is true, at least one flag should be detected
+  if (question.isCheatingDetected === true && mergedFlaggedChecks === 0) {
+    logger.warn("V2.5: Inconsistency detected - isCheatingDetected=true but no flags detected", {
+      questionId: responseData.questionId,
+      candidateScreeningId: responseData.candidateScreeningId,
+      existingFlags: existingFlagResults.length,
+      newFlags: newFlagResults.length,
+      mergedFlags: mergedFlagResults.length,
+      cheatingConfidence: question.cheatingConfidence || mergedAnalysis.cheatingConfidence || 0,
+    });
+    
+    // Note: We don't auto-correct here because this might be from webcam processing
+    // The sync validation in processors should have handled this, but we log for monitoring
+  }
+
+  // Preserve maximum cheatingConfidence (from webcam or audio/video/subjective processing)
+  const existingConfidence = question.cheatingConfidence || 0;
+  const newConfidence = mergedAnalysis.cheatingConfidence || 0;
+  question.cheatingConfidence = Math.max(existingConfidence, newConfidence);
 
   // Add metadata
   question.processingVersion = "V2.5";
   question.contextualQuality = mergedAnalysis.responseQuality;
-  question.cheatingConfidence = mergedAnalysis.cheatingConfidence;
   question.processingCost = processingCost;
 
   // Add relevance score for subjective
@@ -567,11 +620,21 @@ const saveToDatabase = async (
   });
 
   // Update document-level cheating detection
+  // ENHANCED: Add flag verification - only flag document if at least one flag is detected
   if (questionAiResponse.isCheatingDetected && !doc.isCheatingDetected) {
-    if (mergedAnalysis.cheatingConfidence >= 75) {
+    const hasDetectedFlags = mergedFlaggedChecks > 0;
+    
+    if (mergedAnalysis.cheatingConfidence >= 75 && hasDetectedFlags) {
       doc.isCheatingDetected = true;
       logger.info("V2.5: Document flagged for cheating", {
         confidence: mergedAnalysis.cheatingConfidence,
+        flaggedChecks: mergedFlaggedChecks,
+      });
+    } else if (mergedAnalysis.cheatingConfidence >= 75 && !hasDetectedFlags) {
+      logger.warn("V2.5: Document-level cheating not flagged - no flags detected despite high confidence", {
+        confidence: mergedAnalysis.cheatingConfidence,
+        flaggedChecks: mergedFlaggedChecks,
+        questionId: responseData.questionId,
       });
     }
   }

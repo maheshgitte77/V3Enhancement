@@ -163,17 +163,38 @@ const processSubjectiveResponse = async (responseData) => {
       cachedAnalysis
     );
 
+    // ENHANCED: Validate sync between cheating detection and flag system
+    const syncValidation = cheatingDetector.validateCheatingFlagSync(
+      cheatingResults,
+      flagResults
+    );
+
+    // Use validated flags (auto-corrected if needed)
+    const validatedFlagResults = syncValidation.flagResults;
+    cheatingResults.flagResults = validatedFlagResults;
+
+    // Update flag stats based on validated flags
     const flagStats = {
-      flaggedChecks: flagResults.filter((f) => f.detected).length,
-      clearChecks: flagResults.filter((f) => !f.detected).length,
-      totalChecks: flagResults.length,
+      flaggedChecks: validatedFlagResults.filter((f) => f.detected).length,
+      clearChecks: validatedFlagResults.filter((f) => !f.detected).length,
+      totalChecks: validatedFlagResults.length,
     };
 
-    cheatingResults.flagResults = flagResults;
+    // Log warning if flags were auto-corrected
+    if (syncValidation.wasAutoCorrected) {
+      logger.warn("V2.5: Flag sync issue detected and auto-corrected", {
+        syncIssue: syncValidation.syncIssue,
+        questionId: responseData.questionId,
+        originalFlaggedChecks: flagResults.filter((f) => f.detected).length,
+        correctedFlaggedChecks: flagStats.flaggedChecks,
+      });
+    }
 
     logger.info("V2.5: Flag processing completed", {
       flaggedChecks: flagStats.flaggedChecks,
       totalChecks: flagStats.totalChecks,
+      isSynced: syncValidation.isSynced,
+      wasAutoCorrected: syncValidation.wasAutoCorrected,
     });
 
     // ====== GENERATE BEHAVIORAL ANALYSIS FROM TYPING ======

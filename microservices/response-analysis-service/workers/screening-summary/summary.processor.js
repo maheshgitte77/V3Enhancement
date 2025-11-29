@@ -796,16 +796,33 @@ const processScreeningSummary = async ({
       candidateScreeningId: screeningResult.candidateScreeningId,
     });
 
+    // Calculate recommendation BEFORE generating AI prompt to ensure alignment
+    const integrityScore = calculateIntegrityScore(screeningResult);
+    const recommendation = calculateRecommendation(
+      candidateFitScore,
+      integrityScore,
+      screeningResult.isCheatingDetected
+    );
+
+    logger.info("V2.5: Recommendation calculated", {
+      candidateScreeningId,
+      candidateFitScore,
+      integrityScore,
+      recommendation,
+    });
+
     // Build question data for prompt
     const questionData = await buildQuestionData(screeningResult, aiResponses);
 
-    // Generate screening summary prompt
+    // Generate screening summary prompt (now with recommendation and integrity score)
     const promptGenerator = require("../common/prompt.generator");
     const prompt = promptGenerator.generateScreeningSummaryPrompt(
       candidateFitScore,
       screeningResult,
       aiResponses,
-      questionData
+      questionData,
+      recommendation,
+      integrityScore
     );
 
     // Get AI screening summary
@@ -868,21 +885,6 @@ const processScreeningSummary = async ({
       candidateScreeningId,
       totalProcessingCost: `$${totalProcessingCost.toFixed(6)}`,
       screeningSummaryCost: `$${screeningSummaryCost.toFixed(6)}`,
-    });
-
-    // Calculate recommendation
-    const integrityScore = calculateIntegrityScore(screeningResult);
-    const recommendation = calculateRecommendation(
-      candidateFitScore,
-      integrityScore,
-      screeningResult.isCheatingDetected
-    );
-
-    logger.info("V2.5: Recommendation calculated", {
-      candidateScreeningId,
-      candidateFitScore,
-      integrityScore,
-      recommendation,
     });
 
     // Update screening result
