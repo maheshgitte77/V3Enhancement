@@ -8,6 +8,16 @@ require("dotenv").config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Add cors policy,all more than one origin
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://staging.app.hirecorrecto.com",
+    "https://app.hirecorrecto.com",
+    "https://hirecorrecto.com",
+  ],
+  credentials: true,
+}));
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
   broker.trim()
 );
