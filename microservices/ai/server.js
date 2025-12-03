@@ -118,6 +118,34 @@ const ensureTopics = async () => {
           }
           const categoryCache = responseCache.get(key);
 
+          // Initialize token usage tracking if needed
+          if (!requestInfo.tokenUsage) {
+            requestInfo.tokenUsage = {
+              byType: {},
+              total: {
+                promptTokens: 0,
+                completionTokens: 0,
+                totalTokens: 0,
+              },
+            };
+          }
+
+          // Track token usage for this question type
+          if (responseData.tokenUsage) {
+            const typeTokenUsage = responseData.tokenUsage;
+            requestInfo.tokenUsage.byType[questionType] = {
+              promptTokens: typeTokenUsage.promptTokens || 0,
+              completionTokens: typeTokenUsage.completionTokens || 0,
+              totalTokens: typeTokenUsage.totalTokens || 0,
+              batches: typeTokenUsage.batches || [], // For Programming batches
+            };
+
+            // Add to total
+            requestInfo.tokenUsage.total.promptTokens += typeTokenUsage.promptTokens || 0;
+            requestInfo.tokenUsage.total.completionTokens += typeTokenUsage.completionTokens || 0;
+            requestInfo.tokenUsage.total.totalTokens += typeTokenUsage.totalTokens || 0;
+          }
+
           if (!categoryCache[categoryName]) {
             categoryCache[categoryName] = {
               skillName: categoryName,
@@ -155,6 +183,22 @@ const ensureTopics = async () => {
           if (receivedCount === requestInfo.expectedResponses) {
             console.log(`✅ All responses received for Request ID: ${key}`);
 
+            // Log token usage summary
+            if (requestInfo.tokenUsage) {
+              console.log(`\n📊 Token Usage Summary for Request ${key}:`);
+              console.log(`Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`);
+              console.log(`By Type:`);
+              Object.entries(requestInfo.tokenUsage.byType).forEach(([type, usage]) => {
+                console.log(`  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`);
+                if (usage.batches && usage.batches.length > 0) {
+                  console.log(`    Batches:`);
+                  usage.batches.forEach((batch) => {
+                    console.log(`      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`);
+                  });
+                }
+              });
+            }
+
             // Convert category cache to array format matching original structure
             const questionsArray = Object.values(categoryCache).map((cat) => ({
               skillName: cat.skillName,
@@ -165,6 +209,7 @@ const ensureTopics = async () => {
             requestInfo.res.json({
               requestId: key,
               questions: questionsArray,
+              tokenUsage: requestInfo.tokenUsage, // Include aggregated token usage
             });
 
             pendingRequests.delete(key);

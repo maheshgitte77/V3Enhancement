@@ -1,6 +1,7 @@
 const { Kafka } = require("kafkajs");
 const axios = require("axios");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const crypto = require("crypto");
 
 require("dotenv").config();
 
@@ -71,12 +72,84 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
     .replace(/^```\s*/, "")
     .replace(/\s*```$/g, "");
 
-  // Find JSON object boundaries - look for first { and last }
+  // Remove HTML/XML tags that might be embedded in the response
+  // This handles cases where AI includes HTML tags in JSON strings
+  // We need to be careful - only remove tags that are clearly outside JSON structure
+  // First, try to find JSON boundaries
   const firstBrace = aiResponseJson.indexOf("{");
   const lastBrace = aiResponseJson.lastIndexOf("}");
 
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    aiResponseJson = aiResponseJson.substring(firstBrace, lastBrace + 1);
+    // Extract JSON portion
+    const jsonPortion = aiResponseJson.substring(firstBrace, lastBrace + 1);
+
+    // Clean HTML tags that might be breaking JSON (but preserve escaped HTML in strings)
+    // Replace unescaped < and > that appear outside of strings
+    let cleanedJson = "";
+    let inString = false;
+    let escapeNext = false;
+
+    for (let i = 0; i < jsonPortion.length; i++) {
+      const char = jsonPortion[i];
+      const prevChar = i > 0 ? jsonPortion[i - 1] : "";
+
+      if (escapeNext) {
+        cleanedJson += char;
+        escapeNext = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        cleanedJson += char;
+        escapeNext = true;
+        continue;
+      }
+
+      if (char === '"') {
+        // Check if this quote is escaped by counting backslashes
+        let backslashCount = 0;
+        let checkPos = i - 1;
+        while (checkPos >= 0 && jsonPortion[checkPos] === "\\") {
+          backslashCount++;
+          checkPos--;
+        }
+        // If even number of backslashes (or zero), quote is not escaped
+        if (backslashCount % 2 === 0) {
+          inString = !inString;
+        }
+        cleanedJson += char;
+        continue;
+      }
+
+      // If we encounter < or > outside of strings, check if it's part of HTML tag
+      if (!inString && (char === "<" || char === ">")) {
+        // Skip HTML tags outside strings - look ahead to see if it's a tag
+        if (char === "<") {
+          // Check if this looks like an HTML tag start
+          const nextChars = jsonPortion.substring(i, Math.min(i + 20, jsonPortion.length));
+          if (/^<[a-zA-Z\/!]/.test(nextChars)) {
+            // Skip until we find matching >
+            let j = i + 1;
+            while (j < jsonPortion.length && jsonPortion[j] !== ">") {
+              j++;
+            }
+            if (j < jsonPortion.length) {
+              i = j; // Skip the entire tag
+              continue;
+            }
+          }
+        }
+        // If not a tag, keep the character (might be part of comparison operator in code)
+        cleanedJson += char;
+      } else {
+        cleanedJson += char;
+      }
+    }
+
+    aiResponseJson = cleanedJson;
+  } else {
+    // If no braces found, try to clean HTML tags from entire response
+    aiResponseJson = aiResponseJson.replace(/<[^>]*>/g, "");
   }
 
   // Clean up common issues
@@ -681,6 +754,22 @@ const createConsumer = async (id) => {
         });
 
         let aiResponse;
+        let tokenUsage = {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          batches: [], // For Programming batches
+        };
+
+        // Helper function to extract token usage from Gemini response
+        const extractTokenUsage = (response) => {
+          const usageMetadata = response?.usageMetadata || {};
+          return {
+            promptTokens: usageMetadata.promptTokenCount || 0,
+            completionTokens: usageMetadata.candidatesTokenCount || 0,
+            totalTokens: (usageMetadata.promptTokenCount || 0) + (usageMetadata.candidatesTokenCount || 0),
+          };
+        };
 
         // Special flow for Programming when more than 2 questions are requested:
         // 1) Generate titles, 2) Generate questions in batches of 2 titles
@@ -707,6 +796,12 @@ const createConsumer = async (id) => {
             );
             titlesResponse = titlesResult.response;
             titlesCandidate = titlesResponse.candidates?.[0]?.content;
+
+            // Track token usage for titles generation
+            const titlesTokenUsage = extractTokenUsage(titlesResponse);
+            tokenUsage.promptTokens += titlesTokenUsage.promptTokens;
+            tokenUsage.completionTokens += titlesTokenUsage.completionTokens;
+            tokenUsage.totalTokens += titlesTokenUsage.totalTokens;
           } catch (geminiError) {
             console.error(
               `❌ Error calling Gemini API for titles in Consumer ${id}:`,
@@ -758,7 +853,7 @@ const createConsumer = async (id) => {
             // Create promise for this batch
             const batchPromise = (async () => {
               try {
-                // console.log(`🚀 Starting Programming batch ${batchIndex}/${Math.ceil(titles.length / 2)} (Consumer ${id})...`);
+                console.log(`🚀 Starting Programming batch ${batchIndex}/${Math.ceil(titles.length / 2)} (Consumer ${id})...`);
 
                 const batchResult = await retryGeminiCall(
                   () => model.generateContent(batchPrompt),
@@ -773,6 +868,9 @@ const createConsumer = async (id) => {
                   throw new Error("No valid response received from Gemini for batch");
                 }
 
+                // Extract token usage for this batch
+                const batchTokenUsage = extractTokenUsage(batchResponse);
+
                 const batchText = batchCandidate.parts[0]?.text || "";
                 const batchJson = extractJsonFromGeminiText(batchText, id);
 
@@ -785,10 +883,11 @@ const createConsumer = async (id) => {
                   );
                 }
 
-                // console.log(`✅ Completed Programming batch ${batchIndex}/${Math.ceil(titles.length / 2)} (Consumer ${id})`);
+                console.log(`✅ Completed Programming batch ${batchIndex}/${Math.ceil(titles.length / 2)} (Consumer ${id})`);
                 return {
                   batchIndex: batchIndex - 1, // 0-indexed for sorting
                   questions: batchJson.Programming,
+                  tokenUsage: batchTokenUsage,
                 };
               } catch (geminiError) {
                 console.error(
@@ -804,21 +903,83 @@ const createConsumer = async (id) => {
             batchPromises.push(batchPromise);
           }
 
-          // Process all batches in parallel
-          // console.log(`🔄 Processing ${batchPromises.length} Programming batches in parallel (Consumer ${id})...`);
-          const batchResults = await Promise.all(batchPromises);
+          // Process all batches in parallel - use allSettled to handle partial failures
+          console.log(`🔄 Processing ${batchPromises.length} Programming batches in parallel (Consumer ${id})...`);
+          const batchResults = await Promise.allSettled(batchPromises);
 
-          // Sort by batchIndex to maintain order, then combine all questions
-          batchResults.sort((a, b) => a.batchIndex - b.batchIndex);
-          const allProgrammingQuestions = batchResults.flatMap(result => result.questions);
+          // Separate successful and failed batches
+          const successfulBatches = [];
+          const failedBatches = [];
+
+          batchResults.forEach((result, index) => {
+            if (result.status === "fulfilled") {
+              successfulBatches.push(result.value);
+            } else {
+              const batchIndex = Math.floor((index * 2) / 2) + 1;
+              console.error(
+                `❌ Programming batch ${batchIndex} failed in Consumer ${id}:`,
+                result.reason?.message || result.reason
+              );
+              failedBatches.push({
+                batchIndex: index,
+                error: result.reason?.message || "Unknown error",
+              });
+            }
+          });
+
+          // Sort successful batches by batchIndex to maintain order
+          successfulBatches.sort((a, b) => a.batchIndex - b.batchIndex);
+          const allProgrammingQuestions = successfulBatches.flatMap(result => result.questions);
+
+          // Aggregate token usage from all batches
+          successfulBatches.forEach((batch) => {
+            if (batch.tokenUsage) {
+              tokenUsage.promptTokens += batch.tokenUsage.promptTokens;
+              tokenUsage.completionTokens += batch.tokenUsage.completionTokens;
+              tokenUsage.totalTokens += batch.tokenUsage.totalTokens;
+              tokenUsage.batches.push({
+                batchIndex: batch.batchIndex + 1,
+                ...batch.tokenUsage,
+              });
+            }
+          });
+
+          // Log summary
+          if (failedBatches.length > 0) {
+            console.warn(
+              `⚠️ Consumer ${id}: ${successfulBatches.length}/${batchPromises.length} Programming batches succeeded. ${failedBatches.length} batch(es) failed.`
+            );
+          } else {
+            console.log(
+              `✅ Consumer ${id}: All ${successfulBatches.length} Programming batches succeeded.`
+            );
+          }
+
+          console.log(
+            `📊 Token usage for Programming (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`
+          );
 
           // Build aiResponse object matching normal schema
+          // Always send response even if some batches failed (partial success)
           aiResponse = {
             skillName: category.category,
             skillType: category.skills || "unknown",
             type: "Programming",
             Programming: allProgrammingQuestions,
           };
+
+          // If no questions were generated, log warning but still send empty array
+          if (allProgrammingQuestions.length === 0) {
+            console.warn(
+              `⚠️ Consumer ${id}: No Programming questions generated. All batches failed. Errors: ${failedBatches.map(f => f.error).join("; ")}`
+            );
+            // Still send response with empty array - let frontend handle it
+          } else if (failedBatches.length > 0) {
+            // Log partial success
+            console.warn(
+              `⚠️ Consumer ${id}: Partial success - ${allProgrammingQuestions.length} Programming questions generated, ${failedBatches.length} batch(es) failed.`
+            );
+          }
         } else {
           // Normal single-call flow for all other types (and Programming <= 2)
           const prompt = generatePromptForType(
@@ -858,8 +1019,18 @@ const createConsumer = async (id) => {
             throw new Error("No valid response received from Gemini.");
           }
 
+          // Track token usage for non-Programming questions
+          const responseTokenUsage = extractTokenUsage(response);
+          tokenUsage.promptTokens += responseTokenUsage.promptTokens;
+          tokenUsage.completionTokens += responseTokenUsage.completionTokens;
+          tokenUsage.totalTokens += responseTokenUsage.totalTokens;
+
           const aiResponseText = candidate.parts[0]?.text || "";
           aiResponse = extractJsonFromGeminiText(aiResponseText, id);
+
+          console.log(
+            `📊 Token usage for ${questionType} (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`
+          );
         }
 
         // Process questions based on type
@@ -977,16 +1148,17 @@ const createConsumer = async (id) => {
                       requestId: requestId,
                       category: category.category,
                       questionType: questionType,
+                      tokenUsage: tokenUsage, // Include token usage information
                     }),
                   },
                 ],
               });
-              // console.log(
-              //   `✅ Consumer ${id} completed processing ${questionType} questions for '${category.category}'`
-              // );
-              // console.log(
-              //   `✅ Response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`
-              // );
+              console.log(
+                `✅ Consumer ${id} completed processing ${questionType} questions for '${category.category}'`
+              );
+              console.log(
+                `✅ Response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`
+              );
             } catch (sendError) {
               console.error(`❌ Error sending response to Kafka in Consumer ${id}:`, sendError);
               throw sendError;

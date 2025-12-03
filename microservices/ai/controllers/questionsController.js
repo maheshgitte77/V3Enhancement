@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const crypto = require("crypto");
 require("dotenv").config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -22,7 +23,8 @@ const generateScreeningQuestion = async (req, res) => {
         .json({ message: "Missing or invalid data in request" });
     }
 
-    const requestId = `req-${Date.now()}`;
+    // Generate unique request ID using crypto
+    const requestId = `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
     // Split each category's questions by type - each type gets its own message
     const producerMessages = [];
@@ -31,6 +33,9 @@ const generateScreeningQuestion = async (req, res) => {
     data.forEach((category) => {
       if (category.questions && Array.isArray(category.questions)) {
         category.questions.forEach((questionConfig) => {
+          // Use type-specific questionsArray from questionConfig if available, otherwise use global questionsArray
+          const typeSpecificQuestionsArray = questionConfig.questionsArray || questionsArray || [];
+          console.log("typeSpecificQuestionsArray", typeSpecificQuestionsArray.length);
           producerMessages.push({
             key: `req-${messageIndex++}`,
             value: JSON.stringify({
@@ -47,7 +52,7 @@ const generateScreeningQuestion = async (req, res) => {
               questionConfig: questionConfig, // Single question config (type, number, maxTime, etc.)
               tailorMade,
               CandidateResumeData,
-              questionsArray,
+              questionsArray: typeSpecificQuestionsArray, // Use type-specific array
             }),
           });
         });
