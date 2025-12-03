@@ -117,7 +117,7 @@ CRITICAL BOILERPLATE CODE REQUIREMENTS:
    - Input reading code (e.g., Scanner, readline, input())
    - Basic structure (main function, class definition)
    - A TODO comment indicating where candidates should implement their solution (e.g., '// TODO: Implement the solution here' or '# TODO: Implement the solution here')
-   - A placeholder print/output statement that calls the solution function (commented out or with a placeholder)
+   - A placeholder print/output statement that calls the solution function
 
 CRITICAL FORMATTING REQUIREMENTS:
 1. Use actual newline characters (\\n) NOT <br/> tags
@@ -140,7 +140,7 @@ Ensure the JSON is valid and each language name matches exactly with the provide
 `;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.0-flash",
     });
 
     const result = await model.generateContent(prompt);

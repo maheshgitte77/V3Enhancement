@@ -158,6 +158,8 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
     - Python: imports, empty function with TODO, placeholder print
   * Use \\n for newlines in boilerplate code (NOT <br/>)
   * Follow language-specific formatting standards
+  * **IMPORTANT**: The boilerplate code must be a clean starting point where candidates write ALL solution logic themselves.
+  * **IMPORTANT**: The boilerplate code does not include any solution logic or algorithm implementation.
 `;
       break;
   }
@@ -362,7 +364,7 @@ const createConsumer = async (id) => {
         let result, response, candidate;
         try {
           const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash",
+            model: "gemini-2.0-flash",
           });
           result = await model.generateContent(prompt);
           response = result.response;
