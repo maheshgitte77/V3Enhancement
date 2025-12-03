@@ -24,29 +24,57 @@ const generateScreeningQuestion = async (req, res) => {
 
     const requestId = `req-${Date.now()}`;
 
-    const totalCategories = data.length;
-    const producerMessages = data.map((category, index) => ({
-      key: `req-${index + 1}`,
-      value: JSON.stringify({
-        requestId,
-        experience,
-        jobRole,
-        proposedSeniority,
-        JD,
-        category,
-        tailorMade,
-        CandidateResumeData,
-        questionsArray,
-      }),
-    }));
+    // Split each category's questions by type - each type gets its own message
+    const producerMessages = [];
+    let messageIndex = 0;
+
+    data.forEach((category) => {
+      if (category.questions && Array.isArray(category.questions)) {
+        category.questions.forEach((questionConfig) => {
+          producerMessages.push({
+            key: `req-${messageIndex++}`,
+            value: JSON.stringify({
+              requestId,
+              experience,
+              jobRole,
+              proposedSeniority,
+              JD,
+              category: {
+                category: category.category,
+                skills: category.skills || "unknown",
+              },
+              questionType: questionConfig.type,
+              questionConfig: questionConfig, // Single question config (type, number, maxTime, etc.)
+              tailorMade,
+              CandidateResumeData,
+              questionsArray,
+            }),
+          });
+        });
+      }
+    });
+
+    // Calculate total expected responses (one per question type per category)
+    const totalExpectedResponses = producerMessages.length;
+
+    if (producerMessages.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "No questions to generate" });
+    }
 
     await req.producer.send({
       topic: "questions-request-topic",
       messages: producerMessages,
     });
+
     req.pendingRequests.set(requestId, {
       res,
-      expectedResponses: totalCategories,
+      expectedResponses: totalExpectedResponses,
+      categories: data.map(cat => ({
+        category: cat.category,
+        skills: cat.skills || "unknown",
+      })),
     });
   } catch (error) {
     console.error("❌ Error in generateScreeningQuestion:", error);
@@ -59,8 +87,8 @@ const generateBoilerplateCode = async (req, res) => {
     const { questionTitle, question, testCases, languages } = req.body;
 
     if (!questionTitle || !question || !testCases || !languages || !Array.isArray(languages) || languages.length === 0) {
-      return res.status(400).json({ 
-        message: "Missing required fields: questionTitle, question, testCases, and languages array are required" 
+      return res.status(400).json({
+        message: "Missing required fields: questionTitle, question, testCases, and languages array are required"
       });
     }
 
@@ -124,7 +152,7 @@ Ensure the JSON is valid and each language name matches exactly with the provide
       const aiResponseJson = aiResponseText
         .replace(/```json|```/g, "")
         .trim();
-      
+
       let aiResponse;
       try {
         aiResponse = JSON.parse(aiResponseJson);

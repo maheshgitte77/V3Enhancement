@@ -29,7 +29,7 @@ const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: "response-group" });
 
 const pendingRequests = new Map(); // Stores Express response objects
-const responseCache = new Map(); // Stores aggregated responses
+const responseCache = new Map(); // Stores aggregated responses by requestId -> category -> questionType
 
 const ensureTopics = async () => {
   const admin = kafka.admin();
@@ -85,46 +85,92 @@ const ensureTopics = async () => {
             return;
           }
 
-          if (
-            responseData.questions &&
-            Array.isArray(responseData.questions.questions)
-          ) {
-            responseData.questions.questions.forEach((question) => {
-              // Add ai: true to all question types
-              if (question[question.type]) {
-                question[question.type].forEach((q) => {
-                  q.isAiGenerated = true;
-                  // Add retakeCount: 2 only for Audio & Video types
-                  if (question.type === "Audio" || question.type === "Video") {
-                    q.retakeCount = 2;
-                    q.prepTime = 30;
-                  }
-                });
+          // Handle error responses
+          if (responseData.error) {
+            console.error(`❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`);
+            const requestInfo = pendingRequests.get(key);
+            if (requestInfo) {
+              // Track error but continue waiting for other responses
+              if (!requestInfo.errors) {
+                requestInfo.errors = [];
               }
-            });
-          } else {
-            console.error(
-              "❌ Invalid questions format:",
-              responseData.questions
-            );
+              requestInfo.errors.push({
+                category: responseData.category,
+                questionType: responseData.questionType,
+                message: responseData.message,
+              });
+            }
             return;
           }
 
-          if (!responseCache.has(key)) {
-            responseCache.set(key, []);
-          }
-          responseCache.get(key).push(responseData.questions);
-
           const requestInfo = pendingRequests.get(key);
-          if (responseCache.get(key).length === requestInfo.expectedResponses) {
+          if (!requestInfo) {
+            console.error(`❌ No pending request found for requestId: ${key}`);
+            return;
+          }
+
+          const categoryName = responseData.category || responseData.questions?.skillName || "unknown";
+          const questionType = responseData.questionType || responseData.questions?.type || "unknown";
+
+          // Initialize cache structure if needed
+          if (!responseCache.has(key)) {
+            responseCache.set(key, {});
+          }
+          const categoryCache = responseCache.get(key);
+
+          if (!categoryCache[categoryName]) {
+            categoryCache[categoryName] = {
+              skillName: categoryName,
+              skillType: responseData.questions?.skillType || "unknown",
+              questions: [],
+            };
+          }
+
+          // Process the question response
+          if (responseData.questions) {
+            const questionObj = responseData.questions;
+
+            // Add ai: true to all question types
+            if (questionObj[questionType]) {
+              questionObj[questionType].forEach((q) => {
+                q.isAiGenerated = true;
+                // Add retakeCount: 2 only for Audio & Video types
+                if (questionType === "Audio" || questionType === "Video") {
+                  q.retakeCount = 2;
+                  q.prepTime = 30;
+                }
+              });
+            }
+
+            // Add this question type to the category
+            categoryCache[categoryName].questions.push({
+              type: questionType,
+              [questionType]: questionObj[questionType],
+            });
+          }
+
+          // Check if we've received all expected responses
+          const receivedCount = Object.values(categoryCache).reduce((sum, cat) => sum + cat.questions.length, 0);
+
+          if (receivedCount === requestInfo.expectedResponses) {
             console.log(`✅ All responses received for Request ID: ${key}`);
+
+            // Convert category cache to array format matching original structure
+            const questionsArray = Object.values(categoryCache).map((cat) => ({
+              skillName: cat.skillName,
+              skillType: cat.skillType,
+              questions: cat.questions,
+            }));
+
             requestInfo.res.json({
               requestId: key,
-              questions: responseCache.get(key),
+              questions: questionsArray,
             });
 
             pendingRequests.delete(key);
             responseCache.delete(key);
+          } else {
+            console.log(`📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`);
           }
         } catch (error) {
           console.error("❌ Error in Kafka consumer:", error);
