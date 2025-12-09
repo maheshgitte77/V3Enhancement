@@ -205,6 +205,12 @@ const initializeV2_5Processor = (dependencies) => {
   // Initialize database handler
   databaseHandler.initializeDatabaseHandler(models, logger);
 
+  // Initialize cheating detector with logger
+  cheatingDetector.initializeCheatingDetector(logger);
+
+  // Initialize typing analyzer with logger
+  typingAnalyzer.setLogger(logger);
+
   // Prepare processor dependencies
   const processorDependencies = {
     logger,

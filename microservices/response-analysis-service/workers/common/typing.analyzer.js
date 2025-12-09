@@ -8,10 +8,36 @@
  */
 
 // Simple logger for typing analyzer (can be overridden)
+// Default logger uses console as fallback, but should be replaced with proper logger
 let logger = {
-  info: (msg, meta) => console.log(`[TypingAnalyzer]`, msg, meta || ""),
-  warn: (msg, meta) => console.warn(`[TypingAnalyzer]`, msg, meta || ""),
-  error: (msg, meta) => console.error(`[TypingAnalyzer]`, msg, meta || ""),
+  info: (msg, meta) => {
+    if (typeof meta === "object" && meta !== null) {
+      console.log(`[TypingAnalyzer]`, msg, JSON.stringify(meta));
+    } else {
+      console.log(`[TypingAnalyzer]`, msg, meta || "");
+    }
+  },
+  warn: (msg, meta) => {
+    if (typeof meta === "object" && meta !== null) {
+      console.warn(`[TypingAnalyzer]`, msg, JSON.stringify(meta));
+    } else {
+      console.warn(`[TypingAnalyzer]`, msg, meta || "");
+    }
+  },
+  error: (msg, meta) => {
+    if (typeof meta === "object" && meta !== null) {
+      console.error(`[TypingAnalyzer]`, msg, JSON.stringify(meta));
+    } else {
+      console.error(`[TypingAnalyzer]`, msg, meta || "");
+    }
+  },
+  debug: (msg, meta) => {
+    if (typeof meta === "object" && meta !== null) {
+      console.log(`[TypingAnalyzer]`, msg, JSON.stringify(meta));
+    } else {
+      console.log(`[TypingAnalyzer]`, msg, meta || "");
+    }
+  },
 };
 
 /**

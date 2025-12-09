@@ -9,15 +9,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 // Add cors policy,all more than one origin
-app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "https://staging.app.hirecorrecto.com",
-    "https://app.hirecorrecto.com",
-    "https://hirecorrecto.com",
-  ],
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://staging.app.hirecorrecto.com",
+      "https://app.hirecorrecto.com",
+      "https://hirecorrecto.com",
+    ],
+    credentials: true,
+  })
+);
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
   broker.trim()
 );
@@ -87,7 +89,9 @@ const ensureTopics = async () => {
 
           // Handle error responses
           if (responseData.error) {
-            console.error(`❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`);
+            console.error(
+              `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`
+            );
             const requestInfo = pendingRequests.get(key);
             if (requestInfo) {
               // Track error but continue waiting for other responses
@@ -109,8 +113,14 @@ const ensureTopics = async () => {
             return;
           }
 
-          const categoryName = responseData.category || responseData.questions?.skillName || "unknown";
-          const questionType = responseData.questionType || responseData.questions?.type || "unknown";
+          const categoryName =
+            responseData.category ||
+            responseData.questions?.skillName ||
+            "unknown";
+          const questionType =
+            responseData.questionType ||
+            responseData.questions?.type ||
+            "unknown";
 
           // Initialize cache structure if needed
           if (!responseCache.has(key)) {
@@ -141,9 +151,12 @@ const ensureTopics = async () => {
             };
 
             // Add to total
-            requestInfo.tokenUsage.total.promptTokens += typeTokenUsage.promptTokens || 0;
-            requestInfo.tokenUsage.total.completionTokens += typeTokenUsage.completionTokens || 0;
-            requestInfo.tokenUsage.total.totalTokens += typeTokenUsage.totalTokens || 0;
+            requestInfo.tokenUsage.total.promptTokens +=
+              typeTokenUsage.promptTokens || 0;
+            requestInfo.tokenUsage.total.completionTokens +=
+              typeTokenUsage.completionTokens || 0;
+            requestInfo.tokenUsage.total.totalTokens +=
+              typeTokenUsage.totalTokens || 0;
           }
 
           if (!categoryCache[categoryName]) {
@@ -178,7 +191,10 @@ const ensureTopics = async () => {
           }
 
           // Check if we've received all expected responses
-          const receivedCount = Object.values(categoryCache).reduce((sum, cat) => sum + cat.questions.length, 0);
+          const receivedCount = Object.values(categoryCache).reduce(
+            (sum, cat) => sum + cat.questions.length,
+            0
+          );
 
           if (receivedCount === requestInfo.expectedResponses) {
             console.log(`✅ All responses received for Request ID: ${key}`);
@@ -186,17 +202,25 @@ const ensureTopics = async () => {
             // Log token usage summary
             if (requestInfo.tokenUsage) {
               console.log(`\n📊 Token Usage Summary for Request ${key}:`);
-              console.log(`Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`);
+              console.log(
+                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`
+              );
               console.log(`By Type:`);
-              Object.entries(requestInfo.tokenUsage.byType).forEach(([type, usage]) => {
-                console.log(`  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`);
-                if (usage.batches && usage.batches.length > 0) {
-                  console.log(`    Batches:`);
-                  usage.batches.forEach((batch) => {
-                    console.log(`      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`);
-                  });
+              Object.entries(requestInfo.tokenUsage.byType).forEach(
+                ([type, usage]) => {
+                  console.log(
+                    `  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`
+                  );
+                  if (usage.batches && usage.batches.length > 0) {
+                    console.log(`    Batches:`);
+                    usage.batches.forEach((batch) => {
+                      console.log(
+                        `      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`
+                      );
+                    });
+                  }
                 }
-              });
+              );
             }
 
             // Convert category cache to array format matching original structure
@@ -215,7 +239,9 @@ const ensureTopics = async () => {
             pendingRequests.delete(key);
             responseCache.delete(key);
           } else {
-            console.log(`📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`);
+            console.log(
+              `📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`
+            );
           }
         } catch (error) {
           console.error("❌ Error in Kafka consumer:", error);

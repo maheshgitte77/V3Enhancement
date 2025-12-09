@@ -5,8 +5,16 @@
 
 const { ObjectId } = require("mongodb");
 
-// Import logger from parent
-const logger = console; // Will be replaced with actual logger when integrated
+// Logger will be injected during initialization
+let logger = console; // Default fallback
+
+/**
+ * Initialize cheating detector with logger
+ * @param {Object} loggerInstance - Logger instance
+ */
+const initializeCheatingDetector = (loggerInstance) => {
+  logger = loggerInstance;
+};
 
 /**
  * Analyze eye movement events for reading patterns with confidence weighting
@@ -360,14 +368,11 @@ const checkAudioBehavioralReading = (behavioralAnalysis) => {
   // Score interpretation with lowered threshold for better detection
   const hasReadingEvidence = readingScore >= 4; // Lowered from 3
 
-  console.log(
-    "[V2.5 Cheating Detector] Enhanced audio behavioral reading analysis:",
-    {
-      readingScore,
-      indicators,
-      hasReadingEvidence,
-    }
-  );
+  logger.debug("Enhanced audio behavioral reading analysis", {
+    readingScore,
+    indicators,
+    hasReadingEvidence,
+  });
 
   return hasReadingEvidence;
 };
@@ -427,7 +432,7 @@ const validateGenuineCheatingIndicators = (behavioralIndicators = []) => {
   behavioralIndicators.forEach((indicator) => {
     // Ensure indicator is a string before processing
     if (typeof indicator !== "string") {
-      console.warn("Non-string indicator found in behavioralIndicators", {
+      logger.warn("Non-string indicator found in behavioralIndicators", {
         indicator,
         type: typeof indicator,
         skipping: true,
@@ -835,7 +840,7 @@ const detectCheating = (
   type,
   typingAnalysis = null
 ) => {
-  console.log("Stage 3: Starting cheating detection", {
+  logger.info("Stage 3: Starting cheating detection", {
     type,
     hasStage1: !!stage1Results,
     hasStage2: !!stage2Results,
@@ -869,7 +874,7 @@ const detectCheating = (
     responseData.typingAnalysis?.pasteAnalysis?.pastePercentage || 0;
   const hasCopyPasteBehavior = pasteCount >= 1 && pastePercentage >= 20;
 
-  console.log("Stage 3: Frontend algorithmic behavior checks", {
+  logger.debug("Stage 3: Frontend algorithmic behavior checks", {
     tabSwitches,
     fullScreenExits,
     hasQuestionCopying,
@@ -902,7 +907,7 @@ const detectCheating = (
         "Candidate pasted a significant amount of content from external sources"
       );
 
-    console.log("Stage 3: Frontend algorithmic cheating detected", {
+    logger.info("Stage 3: Frontend algorithmic cheating detected", {
       reasons,
       tabSwitches,
       fullScreenExits,
@@ -1030,7 +1035,7 @@ const detectCheating = (
     );
   }
 
-  console.log("[V2.5 Cheating Detector] Comprehensive behavioral analysis:", {
+  logger.debug("Comprehensive behavioral analysis", {
     hasBehavioralReadingEvidence,
     compositeConfidence: Math.round(compositeConfidence),
     confidenceFactors,
@@ -1534,7 +1539,7 @@ const checkFlagDetection = (
 
     case "TabSwitching":
       const tabSwitches = responseData.tabSwitchCount || 0;
-      console.log("[V2.5 Cheating Detector] TabSwitching Check:", {
+      logger.debug("TabSwitching Check", {
         tabSwitchCount: responseData.tabSwitchCount,
         tabSwitches,
         type: typeof responseData.tabSwitchCount,
@@ -1592,7 +1597,7 @@ const checkFlagDetection = (
       hasQuestionCopying =
         subjectiveQuestionCopying || copyPasteQuestionCopying;
 
-      console.log("[V2.5 Cheating Detector] QuestionCopying Check:", {
+      logger.debug("QuestionCopying Check", {
         subjectiveQuestionCopying,
         copyPasteQuestionCopying,
         hasQuestionCopying,
@@ -1604,7 +1609,7 @@ const checkFlagDetection = (
 
     case "FullScreenExit":
       const fullScreenExits = responseData.fullScreenExitCount || 0;
-      console.log("[V2.5 Cheating Detector] FullScreenExit Check:", {
+      logger.debug("FullScreenExit Check", {
         fullScreenExitCount: responseData.fullScreenExitCount,
         fullScreenExits,
         type: typeof responseData.fullScreenExitCount,
@@ -1935,7 +1940,7 @@ const validateCheatingFlagSync = (cheatingResults, flagResults) => {
     const detectedFlags = flagResults.filter((f) => f.detected);
 
     if (detectedFlags.length === 0) {
-      console.warn("[SYNC WARNING] isCheatingDetected=true but no flags set", {
+      logger.warn("SYNC WARNING: isCheatingDetected=true but no flags set", {
         cheatingConfidence: cheatingResults.cheatingConfidence,
         cheatingIndicators: cheatingResults.cheatingIndicators,
         totalFlags: flagResults.length,
@@ -1983,6 +1988,7 @@ const validateCheatingFlagSync = (cheatingResults, flagResults) => {
 };
 
 module.exports = {
+  initializeCheatingDetector,
   detectCheating,
   processEnhancedFlags,
   refineCheatingDetection,

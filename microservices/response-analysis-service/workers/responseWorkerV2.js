@@ -12573,6 +12573,9 @@ const processResponseTypeSpecific = async (responseData) => {
 // Import V2.5 processor module
 const v2_5Processor = require("./response.processor.v2.5");
 
+// Import typing analyzer module (entire module needed for setLogger)
+const typingAnalyzer = require("./common/typing.analyzer");
+
 // Initialize V2.5 processor with dependencies (V2.5 uses its own internal config)
 v2_5Processor.initializeV2_5Processor({
   logger,
@@ -12581,7 +12584,7 @@ v2_5Processor.initializeV2_5Processor({
     CandidateAnswerAiResponse,
     CandidateScreeningResult,
   },
-  typingAnalyzer: analyzeSubjectiveTypingPatterns,
+  typingAnalyzer: typingAnalyzer, // Pass entire module object
   // Note: V2.5 uses its own V2_5_CONFIG internally - no dependency on V2_CONFIG
 });
 

@@ -103,7 +103,7 @@ const processSubjectiveResponse = async (responseData) => {
         fullScreenExitCount: responseData.fullScreenExitCount || 0,
       };
 
-      typingAnalysisResult = typingAnalyzer(
+      typingAnalysisResult = typingAnalyzer.analyzeSubjectiveTypingPatterns(
         responseData.typingAnalysis,
         typingContext
       );

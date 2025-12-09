@@ -27,10 +27,11 @@ const summaryProcessor = require("../workers/screening-summary/summary.processor
 
 const { GoogleGenAI } = require("@google/genai");
 
-// Import typing analyzer from V2 worker (reusable function)
-const {
-  analyzeSubjectiveTypingPatterns,
-} = require("../workers/common/typing.analyzer");
+// Import typing analyzer module (entire module needed for setLogger)
+const typingAnalyzer = require("../workers/common/typing.analyzer");
+
+// Import V2.5 logger with rotation
+const v2_5Logger = require("../utils/v2.5.logger");
 
 dotenv.config();
 
@@ -46,7 +47,10 @@ const producer = kafka.producer({
 
 // Connect Kafka producer asynchronously
 producer.connect().catch((error) => {
-  console.error("❌ [V2.5] Kafka producer connection failed:", error.message);
+  v2_5Logger.error("Kafka producer connection failed", {
+    error: error.message,
+    stack: error.stack,
+  });
 });
 
 // Initialize AI client
@@ -54,20 +58,14 @@ const client = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-// Logger instance
-const logger = {
-  info: (msg, meta) => console.log(`ℹ️ [V2.5]`, msg, meta || ""),
-  error: (msg, meta) => console.error(`❌ [V2.5]`, msg, meta || ""),
-  warn: (msg, meta) => console.warn(`⚠️ [V2.5]`, msg, meta || ""),
-};
+// Logger instance (using Winston with rotation)
+const logger = v2_5Logger;
 
 // ============================================
 // V2.5 INDEPENDENT INITIALIZATION
 // ============================================
 
-console.log(
-  "🚀 [V2.5] Initializing V2.5 Multi-Stage Processor (Independent)..."
-);
+logger.info("Initializing V2.5 Multi-Stage Processor (Independent)...");
 
 // Initialize V2.5 processor with all dependencies
 try {
@@ -78,14 +76,14 @@ try {
       CandidateAnswerAiResponse,
       CandidateScreeningResult,
     },
-    typingAnalyzer: analyzeSubjectiveTypingPatterns,
+    typingAnalyzer: typingAnalyzer, // Pass entire module object
   });
-  console.log("✅ [V2.5] V2.5 Processor initialized successfully");
+  logger.info("V2.5 Processor initialized successfully");
 } catch (error) {
-  console.error(
-    "❌ [V2.5] Failed to initialize V2.5 processor:",
-    error.message
-  );
+  logger.error("Failed to initialize V2.5 processor", {
+    error: error.message,
+    stack: error.stack,
+  });
 }
 
 // Initialize summary processor
@@ -100,7 +98,7 @@ summaryProcessor.initializeSummaryProcessor({
   producer,
 });
 
-console.log("✅ [V2.5] Summary Processor initialized successfully");
+logger.info("Summary Processor initialized successfully");
 
 // ============================================
 // MULTER CONFIGURATION
@@ -132,7 +130,7 @@ const downloadFileFromUri = async (fileUri, providedMimeType) => {
       fs.mkdirSync("Uploads/", { recursive: true });
     }
 
-    console.log("⬇️ [V2.5] Downloading file from URI...");
+    logger.debug("Downloading file from URI", { fileUri });
 
     const response = await axios({
       method: "GET",
@@ -172,7 +170,11 @@ const downloadFileFromUri = async (fileUri, providedMimeType) => {
       size: fileStats.size,
     };
   } catch (error) {
-    console.error("❌ [V2.5] File download error:", error.message);
+    logger.error("File download error", {
+      error: error.message,
+      stack: error.stack,
+      fileUri,
+    });
     throw error;
   }
 };
@@ -183,14 +185,18 @@ const downloadFileFromUri = async (fileUri, providedMimeType) => {
  * FIXED: Proper file upload handling with middleware
  */
 const analyzeMediaResponseV2_5 = async (req, res) => {
-  console.log("📩 [V2.5] Received media response analysis request");
+  logger.info("Received media response analysis request", {
+    candidateScreeningId: req.body?.candidateScreeningId,
+    questionId: req.body?.questionId,
+    type: req.body?.type,
+  });
 
   let fileToDelete = null;
 
   try {
     // Check if V2.5 processor is initialized
     if (!v2_5Processor.isInitialized()) {
-      console.error("❌ [V2.5] Processor not initialized");
+      logger.error("Processor not initialized");
       return res.status(500).json({
         success: false,
         error: "V2.5 processor not initialized",
@@ -202,17 +208,17 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
 
     if (req.body.file_uri) {
       // Option 1: URI-based file download
-      console.log("🔗 [V2.5] Processing file from URI:", req.body.file_uri);
+      logger.debug("Processing file from URI", { fileUri: req.body.file_uri });
       file = await downloadFileFromUri(req.body.file_uri, req.body.mimetype);
       fileToDelete = file.path;
     } else if (req.file) {
       // Option 2: File already uploaded by middleware (route uses upload.single('file'))
-      console.log("📁 [V2.5] Processing uploaded file:", req.file.filename);
+      logger.debug("Processing uploaded file", { filename: req.file.filename });
       file = req.file;
       fileToDelete = file.path;
     } else {
       // No file provided
-      console.error("❌ [V2.5] No file provided in request");
+      logger.error("No file provided in request");
       return res.status(400).json({
         success: false,
         error:
@@ -220,7 +226,7 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
       });
     }
 
-    console.log("✅ [V2.5] File acquired successfully:", {
+    logger.debug("File acquired successfully", {
       filename: file.filename || file.originalname,
       size: file.size,
       mimetype: file.mimetype,
@@ -234,16 +240,16 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
           typeof req.body.copyPasteAnalysis === "string"
             ? JSON.parse(req.body.copyPasteAnalysis)
             : req.body.copyPasteAnalysis;
-        console.log("✅ [V2.5] Successfully parsed copyPasteAnalysis:", {
+        logger.debug("Successfully parsed copyPasteAnalysis", {
           hasGlobalCopyEvents:
             !!parsedCopyPasteAnalysis.globalCopyEvents?.length,
           hasQuestionCopying: parsedCopyPasteAnalysis.hasQuestionCopying,
         });
       } catch (parseError) {
-        console.error(
-          "❌ [V2.5] Failed to parse copyPasteAnalysis:",
-          parseError.message
-        );
+        logger.error("Failed to parse copyPasteAnalysis", {
+          error: parseError.message,
+          stack: parseError.stack,
+        });
         parsedCopyPasteAnalysis = null;
       }
     }
@@ -271,8 +277,11 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
       copyPasteAnalysis: parsedCopyPasteAnalysis,
     };
 
-    console.log("🚀 [V2.5] Starting multi-stage processing...");
-    console.log("📊 [V2.5] Media Proctoring Data:", {
+    logger.info("Starting multi-stage processing", {
+      type: responseData.type,
+      questionId: responseData.questionId,
+    });
+    logger.debug("Media Proctoring Data", {
       type: responseData.type,
       tabSwitchCount: responseData.tabSwitchCount,
       fullScreenExitCount: responseData.fullScreenExitCount,
@@ -287,10 +296,13 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
     // Clean up file
     if (fileToDelete && fs.existsSync(fileToDelete)) {
       fs.unlinkSync(fileToDelete);
-      console.log("🗑️ [V2.5] Cleaned up file:", fileToDelete);
+      logger.debug("Cleaned up file", { filePath: fileToDelete });
     }
 
-    console.log("✅ [V2.5] Processing completed successfully");
+    logger.info("Processing completed successfully", {
+      questionId: responseData.questionId,
+      duration: result.duration,
+    });
 
     return res.status(200).json({
       success: true,
@@ -304,18 +316,24 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ [V2.5] Media response processing error:", error);
+    logger.error("Media response processing error", {
+      error: error.message,
+      stack: error.stack,
+      candidateScreeningId: req.body?.candidateScreeningId,
+      questionId: req.body?.questionId,
+    });
 
     // Clean up file on error
     if (fileToDelete && fs.existsSync(fileToDelete)) {
       try {
         fs.unlinkSync(fileToDelete);
-        console.log("🗑️ [V2.5] Cleaned up file on error:", fileToDelete);
+        logger.debug("Cleaned up file on error", { filePath: fileToDelete });
       } catch (cleanupError) {
-        console.error(
-          "⚠️ [V2.5] Failed to cleanup file:",
-          cleanupError.message
-        );
+        logger.error("Failed to cleanup file", {
+          error: cleanupError.message,
+          stack: cleanupError.stack,
+          filePath: fileToDelete,
+        });
       }
     }
 
@@ -364,12 +382,15 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
  * }
  */
 const analyzeSubjectiveV2_5 = async (req, res) => {
-  console.log("📩 [V2.5] Received subjective response analysis request");
+  logger.info("Received subjective response analysis request", {
+    candidateScreeningId: req.body?.candidateScreeningId,
+    questionId: req.body?.questionId,
+  });
 
   try {
     // Check if V2.5 processor is initialized
     if (!v2_5Processor.isInitialized()) {
-      console.error("❌ [V2.5] Processor not initialized");
+      logger.error("Processor not initialized");
       return res.status(500).json({
         success: false,
         error: "V2.5 processor not initialized",
@@ -377,7 +398,7 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
     }
 
     // Log typing analysis data for debugging
-    console.log("📊 [V2.5] Typing Analysis Debug Info:", {
+    logger.debug("Typing Analysis Debug Info", {
       hasTypingAnalysis: !!req.body.typingAnalysis,
       typingAnalysisType: typeof req.body.typingAnalysis,
       typingAnalysisKeys: req.body.typingAnalysis
@@ -402,28 +423,25 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
       const hasLegacyFormat = typingData.keystrokes || typingData.totalDuration;
 
       if (!hasEnhancedFormat && !hasLegacyFormat) {
-        console.warn(
-          "⚠️ [V2.5] Typing analysis provided but missing required fields",
-          {
-            providedKeys: Object.keys(typingData),
-            expectedEnhancedFields: [
-              "pasteAnalysis",
-              "globalEventAnalysis",
-              "copyPasteCorrelations",
-            ],
-            expectedLegacyFields: ["keystrokes", "totalDuration"],
-          }
-        );
+        logger.warn("Typing analysis provided but missing required fields", {
+          providedKeys: Object.keys(typingData),
+          expectedEnhancedFields: [
+            "pasteAnalysis",
+            "globalEventAnalysis",
+            "copyPasteCorrelations",
+          ],
+          expectedLegacyFields: ["keystrokes", "totalDuration"],
+        });
       } else {
-        console.log("✅ [V2.5] Valid typing analysis format detected:", {
+        logger.debug("Valid typing analysis format detected", {
           format: hasEnhancedFormat ? "enhanced" : "legacy",
           hasEnhancedFormat,
           hasLegacyFormat,
         });
       }
     } else {
-      console.log(
-        "ℹ️ [V2.5] No typing analysis provided - will proceed without typing data"
+      logger.debug(
+        "No typing analysis provided - will proceed without typing data"
       );
     }
 
@@ -435,17 +453,17 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
           typeof req.body.typingAnalysis === "string"
             ? JSON.parse(req.body.typingAnalysis)
             : req.body.typingAnalysis;
-        console.log("✅ [V2.5] Successfully parsed typing analysis:", {
+        logger.debug("Successfully parsed typing analysis", {
           hasKeystrokeCount: !!parsedTypingAnalysis.keystrokeCount,
           hasPasteAnalysis: !!parsedTypingAnalysis.pasteAnalysis,
           hasGlobalEventAnalysis: !!parsedTypingAnalysis.globalEventAnalysis,
           hasTotalDuration: !!parsedTypingAnalysis.totalDuration,
         });
       } catch (parseError) {
-        console.error(
-          "❌ [V2.5] Failed to parse typing analysis:",
-          parseError.message
-        );
+        logger.error("Failed to parse typing analysis", {
+          error: parseError.message,
+          stack: parseError.stack,
+        });
         parsedTypingAnalysis = null;
       }
     }
@@ -474,8 +492,10 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
         : 0,
     };
 
-    console.log("🚀 [V2.5] Starting multi-stage processing...");
-    console.log("📊 [V2.5] Subjective Proctoring Data:", {
+    logger.info("Starting multi-stage processing", {
+      questionId: responseData.questionId,
+    });
+    logger.debug("Subjective Proctoring Data", {
       tabSwitchCount: responseData.tabSwitchCount,
       fullScreenExitCount: responseData.fullScreenExitCount,
       timeSpent: responseData.timeSpent,
@@ -486,7 +506,10 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
     // Process using V2.5 multi-stage processor
     const result = await v2_5Processor.processTypeWiseResponse(responseData);
 
-    console.log("✅ [V2.5] Processing completed successfully");
+    logger.info("Processing completed successfully", {
+      questionId: responseData.questionId,
+      duration: result.duration,
+    });
 
     return res.status(200).json({
       success: true,
@@ -500,7 +523,12 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ [V2.5] Subjective response processing error:", error);
+    logger.error("Subjective response processing error", {
+      error: error.message,
+      stack: error.stack,
+      candidateScreeningId: req.body?.candidateScreeningId,
+      questionId: req.body?.questionId,
+    });
 
     return res.status(500).json({
       success: false,
@@ -516,7 +544,10 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
  * Handles HTTP request/response only
  */
 const analyzeScreeningV2_5 = async (req, res) => {
-  console.log("📩 [V2.5] Received screening analysis request");
+  logger.info("Received screening analysis request", {
+    candidateScreeningId: req.query?.candidateScreeningId,
+    screeningAssessmentId: req.query?.screeningAssessmentId,
+  });
 
   const {
     candidateScreeningId,
