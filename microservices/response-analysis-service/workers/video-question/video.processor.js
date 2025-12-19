@@ -24,12 +24,23 @@ const initializeVideoProcessor = (dependencies) => {
   cheatingDetector = dependencies.cheatingDetector;
   resultMerger = dependencies.resultMerger;
   databaseHandler = dependencies.databaseHandler;
+
+  // Allow overriding polling config
+  if (dependencies.pollConfig) {
+    POLL_CONFIG = { ...POLL_CONFIG, ...dependencies.pollConfig };
+  }
 };
 
 /**
  * File upload and polling utilities
  */
-const MAX_POLL_ATTEMPTS = 10;
+// Default polling configuration (can be overridden via initializeVideoProcessor)
+let POLL_CONFIG = {
+  maxAttempts: 10,
+  baseDelayMs: 1000,
+  maxDelayMs: 16000,
+  consecutiveErrorThreshold: 3,
+};
 
 const uploadFile = async (filePath, fileName, mimeType) => {
   try {
@@ -63,16 +74,38 @@ const uploadFile = async (filePath, fileName, mimeType) => {
   }
 };
 
+/**
+ * Delete uploaded file from Google AI storage
+ * Called after processing to clean up storage and avoid costs/quota issues
+ */
+const deleteUploadedFile = async (fileName) => {
+  try {
+    if (!fileName) return;
+
+    logger.info("V2.5: Deleting uploaded file from Google AI", { fileName });
+    await client.files.delete({ name: fileName });
+    logger.info("V2.5: File deleted successfully", { fileName });
+  } catch (error) {
+    // Log but don't throw - cleanup failures shouldn't break processing
+    logger.warn("V2.5: Failed to delete uploaded file", {
+      fileName,
+      error: error.message,
+    });
+  }
+};
+
 const pollFileStatus = async (fileName) => {
   let lastKnownState = null;
   let consecutiveErrors = 0;
+  let lastKnownUri = null; // Track URI for optimistic fallback
+  let lastKnownMimeType = null; // Track mimeType for optimistic fallback
 
-  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < POLL_CONFIG.maxAttempts; attempt++) {
     try {
       logger.info(
-        `V2.5: Polling file status - attempt ${
-          attempt + 1
-        }/${MAX_POLL_ATTEMPTS}`,
+        `V2.5: Polling file status - attempt ${attempt + 1}/${
+          POLL_CONFIG.maxAttempts
+        }`,
         {
           fileName,
           attempt: attempt + 1,
@@ -83,6 +116,9 @@ const pollFileStatus = async (fileName) => {
       const file = await client.files.get({ name: fileName });
       consecutiveErrors = 0;
       lastKnownState = file.state;
+      // Capture URI and mimeType when available for fallback
+      if (file.uri) lastKnownUri = file.uri;
+      if (file.mimeType) lastKnownMimeType = file.mimeType;
 
       logger.info("V2.5: File status check result", {
         fileName,
@@ -95,7 +131,10 @@ const pollFileStatus = async (fileName) => {
       if (file.state !== "PROCESSING")
         throw new Error(`Unexpected file state: ${file.state}`);
 
-      const delay = Math.min(1000 * Math.pow(2, attempt), 16000);
+      const delay = Math.min(
+        POLL_CONFIG.baseDelayMs * Math.pow(2, attempt),
+        POLL_CONFIG.maxDelayMs
+      );
       logger.info(`V2.5: Waiting ${delay}ms before next poll attempt`, {
         fileName,
         delay,
@@ -110,26 +149,31 @@ const pollFileStatus = async (fileName) => {
       });
 
       // If we've had too many consecutive errors, use optimistic processing
-      if (consecutiveErrors >= 3) {
+      if (consecutiveErrors >= POLL_CONFIG.consecutiveErrorThreshold) {
         logger.warn("V2.5: Using optimistic processing due to polling errors", {
           fileName,
           lastKnownState,
+          lastKnownUri,
         });
         return {
           name: fileName,
           state: lastKnownState || "UNKNOWN",
           optimisticProcessing: true,
           originalLastState: lastKnownState,
+          uri: lastKnownUri, // Include URI for fallback
+          mimeType: lastKnownMimeType, // Include mimeType for fallback
         };
       }
 
-      if (attempt === MAX_POLL_ATTEMPTS - 1) {
+      if (attempt === POLL_CONFIG.maxAttempts - 1) {
         throw error;
       }
     }
   }
 
-  throw new Error(`File polling timed out after ${MAX_POLL_ATTEMPTS} attempts`);
+  throw new Error(
+    `File polling timed out after ${POLL_CONFIG.maxAttempts} attempts`
+  );
 };
 
 /**
@@ -140,6 +184,7 @@ const pollFileStatus = async (fileName) => {
  */
 const processVideoResponse = async (responseData) => {
   const startTime = Date.now();
+  let uploadedFileName = null; // Track for cleanup
 
   logger.info("V2.5: Starting video processing with multi-stage pipeline", {
     questionId: responseData.questionId,
@@ -156,6 +201,19 @@ const processVideoResponse = async (responseData) => {
     const file = responseData.file;
     const fileName = file.filename || file.originalname;
     const fileMimetype = file.mimetype;
+
+    // Validate required file properties
+    if (!fileName) {
+      throw new Error(
+        "File name is missing: both filename and originalname are undefined"
+      );
+    }
+    if (!fileMimetype) {
+      throw new Error("File mimetype is missing in responseData.file");
+    }
+    if (!file.path) {
+      throw new Error("File path is missing in responseData.file");
+    }
 
     // Resolve file path - handle both absolute and relative paths
     let mediaPath;
@@ -185,16 +243,18 @@ const processVideoResponse = async (responseData) => {
 
     // Upload file to Google AI
     const uploadedFile = await uploadFile(mediaPath, fileName, fileMimetype);
+    uploadedFileName = uploadedFile.name; // Store for cleanup
+    const uploadedUri = uploadedFile.uri; // Capture immediately for fallback
 
     // Poll for file to be ready
     const polledFile = await pollFileStatus(uploadedFile.name);
 
-    // Prepare file input for AI
+    // Prepare file input for AI (use uploadedUri as fallback if polling returned optimistic result)
     const fileInput = [
       {
         fileData: {
           mimeType: polledFile.mimeType || fileMimetype,
-          fileUri: polledFile.uri,
+          fileUri: polledFile.uri || uploadedUri, // Fallback to uploaded URI
         },
       },
     ];
@@ -317,12 +377,8 @@ const processVideoResponse = async (responseData) => {
       finalCheatingResults
     );
 
-    // Cleanup contradictory content
-    const cleanedAnalysis =
-      resultMerger.cleanupContradictoryContent(mergedAnalysis);
-
     // Validate results
-    const validation = resultMerger.validateMergedResults(cleanedAnalysis);
+    const validation = resultMerger.validateMergedResults(mergedAnalysis);
     if (!validation.isValid) {
       logger.warn("V2.5: Validation issues found in merged results", {
         issues: validation.issues,
@@ -330,19 +386,28 @@ const processVideoResponse = async (responseData) => {
     }
 
     // Calculate total processing cost
+    const hasCostMetadata = !!mergedAnalysis.processingMetadata?.totalCost;
+    if (!hasCostMetadata) {
+      logger.warn("V2.5: Processing cost metadata missing, using defaults", {
+        questionId: responseData.questionId,
+        hasProcessingMetadata: !!mergedAnalysis.processingMetadata,
+      });
+    }
+
     const processingCost = {
-      totalCost: cleanedAnalysis.processingMetadata?.totalCost || 0,
-      breakdown: cleanedAnalysis.processingMetadata?.breakdown || {},
+      totalCost: mergedAnalysis.processingMetadata?.totalCost || 0,
+      breakdown: mergedAnalysis.processingMetadata?.breakdown || {},
       currency: "USD",
+      isEstimated: !hasCostMetadata,
     };
 
     // ====== SAVE TO DATABASE ======
     logger.info("V2.5: Saving results to database");
     const { questionAiResponse, doc, question } =
       await databaseHandler.saveToDatabase(
-        cleanedAnalysis,
+        mergedAnalysis,
         responseData,
-        flagResults,
+        validatedFlagResults, // Use validated/auto-corrected flags
         flagStats,
         processingCost
       );
@@ -355,11 +420,11 @@ const processVideoResponse = async (responseData) => {
       stage1Duration: stage1Results.metadata?.duration || 0,
       stage2Duration: stage2Results.metadata?.duration || 0,
       totalCost: processingCost.totalCost,
-      isCheatingDetected: cleanedAnalysis.isCheatingDetected,
-      correctPercentage: cleanedAnalysis.correctPercentage,
+      isCheatingDetected: mergedAnalysis.isCheatingDetected,
+      correctPercentage: mergedAnalysis.correctPercentage,
     });
 
-    return {
+    const result = {
       success: true,
       questionAiResponse,
       doc,
@@ -375,15 +440,96 @@ const processVideoResponse = async (responseData) => {
         },
       },
     };
+
+    // Cleanup uploaded file from Google AI storage
+    await deleteUploadedFile(uploadedFileName);
+
+    return result;
   } catch (error) {
+    const totalDuration = Date.now() - startTime;
+
+    // Categorize error type for monitoring/alerting
+    const errorCategory = categorizeError(error);
+    const failedStage = determineFailedStage(error);
+
+    // Cleanup on error
+    if (uploadedFileName) {
+      await deleteUploadedFile(uploadedFileName);
+    }
+
     logger.error("V2.5: Video processing failed", {
       questionId: responseData.questionId,
+      candidateScreeningId: responseData.candidateScreeningId,
       error: error.message,
       stack: error.stack,
+      errorCategory,
+      failedStage,
+      totalDuration,
     });
 
     throw error;
   }
+};
+
+/**
+ * Categorize error for monitoring/alerting
+ */
+const categorizeError = (error) => {
+  const message = error.message?.toLowerCase() || "";
+
+  if (message.includes("timeout") || message.includes("timed out")) {
+    return "TIMEOUT";
+  }
+  if (message.includes("not found") || message.includes("missing")) {
+    return "NOT_FOUND";
+  }
+  if (message.includes("upload") || message.includes("file")) {
+    return "FILE_ERROR";
+  }
+  if (
+    message.includes("stage 1") ||
+    message.includes("stage 2") ||
+    message.includes("behavioral") ||
+    message.includes("scoring")
+  ) {
+    return "AI_PROCESSING";
+  }
+  if (
+    message.includes("database") ||
+    message.includes("mongo") ||
+    message.includes("save")
+  ) {
+    return "DATABASE";
+  }
+  return "UNKNOWN";
+};
+
+/**
+ * Determine which stage failed based on error context
+ */
+const determineFailedStage = (error) => {
+  const message = error.message?.toLowerCase() || "";
+
+  if (message.includes("upload") || message.includes("polling")) {
+    return "PRE_STAGE";
+  }
+  if (message.includes("stage 1") || message.includes("behavioral")) {
+    return "STAGE_1";
+  }
+  if (message.includes("stage 2") || message.includes("scoring")) {
+    return "STAGE_2";
+  }
+  if (message.includes("cheating") || message.includes("flag")) {
+    return "STAGE_3";
+  }
+  if (
+    message.includes("merge") ||
+    message.includes("database") ||
+    message.includes("save")
+  ) {
+    return "POST_PROCESSING";
+  }
+  return "UNKNOWN";
 };
 
 module.exports = {
@@ -391,4 +537,5 @@ module.exports = {
   processVideoResponse,
   uploadFile,
   pollFileStatus,
+  deleteUploadedFile,
 };

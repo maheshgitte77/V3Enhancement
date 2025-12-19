@@ -71,7 +71,8 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
       },
     },
     communication: {
-      type: String,
+      // V3: Can be String (legacy) OR Object {summary, confidenceLevel}
+      type: mongoose.Schema.Types.Mixed,
       required: true,
     },
     isCheatingDetected: {
@@ -167,15 +168,17 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     answerTime: {
       totalDurationSeconds: { type: Number },
       effectiveAnswerTimeSeconds: { type: Number },
-      effectiveAnswerTimePercentage: { type: Number },
-    },
-    answerEffectiveness: {
-      rating: { type: String },
+      effectiveAnswerTimePercentage: { type: mongoose.Schema.Types.Mixed }, // Can be Number or String (percentage format)
+      // V3: Moved relevanceBreakdown here from answerEffectiveness
       relevanceBreakdown: {
         relevantTimeSeconds: { type: Number },
         irrelevantTimeSeconds: { type: Number },
         relevanceExplanation: { type: String },
       },
+    },
+    answerEffectiveness: {
+      rating: { type: String },
+      // Legacy: relevanceBreakdown was here in V2, now moved to answerTime in V3
     },
 
     // ===== BACKGROUND ENVIRONMENT =====
@@ -240,6 +243,65 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
           ? "See flag analysis for details"
           : undefined;
       },
+    },
+
+    // V3: NEW STRUCTURED VISUAL INTEGRITY (Video-specific)
+    visualIntegrity: {
+      isLipSyncValid: { type: Boolean },
+      isSinglePerson: { type: Boolean },
+      deviceDetected: { type: Boolean },
+      externalScreenDetected: { type: Boolean },
+    },
+
+    // V3: NEW STRUCTURED INTEGRITY ANALYSIS (Video/Audio)
+    integrityAnalysis: {
+      verdict: {
+        type: String,
+        enum: ["CLEAR", "SUSPECT", "INCONCLUSIVE"],
+      },
+      confidenceScore: {
+        type: Number,
+        min: 0,
+        max: 1,
+      },
+      flags: [
+        {
+          type: {
+            type: String,
+            enum: [
+              "READING_FROM_EXTERNAL",
+              "SAME_SCREEN_READING", // V3.1
+              "SUBTLE_READING", // V3.1
+              "SCRIPTED_DELIVERY", // V3.1
+              "READING_PATTERN_DETECTED", // V3.2 - Generic reading pattern flag
+              "UNNATURAL_DELIVERY",
+              "MONOTONE_SPEECH",
+              "OFF_SCREEN_GAZE",
+              "DEVICE_DETECTED",
+              "MULTIPLE_PERSONS",
+              "LIP_SYNC_MISMATCH",
+              "EXTERNAL_COACHING",
+              "TIMING_ANOMALY",
+              "MULTIPLE_VOICES",
+              "BACKGROUND_COACHING",
+              "READING_DELIVERY",
+              "UNNATURAL_PAUSES",
+              "VOICE_INCONSISTENCY",
+              "EXTERNAL_PROMPTS",
+              "EXCESSIVE_PASTE",
+              "TAB_SWITCHING",
+              "EXTERNAL_INTERACTION",
+              "QUESTION_COPYING",
+            ],
+          },
+          severity: {
+            type: String,
+            enum: ["HIGH", "MEDIUM", "LOW"],
+          },
+          evidence: { type: String },
+          keyTimestamps: [{ type: String }],
+        },
+      ],
     },
 
     // AUDIO-SPECIFIC FIELDS (optional - flag analysis system is primary source)

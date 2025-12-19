@@ -186,425 +186,357 @@ Analyze the written text to identify all languages used by the candidate:
 };
 
 /**
- * Generate Video Stage 1 Behavioral Analysis Prompt
+ * Generate Video Stage 1 Behavioral Analysis Prompt (Optimized V3.1)
+ *
+ * Key optimizations:
+ * - Removed verbose behavioral timestamp arrays (5 arrays → consolidated keyTimestamps per flag)
+ * - Replaced vague string ENUMs with structured integrityAnalysis.flags
+ * - Added explicit verdict field for direct Phase 3 consumption
+ * - Preserved all end-result fields (transcription, communication, languageDetection, backgroundNoise, answerTime)
+ * - V3.1: Enhanced reading detection with same-screen reading, lower thresholds, frontend context
  */
 const generateVideoBehavioralPrompt = (responseData) => {
+  // Extract frontend proctoring data for cross-referencing
+  const tabSwitches = responseData.tabSwitchCount || 0;
+  const fullScreenExits = responseData.fullScreenExitCount || 0;
+  const questionCopyCount =
+    responseData.copyPasteAnalysis?.questionCopyCount || 0;
+  const hasQuestionCopying =
+    responseData.copyPasteAnalysis?.hasQuestionCopying ||
+    responseData.copyPasteAnalysis?.hasFullQuestionCopying ||
+    questionCopyCount > 0;
+
+  // Generate frontend context alert if suspicious activity detected
+  const hasFrontendAlerts =
+    tabSwitches > 0 || fullScreenExits > 0 || hasQuestionCopying;
+  const frontendContext = hasFrontendAlerts
+    ? `
+**⚠️ FRONTEND PROCTORING ALERTS - APPLY STRICT SCRUTINY ⚠️**
+The following suspicious activities were detected by browser monitoring:
+${
+  tabSwitches > 0
+    ? `- Tab switches detected: ${tabSwitches} (candidate left the interview tab)`
+    : ""
+}
+${
+  fullScreenExits > 0
+    ? `- Full screen exits: ${fullScreenExits} (candidate exited full screen mode)`
+    : ""
+}
+${
+  hasQuestionCopying
+    ? `- Question copying detected: Candidate copied the question text (likely searching for answers)`
+    : ""
+}
+
+**CRITICAL**: Since frontend monitoring detected suspicious activity, you MUST apply STRICT scrutiny to:
+1. Eye movements - Look for reading patterns that explain the tab switching
+2. Speech delivery - Check if answers sound rehearsed or read after returning to tab
+3. Timing patterns - Look for delays followed by suddenly fluent answers
+4. Gaze direction - Check if eyes are focused on a specific screen area (reading from same screen)
+
+If frontend alerts exist and you observe ANY supporting visual evidence (even subtle), flag it with MEDIUM or HIGH severity.
+`
+    : "";
+
   return `
 ${generateBaseInstructions()}
 
-You are analyzing a video interview response. Your role is to observe and document behavioral patterns with precise timestamps and confidence scores.
-
+You are analyzing a video interview response for behavioral integrity signals and communication assessment.
+${frontendContext}
 **Interview Context:**
 - Question: ${responseData.question}
-- Experience Level: ${responseData.experience} years
-- Job Role: ${responseData.jobRole}
 
-**Analysis Task:**
-Provide objective observations of the candidate's behavior during their video response. Document patterns with timestamps, duration, and confidence levels.
+**Integrity Analysis Tasks:**
+1. **Audio-Visual Sync**: Verify lip movement matches speech timing
+2. **Eye Movement**: Detect reading patterns (horizontal scanning, fixed gaze, off-screen looks >3s)
+3. **Speech Delivery**: Assess naturalness vs mechanical/reading delivery
+4. **Scene Composition**: Count people, detect devices or external screens
 
-**Primary Analysis Areas:**
+**Transcription Requirements:**
+- Output ENGLISH-ONLY text (translate non-English speech)
+- NO non-Latin scripts (no Devanagari, Cyrillic, Arabic)
+- NO inline annotations like [unclear], [pause], [timestamp]
+- Record actual spoken language in languageDetection field
 
-1. **Audio-Visual Synchronization**
-   Verify voice and lip movement alignment:
-   - Voice characteristics match visible person (gender, age, tone, pitch)
-   - Lip movements sync with audio (timing tolerance: 0.3 seconds)
-   - Mouth shapes correspond to phonetic sounds produced
-   - Voice consistency maintained throughout response
-   - Environmental audio matches video context
-
-2. **Eye Movement Patterns**
-   Track gaze direction and duration:
-   - Camera engagement frequency and duration
-   - Downward glances (note if sustained >5 seconds)
-   - Off-screen focus patterns
-   - Reading-indicative eye movement sequences
-
-3. **Speech Delivery Analysis**
-   Evaluate speaking characteristics:
-   - Conversational flow vs monotone delivery
-   - Natural pauses vs mechanical rhythm
-   - Spontaneous articulation vs rehearsed patterns
-   - Response timing and pacing
-
-4. **Visual Environment**
-   Document scene composition:
-   - Number of people in frame
-   - Active participants vs incidental background presence
-   - Visible devices or materials
-   - Environmental distractions
-
-${generateLanguageDetectionInstructions()}
-
-
-**Output Format:**
+**Output JSON Format:**
 {
-  "transcription": "Complete word-for-word transcription of candidate's spoken words in English. Translate non-English responses to English. Include only the candidate's voice, exclude background voices or coaching.",
+  "transcription": "<ENGLISH-ONLY transcription. Translate non-English. Record spoken language in languageDetection.>",
   
-  "communication": "Professional assessment covering presentation quality, clarity, confidence level, and speaking pace.",
+  "visualIntegrity": {
+    "isLipSyncValid": true/false,
+    "isSinglePerson": true/false,
+    "deviceDetected": true/false,
+    "externalScreenDetected": true/false
+  },
   
-  "communicationRating": "<String, 0.0–5.0> - Numerical rating based on speaking clarity, confidence level, speaking pace, and articulation quality observed in the video",
-  
-  "confidenceLevel": "<String, 0.0–5.0> - Assessment of candidate's confidence based on vocal tone, body language, delivery steadiness, and eye contact",
-  
-  "isLipSync": true/false,
-  
-  "isOnlyOnePersonInVideo": true/false,
+  "integrityAnalysis": {
+    "verdict": "CLEAR | SUSPECT | INCONCLUSIVE",
+    "confidenceScore": <0.0-1.0>,
+    "flags": [
+      {
+        "type": "<READING_FROM_EXTERNAL | SAME_SCREEN_READING | SUBTLE_READING | UNNATURAL_DELIVERY | MONOTONE_SPEECH | OFF_SCREEN_GAZE | DEVICE_DETECTED | MULTIPLE_PERSONS | LIP_SYNC_MISMATCH | EXTERNAL_COACHING | TIMING_ANOMALY>",
+        "severity": "HIGH | MEDIUM | LOW",
+        "evidence": "<Brief description>",
+        "keyTimestamps": ["<MM:SS-MM:SS>"]
+      }
+    ]
+  },
   
   "behavioralAnalysis": {
-    "eyeMovementPattern": "Natural camera engagement | Frequent downward glances | Reading from external source detected | Limited camera engagement | Varied behavior patterns observed | Not assessed",
-    
-    "speakingTone": "Conversational and natural | Monotone delivery | Unnatural speaking rhythm | Reading rhythm detected | Mixed delivery patterns | Not assessed",
-    
-    "responseDelivery": "Spontaneous and fluid | Structured presentation | Reading word-for-word style | Mixed delivery patterns | Not assessed",
-    
-    "timingPatterns": "Natural response flow | Unnatural pauses before answers | Regular pauses before answers | Quick responses after pauses | Mixed timing patterns | Not assessed",
-    
-    "suspiciousIndicators": ["Descriptive observation 1", "Descriptive observation 2"],
-    
-    "behavioralTimestamps": {
-      "eyeMovementEvents": [
-        {
-          "timestamp": "seconds from start",
-          "duration": "duration in seconds",
-          "behavior": "specific behavior observed",
-          "confidence": 0-100,
-          "description": "detailed observation"
-        }
-      ],
-      "speakingToneEvents": [
-        {
-          "timestamp": "seconds from start",
-          "duration": "duration in seconds",
-          "behavior": "tone pattern observed",
-          "confidence": 0-100,
-          "description": "detailed tone analysis"
-        }
-      ],
-      "responseDeliveryEvents": [
-        {
-          "timestamp": "seconds from start",
-          "duration": "duration in seconds",
-          "behavior": "delivery pattern observed",
-          "confidence": 0-100,
-          "description": "detailed delivery analysis"
-        }
-      ],
-      "timingPatternEvents": [
-        {
-          "timestamp": "seconds from start",
-          "duration": "duration in seconds",
-          "behavior": "timing behavior observed",
-          "confidence": 0-100,
-          "description": "detailed timing analysis"
-        }
-      ],
-      "suspiciousEvents": [
-        {
-          "timestamp": "seconds from start",
-          "duration": "duration in seconds",
-          "behavior": "Observable pattern description: MUST BE ONE OF: sustained off-camera gaze | reading rhythm detected | audio-video desync | external assistance visible | device usage detected | voice-face mismatch | extended periods looking | reading from external source | eye movements suggesting reading | consistent reading behavior | reading word-for-word | device reading | sustained downward gaze | alternating attention pattern",
-          "confidence": 0-100,
-          "description": "Detailed observation with context explaining why this pattern is notable",
-          "category": "concerning | technical | environmental | behavioral"
-        }
-      ],
-      "totalSuspiciousTime": "total seconds",
-      "peakSuspiciousTimestamp": "timestamp",
-      "behaviorDensity": 0.0-1.0
-    }
+    "eyeMovementPattern": "<'Natural camera engagement' | 'Frequent off-screen gaze' | 'Reading pattern detected' | 'Same-screen reading detected' | 'Subtle brief glances' | 'Limited camera engagement' | 'Not assessed'>",
+    "speakingTone": "<'Conversational and natural' | 'Monotone delivery' | 'Unnatural speaking rhythm' | 'Reading rhythm detected' | 'Mixed delivery patterns' | 'Not assessed'>",
+    "responseDelivery": "<'Spontaneous and fluid' | 'Structured presentation' | 'Reading word-for-word style' | 'Mixed delivery patterns' | 'Not assessed'>",
+    "timingPatterns": "<'Natural response flow' | 'Unnatural pauses before answers' | 'Regular pauses before answers' | 'Quick responses after pauses' | 'Mixed timing patterns' | 'Not assessed'>",
+    "suspiciousIndicators": ["<Observed behaviors only>"]
+  },
+  
+  "communication": {
+    "summary": "<Speaking style, clarity, confidence assessment>",
+    "confidenceLevel": "<0.0-5.0>"
   },
   
   "languageDetection": {
-    "languages": ["Full language names: English, Hindi, Spanish"],
-    "percentageWise": ["Percentage with 2 decimals: 75.50%"],
+    "languages": ["<Full names: English, Hindi>"],
+    "percentageWise": ["<75.50%>"],
     "languageSwitching": true/false,
-    "primaryLanguage": "Primary language name",
-    "languageProficiency": {
-      "Language": "Native | Fluent | Intermediate | Basic"
-    },
+    "primaryLanguage": "<Primary language>",
+    "languageProficiency": { "<Language>": "Native | Fluent | Intermediate | Basic" },
     "codeSwitching": true/false,
     "languageConsistency": "Consistent | Mixed | Frequent switching"
   },
   
   "backgroundNoise": {
     "level": "low | medium | high",
-    "description": "Audio and environment quality assessment",
-    "contextualImpact": "None | Minimal | Moderate | Significant - with reasoning"
+    "description": "<Environment assessment>",
+    "contextualImpact": "None | Minimal | Moderate | Significant"
   },
   
   "answerTime": {
-    "totalDurationSeconds": number,
-    "effectiveAnswerTimeSeconds": number,
-    "effectiveAnswerTimePercentage": "0-100%",
+    "totalDurationSeconds": <number>,
+    "effectiveAnswerTimeSeconds": <number>,
+    "effectiveAnswerTimePercentage": "<0-100%>",
     "relevanceBreakdown": {
-      "relevantTimeSeconds": "<number> - Estimated time spent directly answering the question based on video analysis",
-      "irrelevantTimeSeconds": "<number> - Estimated time spent on off-topic or unclear content",
-      "relevanceExplanation": "[Description of how the candidate utilized their response time - what portions addressed the question vs went off-topic]"
+      "relevantTimeSeconds": <number>,
+      "irrelevantTimeSeconds": <number>,
+      "relevanceExplanation": "<Time utilization summary>"
     }
   }
 }
 
-**Analysis Guidelines:**
-- Report sustained patterns (>5 seconds duration) for meaningful observations
-- Use confidence scores >80 for flagging concerning patterns
-- Categorize events accurately: 'concerning' for reading/assistance/sync issues, 'environmental' for technical issues, 'behavioral' for normal human patterns
-- Provide precise timestamps and durations for all documented events
-- Maintain objectivity in descriptions and assessments
+**Flag Definitions:**
+- READING_FROM_EXTERNAL: Sustained downward gaze + reading rhythm
+- SAME_SCREEN_READING: Eyes focused on specific screen area while speaking fluently
+- SUBTLE_READING: Brief glances (1-3s) followed by fluent speech, 3+ repetitions
+- UNNATURAL_DELIVERY: Mechanical rhythm, no natural pauses, perfect construction
+- DEVICE_DETECTED: Phone/tablet/laptop visible for ≥0.5 seconds - flag even if partial
+- MULTIPLE_PERSONS: More than one person in frame
+- LIP_SYNC_MISMATCH: Audio doesn't match lips (>0.3s tolerance)
+
+**🚨 DEVICE DETECTION - MANDATORY FULL VIDEO SCAN:**
+Scan ENTIRE video for devices. Flag if visible ≥0.5 seconds (background OR hands, partial OK).
+If detected: set visualIntegrity.deviceDetected=true, add DEVICE_DETECTED flag with HIGH severity and timestamp.
+
+**🎯 READING DETECTION (Flag if 2+ indicators present with ≥60% confidence):**
+- Eyes CONSISTENTLY fixed on one screen area while speaking fluently
+- Horizontal scanning motion (left-to-right reading)
+- Pattern of look-away → immediate fluent speech → look-away (3+ repetitions)
+- Zero hesitation + perfect delivery on complex technical content
+- Almost NO camera engagement throughout response
+
+**Thresholds & Guidelines:**
+- Reading flags: ≥60% confidence, 2+ indicators required
+- Definitive flags (DEVICE, MULTIPLE_PERSONS, LIP_SYNC): ≥75% confidence
+- Frontend alerts present → apply STRICT scrutiny
+- Ambiguous evidence with patterns → flag with MEDIUM severity
 `;
 };
 
 /**
- * Generate Audio Stage 1 Behavioral Analysis Prompt
+ * Generate Audio Stage 1 Behavioral Analysis Prompt (Optimized V3.1)
+ *
+ * Key optimizations:
+ * - Removed verbose behavioral timestamp arrays (5 arrays → consolidated keyTimestamps per flag)
+ * - Replaced vague string ENUMs with structured integrityAnalysis.flags
+ * - Added explicit verdict field for direct Phase 3 consumption
+ * - Preserved all end-result fields (transcription, communication, languageDetection, backgroundNoise, answerTime)
+ * - V3.1: Enhanced reading detection with scripted delivery detection, lower thresholds, frontend context
  */
 const generateAudioBehavioralPrompt = (responseData) => {
+  // Extract frontend proctoring data for cross-referencing
+  const tabSwitches = responseData.tabSwitchCount || 0;
+  const fullScreenExits = responseData.fullScreenExitCount || 0;
+  const questionCopyCount =
+    responseData.copyPasteAnalysis?.questionCopyCount || 0;
+  const hasQuestionCopying =
+    responseData.copyPasteAnalysis?.hasQuestionCopying ||
+    responseData.copyPasteAnalysis?.hasFullQuestionCopying ||
+    questionCopyCount > 0;
+
+  // Generate frontend context alert if suspicious activity detected
+  const hasFrontendAlerts =
+    tabSwitches > 0 || fullScreenExits > 0 || hasQuestionCopying;
+  const frontendContext = hasFrontendAlerts
+    ? `
+**⚠️ FRONTEND PROCTORING ALERTS - APPLY STRICT SCRUTINY ⚠️**
+The following suspicious activities were detected by browser monitoring:
+${
+  tabSwitches > 0
+    ? `- Tab switches detected: ${tabSwitches} (candidate left the interview tab)`
+    : ""
+}
+${
+  fullScreenExits > 0
+    ? `- Full screen exits: ${fullScreenExits} (candidate exited full screen mode)`
+    : ""
+}
+${
+  hasQuestionCopying
+    ? `- Question copying detected: Candidate copied the question text (likely searching for answers)`
+    : ""
+}
+
+**CRITICAL**: Since frontend monitoring detected suspicious activity, you MUST apply STRICT scrutiny to:
+1. Speech delivery - Check if answers sound read or scripted after returning to tab
+2. Timing patterns - Look for delays followed by suddenly fluent answers
+3. Vocal patterns - Listen for reading rhythm or overly perfect delivery
+4. Background sounds - Listen for typing, paper rustling, or external prompts
+
+If frontend alerts exist and you observe ANY supporting audio evidence (even subtle), flag it with MEDIUM or HIGH severity.
+`
+    : "";
+
   return `
 ${generateBaseInstructions()}
 
-**🎯 YOUR TASK: COMPREHENSIVE AUDIO BEHAVIORAL ANALYSIS 🎯**
+You are analyzing an audio interview response for behavioral integrity signals and communication assessment.
+${frontendContext}
+**Interview Context:**
+- Question: ${responseData.question}
 
-You are analyzing an audio interview response. Your role is to provide COMPREHENSIVE behavioral observations about how the candidate is speaking, in addition to detecting potential integrity concerns.
+**Integrity Analysis Tasks:**
+1. **Voice Count**: Verify only one primary voice (detect coaching, whispers, multiple speakers)
+2. **Speech Delivery**: Assess naturalness vs mechanical/reading/scripted delivery
+3. **Vocal Patterns**: Analyze for reading rhythm, monotone delivery, scripted responses
+4. **Background Analysis**: Detect coaching whispers, prompts, external assistance
 
-**Question Asked**: ${responseData.question}
-**Candidate Experience**: ${responseData.experience} years
-**Job Role**: ${responseData.jobRole}
+**Transcription Requirements:**
+- Output ENGLISH-ONLY text (translate non-English speech)
+- NO non-Latin scripts (no Devanagari, Cyrillic, Arabic)
+- NO inline annotations like [unclear], [pause], [timestamp]
+- Record actual spoken language in languageDetection field
 
-**CRITICAL**: Provide TWO types of analysis:
-1. **Detailed Behavioral Observations** - How the candidate speaks, their confidence, delivery style
-2. **Integrity Observations** - Any suspicious patterns (multiple voices, coaching, reading)
-
----
-
-**PART 1: COMPREHENSIVE AUDIO BEHAVIORAL ANALYSIS**
-
-Analyze the candidate's speaking behavior across multiple dimensions:
-
-**1. Vocal Characteristics & Confidence Assessment**
-- **Voice Quality**: Assess clarity, steadiness, projection, vocal control
-- **Confidence Indicators**: 
-  - Strong: Clear voice, steady pace, minimal hesitations, assertive tone
-  - Moderate: Occasional hesitations, some verbal fillers, variable pace
-  - Low: Frequent pauses, uncertain tone, excessive fillers (um, uh), shaky voice
-- **Emotional State**: Detect stress, nervousness, calmness, enthusiasm
-- **Vocal Modulation**: Natural pitch variations vs monotone delivery
-
-**2. Speech Delivery & Fluency**
-- **Articulation Quality**: Clear pronunciation vs mumbling, word clarity
-- **Speaking Pace**: Fast/moderate/slow, consistency of pace
-- **Fluency Analysis**:
-  - Smooth, continuous speech (high fluency)
-  - Occasional stumbles but recovers (moderate fluency)
-  - Frequent false starts, corrections (low fluency)
-- **Natural vs Rehearsed** (THIS DETERMINES responseDelivery field):
-  - Spontaneous and fluid: Natural pauses, thinking time, conversational rhythm, self-corrections
-  - Structured presentation: Organized but natural, planned structure with spontaneous elements
-  - Reading word-for-word style: Monotone, mechanical rhythm, no natural pauses, perfect delivery
-  - Mixed delivery patterns: Combination of spontaneous and rehearsed elements
-
-**3. Response Structure & Thinking Patterns**
-- **Organization**: Structured response vs stream of consciousness
-- **Thinking Indicators**: Natural pauses before/during complex explanations
-- **Filler Words**: Frequency and type (um, uh, like, you know)
-- **Self-Correction**: Does candidate catch and correct mistakes?
-- **Elaboration Style**: Brief answers vs detailed explanations
-
-**4. Timing & Pause Analysis**
-- **Initial Response Time**: Immediate vs thoughtful pause before answering
-- **Mid-Response Pauses**: Natural thinking pauses vs reading pauses
-- **Pause Distribution**: Even distribution vs clustered/patterned pauses
-- **Response Pacing**: Consistent vs irregular timing patterns
-
-**5. Engagement & Presence**
-- **Speaking Energy**: Engaged and present vs distracted or distant
-- **Attention Indicators**: Focused on question vs easily distracted
-- **Response Completeness**: Thorough answers vs rushed/incomplete
-
----
-
-**PART 2: INTEGRITY OBSERVATION GUIDELINES**
-
-Document suspicious behaviors ONLY with strong evidence (80%+ confidence):
-- **Multiple Voices**: Detect if more than one person is speaking
-- **Background Coaching**: Whispers, prompts, instructions from others
-- **Reading Patterns**: Consistent monotone, reading rhythm, unnatural cadence
-- **Voice Inconsistency**: Changes in voice characteristics during response
-- **External Assistance**: Sounds of typing, clicking, paper rustling during pauses
-
-**DO NOT flag**: Natural thinking pauses, normal speech variations, background environmental sounds
-
-${generateLanguageDetectionInstructions()}
-
-
-**Response JSON Format:**
+**Output JSON Format:**
 {
-  "transcription": "[CANDIDATE VOICE ONLY - Complete word-for-word transcription of ONLY what the candidate said in ENGLISH (translate if needed), excluding background voices, whispers, or coaching. MUST BE IN ENGLISH ONLY]",
-  
-  "communication": "[COMPREHENSIVE HR-friendly assessment covering: speaking clarity (articulation quality), confidence level (vocal steadiness and assertiveness), speaking pace (speed and consistency), articulation quality, vocal presence, and overall communication effectiveness. Focus on HOW they communicated, not WHAT they said. Example: 'Candidate demonstrated strong communication with clear articulation and confident vocal delivery. Speaking pace was well-modulated with natural pauses for thought. Voice quality indicated good preparation and engagement with the topic.']",
-  
-  "communicationRating": "<String, 0.0–5.0> - Numerical rating based on speaking clarity, confidence level, speaking pace, and articulation quality observed in the audio",
-  
-  "confidenceLevel": "<String, 0.0–5.0> - Assessment of candidate's confidence based on vocal tone, delivery steadiness, and speech patterns. Consider: voice steadiness (5.0=very steady, 0.0=very shaky), hesitation frequency (fewer=higher score), vocal projection (strong=higher score), and overall assertiveness",
+  "transcription": "<ENGLISH-ONLY transcription. Translate non-English. Record spoken language in languageDetection.>",
   
   "isOnlyOneVoiceInAudio": true/false,
   
+  "integrityAnalysis": {
+    "verdict": "CLEAR | SUSPECT | INCONCLUSIVE",
+    "confidenceScore": <0.0-1.0>,
+    "flags": [
+      {
+        "type": "<MULTIPLE_VOICES | BACKGROUND_COACHING | READING_DELIVERY | SCRIPTED_DELIVERY | MONOTONE_SPEECH | UNNATURAL_PAUSES | VOICE_INCONSISTENCY | EXTERNAL_PROMPTS | TIMING_ANOMALY>",
+        "severity": "HIGH | MEDIUM | LOW",
+        "evidence": "<Brief description>",
+        "keyTimestamps": ["<MM:SS-MM:SS>"]
+      }
+    ]
+  },
+  
+  "communication": {
+    "summary": "<Speaking style, clarity, confidence assessment>",
+    "confidenceLevel": "<0.0-5.0>"
+  },
+  
+  "communicationRating": "<0.0-5.0>",
+  "confidenceLevel": "<0.0-5.0>",
+  
   "behavioralAnalysis": {
     "vocalCharacteristics": {
-      "voiceQuality": "[Describe: Clear and steady | Clear but hesitant | Muffled or unclear | Variable quality | Strong and confident]",
-      "vocalConfidence": "[Describe confidence indicators: Strong - assertive tone, minimal hesitations | Moderate - some uncertainty | Low - frequent hesitations, shaky voice]",
-      "emotionalState": "[Describe: Calm and composed | Nervous but controlled | Stressed | Enthusiastic | Neutral/Professional]",
-      "vocalModulation": "[Natural pitch variations and expression | Monotone delivery | Over-modulated | Mechanical rhythm]"
+      "voiceQuality": "<Clear and steady | Clear but hesitant | Muffled or unclear | Variable quality | Strong and confident>",
+      "vocalConfidence": "<Strong | Moderate | Low>",
+      "emotionalState": "<Calm and composed | Nervous but controlled | Stressed | Enthusiastic | Neutral/Professional>",
+      "vocalModulation": "<Natural pitch variations | Monotone delivery | Mechanical rhythm>"
     },
-    
     "speechDelivery": {
-      "articulationQuality": "[Clear and precise | Generally clear | Occasional mumbling | Poor articulation]",
-      "speakingPace": "[Describe pace: Well-paced and consistent | Too fast | Too slow | Inconsistent pace | Rushed]",
-      "fluencyLevel": "[High - smooth continuous speech | Moderate - occasional stumbles | Low - frequent false starts]",
-      "deliveryStyle": "[Spontaneous and conversational | Structured presentation | Reading or rehearsed | Mixed patterns]",
-      "naturalness": "[Very natural with conversational flow | Somewhat natural | Rehearsed or scripted | Mechanical/reading detected]"
+      "articulationQuality": "<Clear and precise | Generally clear | Occasional mumbling | Poor articulation>",
+      "speakingPace": "<Well-paced and consistent | Too fast | Too slow | Inconsistent pace | Rushed>",
+      "fluencyLevel": "<High - smooth continuous speech | Moderate - occasional stumbles | Low - frequent false starts>",
+      "deliveryStyle": "<Spontaneous and conversational | Structured presentation | Reading or rehearsed | Mixed patterns>",
+      "naturalness": "<Very natural with conversational flow | Somewhat natural | Rehearsed or scripted | Mechanical/reading detected>"
     },
-    
     "thinkingPatterns": {
-      "responseOrganization": "[Well-structured and organized | Moderately organized | Stream of consciousness | Disorganized]",
-      "thinkingIndicators": "[Natural pauses before complex points | Immediate responses | Extended thinking time | No apparent thinking pauses]",
-      "fillerWordFrequency": "[Minimal fillers | Moderate use of um/uh | Excessive fillers | No fillers (may indicate reading)]",
-      "selfCorrection": "[Catches and corrects mistakes naturally | Rarely corrects | Never corrects (may indicate reading)]"
+      "fillerWordFrequency": "<Minimal fillers | Moderate use of um/uh | Excessive fillers | No fillers (may indicate reading)>",
+      "selfCorrection": "<Catches and corrects mistakes naturally | Rarely corrects | Never corrects (may indicate reading)>",
+      "responseOrganization": "<Well-structured and organized | Moderately organized | Stream of consciousness | Disorganized>"
     },
-    
-    "timingAnalysis": {
-      "initialResponseTime": "[Thoughtful pause before answering | Immediate response | Delayed start | Unnatural delay]",
-      "midResponsePauses": "[Natural thinking pauses | Reading-style pauses | No pauses | Excessive pausing]",
-      "pauseDistribution": "[Evenly distributed | Clustered at certain points | Patterned/regular | Minimal pauses]",
-      "overallPacing": "[Consistent throughout | Variable but natural | Irregular patterns | Suspicious patterns detected]"
-    },
-    
-    "engagementLevel": {
-      "speakingEnergy": "[Highly engaged and energetic | Moderately engaged | Low energy | Distracted or disengaged]",
-      "focusLevel": "[Fully focused on question | Generally focused | Easily distracted | Attention divided]",
-      "responseCompleteness": "[Thorough and complete | Adequate | Brief/incomplete | Rushed to finish]"
-    },
-    
-    "speakingTone": "[MUST BE ONE OF: 'Conversational and natural' | 'Monotone delivery' | 'Unnatural speaking rhythm' | 'Reading rhythm detected' | 'Mixed delivery patterns' | 'Not assessed']",
-    
-    "responseDelivery": "[MUST BE ONE OF: 'Spontaneous and fluid' | 'Structured presentation' | 'Reading word-for-word style' | 'Mixed delivery patterns' | 'Not assessed']",
-    
-    "timingPatterns": "[MUST BE ONE OF: 'Natural response flow' | 'Unnatural pauses before answers' | 'Regular pauses before answers' | 'Quick responses after pauses' | 'Mixed timing patterns' | 'Not assessed']",
-    
-    "suspiciousIndicators": ["[OBSERVED audio behaviors only - e.g., 'Multiple distinct voices detected', 'Background whisper heard at 15 seconds', 'Reading rhythm in speech pattern'. DO NOT conclude 'Cheating detected' - describe what you hear. Include behavioral observations like 'Monotone delivery throughout suggests reading from prepared text' or 'Natural conversational tone with appropriate thinking pauses']"],
-    
-    "behavioralTimestamps": {
-      "vocalCharacteristicEvents": [
-        {
-          "timestamp": "<number> seconds from start",
-          "duration": "<number> duration in seconds",
-          "behavior": "specific vocal characteristic observed - e.g., 'voice became shaky', 'confident assertion', 'hesitation spike'",
-          "confidence": "<number 0-100>",
-          "description": "detailed description: e.g., 'Voice quality dropped with noticeable hesitation when discussing complex topic'"
-        }
-      ],
-      "speechDeliveryEvents": [
-        {
-          "timestamp": "<number> seconds from start",
-          "duration": "<number> duration in seconds",
-          "behavior": "specific delivery pattern - e.g., 'pace increased', 'articulation improved', 'fluency breakdown'",
-          "confidence": "<number 0-100>",
-          "description": "detailed description of delivery observation"
-        }
-      ],
-      "thinkingPatternEvents": [
-        {
-          "timestamp": "<number> seconds from start",
-          "duration": "<number> duration in seconds",
-          "behavior": "thinking behavior - e.g., 'natural thinking pause', 'self-correction', 'filler word cluster'",
-          "confidence": "<number 0-100>",
-          "description": "detailed description of thinking pattern"
-        }
-      ],
-      "speakingToneEvents": [
-        {
-          "timestamp": "<number> seconds from start",
-          "duration": "<number> duration in seconds",
-          "behavior": "specific speaking tone behavior observed", 
-          "confidence": "<number 0-100>",
-          "description": "detailed description of tone observation"
-        }
-      ],
-      "timingPatternEvents": [
-        {
-          "timestamp": "<number> seconds from start",
-          "duration": "<number> duration in seconds",
-          "behavior": "specific timing behavior observed",
-          "confidence": "<number 0-100>",
-          "description": "detailed description of timing pattern"
-        }
-      ],
-      "suspiciousEvents": [
-        {
-          "timestamp": "<number> seconds from start",
-          "duration": "<number> duration in seconds", 
-          "behavior": "MUST BE ONE OF: reading rhythm detected | external assistance visible | device usage detected | voice-face mismatch | audio-video desync | sustained off-camera gaze | extended periods looking | reading from external source | eye movements suggesting reading | consistent reading behavior | reading word-for-word | device reading | sustained downward gaze | alternating attention pattern | multiple voices detected | background coaching heard | voice inconsistency detected",
-          "confidence": "<number 0-100> confidence in your observation",
-          "description": "Explain what you heard and WHY it's notable - e.g., 'Distinct female whisper audible at 15-18 seconds while male candidate speaking' OR 'Consistent monotone rhythm throughout entire response suggests reading from prepared text'",
-          "category": "concerning | technical | environmental | behavioral"
-        }
-      ],
-      "totalSuspiciousTime": "<number> total time in seconds of concerning audio behaviors (use 0 if none)",
-      "peakSuspiciousTimestamp": "<number> timestamp in seconds when most concerning audio behavior occurred (use 0 if none)", 
-      "behaviorDensity": "<number 0.0-1.0> frequency of concerning audio behaviors relative to total time (use 0.0 if none)"
-    }
+    "speakingTone": "<'Conversational and natural' | 'Monotone delivery' | 'Unnatural speaking rhythm' | 'Reading rhythm detected' | 'Mixed delivery patterns' | 'Not assessed'>",
+    "responseDelivery": "<'Spontaneous and fluid' | 'Structured presentation' | 'Reading word-for-word style' | 'Mixed delivery patterns' | 'Not assessed'>",
+    "timingPatterns": "<'Natural response flow' | 'Unnatural pauses before answers' | 'Regular pauses before answers' | 'Quick responses after pauses' | 'Mixed timing patterns' | 'Not assessed'>",
+    "suspiciousIndicators": ["<Observed behaviors only>"]
   },
   
   "languageDetection": {
-    "languages": ["[Language 1 - MUST use FULL language names]"],
-    "percentageWise": ["[0.00-100.00% - 2 decimal places]"],
-    "languageSwitching": "[true/false]",
-    "primaryLanguage": "[Primary language]",
-    "languageProficiency": {
-      "[Language 1]": "[Native/Fluent/Intermediate/Basic]"
-    },
-    "codeSwitching": "[true/false]",
-    "languageConsistency": "[Consistent/Mixed/Frequent switching]"
+    "languages": ["<Full names: English, Hindi>"],
+    "percentageWise": ["<75.50%>"],
+    "languageSwitching": true/false,
+    "primaryLanguage": "<Primary language>",
+    "languageProficiency": { "<Language>": "Native | Fluent | Intermediate | Basic" },
+    "codeSwitching": true/false,
+    "languageConsistency": "Consistent | Mixed | Frequent switching"
   },
   
   "backgroundNoise": {
-    "level": "[low/medium/high]",
-    "description": "[Assessment of audio quality and background sounds]",
-    "contextualImpact": "[Impact on assessment]"
+    "level": "low | medium | high",
+    "description": "<Environment assessment>",
+    "contextualImpact": "None | Minimal | Moderate | Significant"
   },
   
   "answerTime": {
-    "totalDurationSeconds": "<number>",
-    "effectiveAnswerTimeSeconds": "<number>",
-    "effectiveAnswerTimePercentage": "[0-100%]",
+    "totalDurationSeconds": <number>,
+    "effectiveAnswerTimeSeconds": <number>,
+    "effectiveAnswerTimePercentage": "<0-100%>",
     "relevanceBreakdown": {
-      "relevantTimeSeconds": "<number> - Estimated time spent directly answering the question based on audio analysis",
-      "irrelevantTimeSeconds": "<number> - Estimated time spent on off-topic or unclear content",
-      "relevanceExplanation": "[Description of how the candidate utilized their response time - what portions addressed the question vs went off-topic]"
+      "relevantTimeSeconds": <number>,
+      "irrelevantTimeSeconds": <number>,
+      "relevanceExplanation": "<Time utilization summary>"
     }
   }
 }
 
-**🚨 CRITICAL REQUIREMENTS 🚨**
-1. **COMPREHENSIVE BEHAVIORAL ANALYSIS IS MANDATORY** - Analyze HOW the candidate speaks in detail
-2. Provide detailed observations in all behavioral fields: vocalCharacteristics, speechDelivery, thinkingPatterns, timingAnalysis, engagementLevel
-3. **MUST fill speakingTone, responseDelivery, and timingPatterns fields** - These are required for cheating detection algorithms
-4. Document BOTH positive behaviors (confident, clear, natural) AND concerning behaviors (reading, coaching, multiple voices)
-5. Record behavioral events with timestamps showing confidence shifts, delivery changes, thinking patterns
-6. Be specific and descriptive - avoid generic statements
-7. Focus on SUSTAINED patterns (5+ seconds) for meaningful observations
-8. Use confidence scores >80 for flagging concerning patterns
-9. Distinguish between environmental noise and human assistance
-10. The "communication" field should be a comprehensive paragraph describing the candidate's speaking style and effectiveness
-11. Even if no cheating is detected, provide rich behavioral analysis of their speaking patterns
+**Flag Definitions:**
+- MULTIPLE_VOICES: More than one distinct voice (INCLUDING whispers/low-volume coaching)
+- BACKGROUND_COACHING: Whispers, prompts, instructions audible (even very low volume)
+- READING_DELIVERY: Word-for-word reading style, mechanical rhythm, no natural pauses
+- SCRIPTED_DELIVERY: Overly perfect delivery - no fillers, no self-corrections, unnaturally smooth
+- EXTERNAL_PROMPTS: Audible prompting sounds (typing, paper rustling, clicking)
 
-**EXAMPLES OF GOOD BEHAVIORAL ANALYSIS:**
+**🚨 DETECT LOW-VOLUME EXTERNAL ASSISTANCE:**
+Listen for whispered coaching, muffled voices, echo effects (candidate repeating what they heard).
+If detected: set isOnlyOneVoiceInAudio=false, add flag with MEDIUM/HIGH severity.
+Even VERY faint secondary voices must be flagged.
 
-Good Communication Field:
-"Candidate demonstrated strong verbal communication skills with clear articulation and confident vocal delivery throughout the response. Speaking pace was well-modulated at approximately 150 words per minute with natural pauses for thought processing. Voice quality remained steady and projected confidence, with minimal hesitations or filler words. The delivery style was conversational yet professional, indicating comfort with the topic. Natural self-corrections and elaborations suggested spontaneous thinking rather than rehearsed content."
+**🎯 READING DETECTION (Flag if 2+ indicators present with ≥60% confidence):**
+- Unnaturally smooth delivery with ZERO hesitation on complex technical content
+- Perfect sentence construction with NO false starts or corrections
+- Complete absence of filler words + no self-corrections
+- Mechanical pacing without natural variation
+- Sudden fluency after pauses (searched → found → read)
 
-Good Suspicious Indicators (No Cheating):
-["Natural conversational tone with appropriate thinking pauses", "Clear articulation with minimal filler words suggests good preparation", "Voice modulation and pace variations indicate spontaneous delivery", "Self-corrections present indicating real-time thinking"]
+**🔗 CRITICAL: Cross-Reference Behavioral Fields with Flags:**
+If behavioralAnalysis shows 3+ of these, MUST add READING_DELIVERY or SCRIPTED_DELIVERY flag:
+- fillerWordFrequency = "Minimal fillers" or "No fillers"
+- selfCorrection = "Rarely corrects" or "Never corrects"
+- fluencyLevel = "High - smooth continuous speech"
+- naturalness = "Mechanical/reading detected" or "Rehearsed or scripted"
 
-Good Suspicious Indicators (Possible Cheating):
-["Consistent monotone delivery throughout entire 45-second response suggests reading from text", "Unusual pause pattern at 15s followed by perfect delivery may indicate listening to coaching", "Background whisper detected at 23-25 seconds while candidate remained silent"]
+**Thresholds & Guidelines:**
+- Reading flags: ≥60% confidence, 2+ indicators required
+- Direct cheating flags (MULTIPLE_VOICES, BACKGROUND_COACHING): ≥75% confidence
+- Frontend alerts present → apply STRICT scrutiny
+- Ambiguous evidence with patterns → flag with MEDIUM severity
 `;
 };
 
@@ -628,7 +560,11 @@ You are evaluating how well the candidate answered the specific question asked. 
 **CANDIDATE CONTEXT:**
 - Experience Level: ${responseData.experience} years
 - Job Role: ${responseData.jobRole}
-- Communication Style Observed: ${stage1Results.communication}
+- Communication Style Observed: ${
+    typeof stage1Results.communication === "object"
+      ? stage1Results.communication.summary
+      : stage1Results.communication
+  }
 
 ${generateRelevanceInstructions(responseData)}
 
@@ -952,7 +888,9 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - **Candidate Fit Score**: ${candidateFitScore}% (Use this for fit category determination)
 - **Final Recommendation**: ${recommendation} (CRITICAL: Your fit summary MUST align with this recommendation)
 - **Integrity Score**: ${integrityScore}% (Lower scores indicate integrity concerns that may affect recommendation)
-- **Cheating Detected**: ${screeningResult.isCheatingDetected ? 'Yes' : 'No'} (If Yes, this significantly impacts recommendation)
+- **Cheating Detected**: ${
+    screeningResult.isCheatingDetected ? "Yes" : "No"
+  } (If Yes, this significantly impacts recommendation)
 `;
 
   // Add all question data

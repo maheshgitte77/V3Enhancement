@@ -19,17 +19,50 @@ const subjectiveProcessor = require("./subjective-question/subjective.processor"
 /**
  * V2.5 Configuration
  * Independent configuration for V2.5 multi-stage processing
+ * V3: Enhanced with centralized detection thresholds
  */
 const V2_5_CONFIG = {
   cheating: {
-    multipleVoiceConfidence: 0.8,
-    backgroundNoiseThreshold: 0.8,
-    cheatingFlagMinimum: 1,
-    sustainedHelpDuration: 5,
-    contextualAnalysis: true,
-    adaptiveThresholds: true,
-    temporalPatterns: true,
+    // V3 Detection Thresholds - Used by cheating.detector.js
+    detection: {
+      // Reading-related flags - use MEDIUM severity to catch actual cheating
+      // Balance: MEDIUM threshold + 75% confidence + improved prompts = reduced false positives
+      readingRelated: {
+        severity: "MEDIUM",
+        confidenceMin: 75,
+        flags: ["ReadingFromExternal", "EyesMovement", "SuspiciousPatterns"],
+      },
+      // Direct detection flags require higher threshold (clear evidence)
+      directDetection: {
+        severity: "HIGH",
+        confidenceMin: 80,
+        flags: [
+          "MultiplePersonsDetected",
+          "MultipleVoiceDetected",
+          "LipSyncMismatch",
+          "MobileDeviceDetected",
+        ],
+      },
+      // External assistance with multi-signal support
+      externalAssistance: {
+        severity: "MEDIUM",
+        confidenceMin: 70,
+        pasteThresholdHigh: 80,
+        pasteThresholdMedium: 50,
+        requiresMultiSignal: true,
+      },
+      // Typing/paste behavior thresholds
+      typing: {
+        focusLossHigh: 10,
+        focusLossMedium: 5,
+        pasteThresholdHigh: 80,
+        pasteThresholdMedium: 50,
+      },
+    },
+    // Legacy mode - set to true for emergency fallback to old detection
+    legacyMode: false,
   },
+
   evaluation: {
     contextAwareRating: true,
     multiFactorAnalysis: true,
@@ -81,55 +114,31 @@ const V2_5_CONFIG = {
 
 /**
  * V2.5 Environment-Specific Configuration
+ * V3: Cleaned up unused legacy options
  */
 const V2_5_ENVIRONMENTS = {
   development: {
     cheating: {
-      multipleVoiceConfidence: 0.8,
-      enableDebugAnalysis: true,
       logAllDecisions: true,
-      contextualAnalysisVerbose: true,
     },
     ai: {
-      enableAdvancedDetection: true,
-      confidenceThreshold: 0.7,
       enhancedLogging: true,
-    },
-    evaluation: {
-      detailedContextualReporting: true,
-      behavioralAnalysisVerbose: true,
     },
   },
   staging: {
     cheating: {
-      multipleVoiceConfidence: 0.75,
-      contextualAnalysis: true,
-      adaptiveThresholds: true,
+      logAllDecisions: false,
     },
     ai: {
-      enableAdvancedDetection: true,
-      confidenceThreshold: 0.75,
-      balancedProcessing: true,
-    },
-    evaluation: {
-      testingMode: true,
-      contextualValidation: true,
+      enhancedLogging: false,
     },
   },
   production: {
     cheating: {
-      multipleVoiceConfidence: 0.75,
-      optimizedProcessing: true,
-      contextualAnalysis: true,
+      logAllDecisions: false,
     },
     ai: {
-      enableAdvancedDetection: true,
-      confidenceThreshold: 0.75,
-      performanceOptimized: true,
-    },
-    evaluation: {
-      productionMode: true,
-      balancedAssessment: true,
+      enhancedLogging: false,
     },
   },
 };
@@ -205,8 +214,8 @@ const initializeV2_5Processor = (dependencies) => {
   // Initialize database handler
   databaseHandler.initializeDatabaseHandler(models, logger);
 
-  // Initialize cheating detector with logger
-  cheatingDetector.initializeCheatingDetector(logger);
+  // Initialize cheating detector with logger and V3 detection config
+  cheatingDetector.initializeCheatingDetector(logger, config);
 
   // Initialize typing analyzer with logger
   typingAnalyzer.setLogger(logger);

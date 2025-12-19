@@ -18,77 +18,88 @@ const initializeDatabaseHandler = (models, loggerInstance) => {
 };
 
 /**
+ * Check if error is transient (worth retrying)
+ */
+const isTransientError = (error) => {
+  const message = error.message?.toLowerCase() || "";
+  const transientPatterns = [
+    "econnreset",
+    "etimedout",
+    "econnrefused",
+    "socket hang up",
+    "network error",
+    "write conflict",
+    "topology was destroyed",
+    "buffermaxentriesexceeded",
+    "no primary found",
+  ];
+  return transientPatterns.some((pattern) => message.includes(pattern));
+};
+
+/**
+ * Retry helper for database operations
+ */
+const withRetry = async (
+  operation,
+  operationName,
+  maxRetries = 3,
+  baseDelay = 1000
+) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const isTransient = isTransientError(error);
+
+      logger.warn(`Database operation failed: ${operationName}`, {
+        attempt,
+        maxRetries,
+        error: error.message,
+        isTransient,
+      });
+
+      if (!isTransient || attempt === maxRetries) {
+        throw error;
+      }
+
+      const delay = baseDelay * Math.pow(2, attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+};
+
+/**
  * Generate type-specific contextual factors
+ * FIXED: Now prefers AI-provided contextual factors instead of manufacturing them
  */
 const generateTypeSpecificContextualFactors = (
   responseType,
   analysis,
   additionalData = {}
 ) => {
-  const isCheatingDetected = analysis.isCheatingDetected;
-  const cheatingConfidence = analysis.cheatingConfidence || 0;
-
-  switch (responseType) {
-    case "subjective":
-      if (isCheatingDetected) {
-        return [
-          "Typing pattern analysis indicates possible external assistance",
-          "Copy-paste behavior detected during response composition",
-          "Tab switching suggests external research activity",
-          ...(additionalData.typingIndicators?.slice(0, 2) || []),
-          `Advanced analysis detected suspicious behavior patterns (${cheatingConfidence}% confidence)`,
-        ].filter(Boolean);
-      } else {
-        return [
-          "Typing patterns appear natural and consistent",
-          "No copy-paste or external assistance indicators detected",
-          "Response composition shows original work patterns",
-          "Tab switching analysis shows no suspicious activity",
-          "Assessment conducted in appropriate professional environment",
-        ];
-      }
-
-    case "video":
-      if (isCheatingDetected) {
-        return [
-          "Visual analysis detected reading from external sources",
-          "Eye movement patterns suggest off-screen reference material",
-          "Speaking rhythm indicates script reading behavior",
-          "Behavioral analysis shows sustained suspicious patterns",
-          `Advanced analysis detected suspicious behavior patterns (${cheatingConfidence}% confidence)`,
-        ].filter(Boolean);
-      } else {
-        return [
-          "Visual analysis shows natural eye contact and engagement",
-          "Speaking patterns appear spontaneous and conversational",
-          "No evidence of reading from external sources detected",
-          "Behavioral analysis indicates honest assessment environment",
-          "Professional presentation observed throughout response",
-        ];
-      }
-
-    case "audio":
-      if (isCheatingDetected) {
-        return [
-          "Audio analysis detected multiple voices or background assistance",
-          "Speaking patterns suggest external prompting or reading",
-          "Background noise indicates possible assistance",
-          "Voice analysis shows unnatural delivery patterns",
-          `Advanced analysis detected suspicious behavior patterns (${cheatingConfidence}% confidence)`,
-        ].filter(Boolean);
-      } else {
-        return [
-          "Audio analysis shows single clear voice throughout response",
-          "Speaking patterns appear natural and spontaneous",
-          "No background assistance or multiple voices detected",
-          "Voice quality and delivery indicate honest assessment",
-          "Clear and professional audio environment maintained",
-        ];
-      }
-
-    default:
-      return ["Standard assessment criteria applied"];
+  // FIXED: Use AI-provided contextual factors if available
+  if (
+    Array.isArray(analysis.contextualFactors) &&
+    analysis.contextualFactors.length > 0
+  ) {
+    logger.info("V2.5: Using AI-provided contextual factors", {
+      responseType,
+      factorsCount: analysis.contextualFactors.length,
+    });
+    return analysis.contextualFactors;
   }
+
+  // Fallback only if AI didn't provide contextual factors
+  logger.info(
+    "V2.5: AI did not provide contextual factors, using minimal fallback",
+    {
+      responseType,
+      isCheatingDetected: analysis.isCheatingDetected,
+    }
+  );
+
+  // Minimal neutral fallback - don't manufacture positive/negative statements
+  return ["Assessment completed with standard evaluation criteria"];
 };
 
 /**
@@ -189,6 +200,12 @@ const createTypeSpecificRecord = (
 
     // Flag analysis
     flagAnalysis: analysis.flagAnalysis,
+
+    // V3 integrity analysis structure (video and audio)
+    integrityAnalysis: analysis.integrityAnalysis,
+
+    // Visual integrity (video-specific)
+    visualIntegrity: analysis.visualIntegrity,
 
     // Token usage - aggregate from all stages (supports video/audio/subjective)
     tokenUsage: (() => {
@@ -426,10 +443,14 @@ const saveToDatabase = async (
 
   const normalizedType = responseData.type.toLowerCase();
 
-  // Get CandidateScreeningResult document
-  const doc = await CandidateScreeningResult.findOne({
-    candidateScreeningId: responseData.candidateScreeningId,
-  });
+  // Get CandidateScreeningResult document (with retry for transient failures)
+  const doc = await withRetry(
+    () =>
+      CandidateScreeningResult.findOne({
+        candidateScreeningId: responseData.candidateScreeningId,
+      }),
+    "findCandidateScreeningResult"
+  );
 
   if (!doc) {
     throw new Error(
@@ -511,9 +532,10 @@ const saveToDatabase = async (
     {}
   );
 
-  // Create CandidateAnswerAiResponse
-  const questionAiResponse = await CandidateAnswerAiResponse.create(
-    typeSpecificRecord
+  // Create CandidateAnswerAiResponse (with retry for transient failures)
+  const questionAiResponse = await withRetry(
+    () => CandidateAnswerAiResponse.create(typeSpecificRecord),
+    "createCandidateAnswerAiResponse"
   );
 
   logger.info("V2.5: CandidateAnswerAiResponse created", {
@@ -533,10 +555,6 @@ const saveToDatabase = async (
   question.correctPercentage = normalizeCorrectPercentageForStorage(
     questionAiResponse.correctPercentage || 0
   );
-  question.isCheatingDetected =
-    question.isCheatingDetected === true
-      ? question.isCheatingDetected
-      : questionAiResponse.isCheatingDetected;
 
   // Merge cheatingAnalysis instead of overwriting (preserve webcam snapshot processing results)
   const existingCheatingAnalysis = question.cheatingAnalysis || {};
@@ -545,11 +563,15 @@ const saveToDatabase = async (
 
   // Merge flag results, avoiding duplicates based on flag key
   const flagMap = new Map();
-  
+
   // First, add existing flags (from webcam snapshot processing)
   existingFlagResults.forEach((flag) => {
-    if (flag.flagKey) {
-      flagMap.set(flag.flagKey, flag);
+    // FIX: Check flagKey OR flag property for unique identifier
+    // cheating.detector.js produces 'flag', while legacy webcam processing might use 'flagKey'
+    const uniqueKey = flag.flagKey || flag.flag;
+
+    if (uniqueKey) {
+      flagMap.set(uniqueKey, flag);
     } else {
       // Fallback: use message as key if flagKey doesn't exist
       const key = flag.message || JSON.stringify(flag);
@@ -559,8 +581,11 @@ const saveToDatabase = async (
 
   // Then, add/override with new flags (from audio/video/subjective processing)
   newFlagResults.forEach((flag) => {
-    if (flag.flagKey) {
-      flagMap.set(flag.flagKey, flag); // New flags override old ones with same key
+    // FIX: Check flagKey OR flag property for unique identifier
+    const uniqueKey = flag.flagKey || flag.flag;
+
+    if (uniqueKey) {
+      flagMap.set(uniqueKey, flag); // New flags override old ones with same key
     } else {
       // Fallback: use message as key if flagKey doesn't exist
       const key = flag.message || JSON.stringify(flag);
@@ -569,7 +594,9 @@ const saveToDatabase = async (
   });
 
   const mergedFlagResults = Array.from(flagMap.values());
-  const mergedFlaggedChecks = mergedFlagResults.filter((f) => f.detected).length;
+  const mergedFlaggedChecks = mergedFlagResults.filter(
+    (f) => f.detected
+  ).length;
   const mergedClearChecks = mergedFlagResults.filter((f) => !f.detected).length;
 
   question.cheatingAnalysis = {
@@ -581,26 +608,60 @@ const saveToDatabase = async (
     flagSystemVersion: existingCheatingAnalysis.flagSystemVersion || "2.5.0",
   };
 
-  // ENHANCED: Flag verification - ensure consistency between isCheatingDetected and flags
-  // If isCheatingDetected is true, at least one flag should be detected
-  if (question.isCheatingDetected === true && mergedFlaggedChecks === 0) {
-    logger.warn("V2.5: Inconsistency detected - isCheatingDetected=true but no flags detected", {
-      questionId: responseData.questionId,
-      candidateScreeningId: responseData.candidateScreeningId,
-      existingFlags: existingFlagResults.length,
-      newFlags: newFlagResults.length,
-      mergedFlags: mergedFlagResults.length,
-      cheatingConfidence: question.cheatingConfidence || mergedAnalysis.cheatingConfidence || 0,
-    });
-    
-    // Note: We don't auto-correct here because this might be from webcam processing
-    // The sync validation in processors should have handled this, but we log for monitoring
+  // FIX 1: Bi-directional isCheatingDetected sync
+  // Set true if: existing is true, OR new analysis says true, OR there are detected flags
+  const existingCheatingDetected = question.isCheatingDetected === true;
+  const newCheatingDetected = questionAiResponse.isCheatingDetected === true;
+  const hasFlagEvidence = mergedFlaggedChecks > 0;
+
+  question.isCheatingDetected =
+    existingCheatingDetected || newCheatingDetected || hasFlagEvidence;
+
+  // Log sync decision for monitoring
+  if (hasFlagEvidence && !existingCheatingDetected && !newCheatingDetected) {
+    logger.info(
+      "V2.5: isCheatingDetected synced to true based on detected flags",
+      {
+        questionId: responseData.questionId,
+        mergedFlaggedChecks,
+        detectedFlags: mergedFlagResults
+          .filter((f) => f.detected)
+          .map((f) => f.flag || f.flagKey),
+      }
+    );
   }
 
-  // Preserve maximum cheatingConfidence (from webcam or audio/video/subjective processing)
+  // FIX 3: Calculate cheatingConfidence from flag evidence
   const existingConfidence = question.cheatingConfidence || 0;
   const newConfidence = mergedAnalysis.cheatingConfidence || 0;
-  question.cheatingConfidence = Math.max(existingConfidence, newConfidence);
+
+  // Calculate flag-based confidence: 1 flag = 60%, 2 flags = 70%, 3+ flags = 80%
+  let flagBasedConfidence = 0;
+  if (mergedFlaggedChecks > 0) {
+    flagBasedConfidence = Math.min(60 + mergedFlaggedChecks * 10, 90);
+  }
+
+  // Use maximum of all confidence sources
+  question.cheatingConfidence = Math.max(
+    existingConfidence,
+    newConfidence,
+    flagBasedConfidence
+  );
+
+  // Log if flag-based confidence was used
+  if (
+    flagBasedConfidence > existingConfidence &&
+    flagBasedConfidence > newConfidence
+  ) {
+    logger.info("V2.5: cheatingConfidence set from flag evidence", {
+      questionId: responseData.questionId,
+      existingConfidence,
+      newConfidence,
+      flagBasedConfidence,
+      finalConfidence: question.cheatingConfidence,
+      mergedFlaggedChecks,
+    });
+  }
 
   // Add metadata
   question.processingVersion = "V2.5";
@@ -620,22 +681,29 @@ const saveToDatabase = async (
   });
 
   // Update document-level cheating detection
-  // ENHANCED: Add flag verification - only flag document if at least one flag is detected
-  if (questionAiResponse.isCheatingDetected && !doc.isCheatingDetected) {
+  // FIX: Align with question-level bi-directional sync
+  // Set doc.isCheatingDetected if: question has cheating detected AND sufficient confidence
+  if (question.isCheatingDetected && !doc.isCheatingDetected) {
+    const hasSufficientConfidence = question.cheatingConfidence >= 60;
     const hasDetectedFlags = mergedFlaggedChecks > 0;
-    
-    if (mergedAnalysis.cheatingConfidence >= 75 && hasDetectedFlags) {
+
+    if (hasSufficientConfidence && hasDetectedFlags) {
       doc.isCheatingDetected = true;
       logger.info("V2.5: Document flagged for cheating", {
-        confidence: mergedAnalysis.cheatingConfidence,
+        confidence: question.cheatingConfidence,
         flaggedChecks: mergedFlaggedChecks,
+        syncReason: "question-level cheating with flag evidence",
       });
-    } else if (mergedAnalysis.cheatingConfidence >= 75 && !hasDetectedFlags) {
-      logger.warn("V2.5: Document-level cheating not flagged - no flags detected despite high confidence", {
-        confidence: mergedAnalysis.cheatingConfidence,
-        flaggedChecks: mergedFlaggedChecks,
-        questionId: responseData.questionId,
-      });
+    } else if (hasDetectedFlags && !hasSufficientConfidence) {
+      logger.info(
+        "V2.5: Document-level cheating not flagged - confidence below threshold",
+        {
+          confidence: question.cheatingConfidence,
+          threshold: 60,
+          flaggedChecks: mergedFlaggedChecks,
+          questionId: responseData.questionId,
+        }
+      );
     }
   }
 
@@ -665,8 +733,8 @@ const saveToDatabase = async (
 
   doc.cheatingFlags = finalCheatingFlags;
 
-  // Save document
-  await doc.save();
+  // Save document (with retry for transient failures)
+  await withRetry(() => doc.save(), "saveCandidateScreeningResult");
 
   logger.info("V2.5: Document saved successfully", {
     candidateScreeningId: responseData.candidateScreeningId,

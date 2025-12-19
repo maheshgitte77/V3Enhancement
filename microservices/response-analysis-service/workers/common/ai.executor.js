@@ -190,6 +190,22 @@ const parseAIResponse = (aiResponse, attempt, maxRetries) => {
 };
 
 /**
+ * Default AI timeout in milliseconds (can be overridden via V2_CONFIG.ai.timeoutMs)
+ */
+const DEFAULT_AI_TIMEOUT_MS = 120000; // 2 minutes
+
+/**
+ * Create a timeout promise for AI calls
+ */
+const createAITimeout = (ms, stage) => {
+  return new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Stage ${stage} AI call timed out after ${ms}ms`));
+    }, ms);
+  });
+};
+
+/**
  * Execute AI call with retry logic
  */
 const executeAICall = async (
@@ -200,6 +216,7 @@ const executeAICall = async (
   maxRetries = 3
 ) => {
   const RETRY_BASE_DELAY = 2000;
+  const aiTimeoutMs = V2_CONFIG?.ai?.timeoutMs || DEFAULT_AI_TIMEOUT_MS;
   let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   let parsedAnalysis = null;
 
@@ -209,13 +226,17 @@ const executeAICall = async (
         questionId: responseData?.questionId,
         stage,
         fileInputCount: fileInput.length,
+        timeoutMs: aiTimeoutMs,
       });
 
-      // Make AI call
-      const result = await client.models.generateContent({
-        model: V2_CONFIG.ai.model,
-        contents: [...fileInput, { text: prompt }],
-      });
+      // Make AI call with timeout protection
+      const result = await Promise.race([
+        client.models.generateContent({
+          model: V2_CONFIG.ai.model,
+          contents: [...fileInput, { text: prompt }],
+        }),
+        createAITimeout(aiTimeoutMs, stage),
+      ]);
 
       const aiResponse = result.text;
 
@@ -238,12 +259,14 @@ const executeAICall = async (
       });
       break;
     } catch (error) {
+      const isTimeout = error.message?.includes("timed out");
       logger.error(
         `Stage ${stage} AI call failed (attempt ${attempt}/${maxRetries})`,
         {
           error: error.message,
           stack: error.stack,
           questionId: responseData?.questionId,
+          isTimeout,
         }
       );
 

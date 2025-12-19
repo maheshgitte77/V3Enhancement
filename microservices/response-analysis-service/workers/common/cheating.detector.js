@@ -1,6 +1,7 @@
 /**
- * V2.5 Cheating Detection Module
+ * V3 Cheating Detection Module
  * Algorithmic Stage 3 - Analyzes behavioral observations and scoring to detect cheating
+ * V3: Uses centralized detection config with configurable thresholds
  */
 
 const { ObjectId } = require("mongodb");
@@ -8,12 +9,173 @@ const { ObjectId } = require("mongodb");
 // Logger will be injected during initialization
 let logger = console; // Default fallback
 
+// V3: Detection config will be injected during initialization
+let detectionConfig = null;
+
 /**
- * Initialize cheating detector with logger
- * @param {Object} loggerInstance - Logger instance
+ * Get default V3 detection configuration
+ * Used when no config is passed (backward compatibility)
  */
-const initializeCheatingDetector = (loggerInstance) => {
+const getDefaultDetectionConfig = () => ({
+  readingRelated: {
+    severity: "MEDIUM",
+    confidenceMin: 60, // Lowered from default to catch more reading patterns
+  },
+  directDetection: {
+    severity: "HIGH",
+    confidenceMin: 75, // Lowered for better device/person detection
+  },
+  externalAssistance: {
+    severity: "MEDIUM",
+    confidenceMin: 60, // Lowered to catch more external assistance
+    pasteThresholdHigh: 80,
+    pasteThresholdMedium: 50,
+    requiresMultiSignal: true,
+  },
+  typing: {
+    focusLossHigh: 10,
+    focusLossMedium: 5,
+    pasteThresholdHigh: 80,
+    pasteThresholdMedium: 50,
+  },
+});
+
+/**
+ * Initialize cheating detector with logger and V3 detection config
+ * @param {Object} loggerInstance - Logger instance
+ * @param {Object} config - V3 configuration with detection thresholds
+ */
+const initializeCheatingDetector = (loggerInstance, config = null) => {
   logger = loggerInstance;
+  detectionConfig = config?.cheating?.detection || getDefaultDetectionConfig();
+
+  const legacyMode = config?.cheating?.legacyMode || false;
+
+  logger.info("V3: Cheating detector initialized with detection config", {
+    hasConfig: !!config,
+    legacyMode,
+    readingRelatedSeverity: detectionConfig.readingRelated?.severity,
+    externalAssistanceSeverity: detectionConfig.externalAssistance?.severity,
+  });
+};
+
+/**
+ * Flag type mapping from new integrityAnalysis.flags to legacy flag keys
+ * Used for backward compatibility and direct flag lookup
+ * Supports video-specific, audio-specific, and subjective/typing flag types
+ * V3.2: Refined mappings to reduce false positive cascade
+ * - Clear indicators (READING_FROM_EXTERNAL, MULTIPLE_PERSONS) trigger appropriate flags
+ * - Subtle indicators (SUBTLE_READING, SCRIPTED_DELIVERY) trigger ONLY one flag to avoid cascade
+ */
+const INTEGRITY_FLAG_TYPE_MAP = {
+  // Video-specific flags - CLEAR indicators (high confidence required)
+  READING_FROM_EXTERNAL: ["ReadingFromExternal"], // Clear reading - single flag
+  SAME_SCREEN_READING: ["ReadingFromExternal", "EyesMovement"], // Clear + eye evidence
+
+  // Video-specific flags - SUBTLE indicators (balanced cascade)
+  // V3.3: SUBTLE_READING triggers EyesMovement + ReadingFromExternal (NOT SuspiciousPatterns)
+  SUBTLE_READING: ["EyesMovement", "ReadingFromExternal"], // Reading + eye evidence
+  UNNATURAL_DELIVERY: ["SuspiciousPatterns"], // Only suspicious - not reading
+  MONOTONE_SPEECH: ["SuspiciousPatterns"],
+  OFF_SCREEN_GAZE: ["EyesMovement"], // Only eye movement
+
+  // Video-specific flags - DEFINITIVE indicators (clear evidence)
+  DEVICE_DETECTED: ["MobileDeviceDetected"],
+  MULTIPLE_PERSONS: ["MultiplePersonsDetected"],
+  LIP_SYNC_MISMATCH: ["LipSyncMismatch"],
+  EXTERNAL_COACHING: ["ExternalAssistance"],
+  TIMING_ANOMALY: ["SuspiciousPatterns"],
+
+  // Audio-specific flags (V3)
+  MULTIPLE_VOICES: ["MultipleVoicesDetected", "ExternalAssistance"],
+  BACKGROUND_COACHING: ["ExternalAssistance"],
+
+  // Audio SUBTLE indicators - trigger only ONE flag
+  READING_DELIVERY: ["SuspiciousPatterns"], // Clear reading rhythm = suspicious only
+  SCRIPTED_DELIVERY: ["SuspiciousPatterns"], // Overly perfect = suspicious only (not reading)
+  UNNATURAL_PAUSES: ["SuspiciousPatterns"],
+  VOICE_INCONSISTENCY: ["SuspiciousPatterns"],
+  EXTERNAL_PROMPTS: ["ExternalAssistance"],
+
+  // Subjective/Typing-specific flags (V3)
+  EXCESSIVE_PASTE: ["ExternalAssistance", "PasteDetected"],
+  TAB_SWITCHING: ["TabSwitching", "FocusLoss"],
+  EXTERNAL_INTERACTION: ["ExternalInteraction"],
+  QUESTION_COPYING: ["QuestionCopying"],
+};
+
+/**
+ * Check if a specific flag type exists in the new integrityAnalysis.flags structure
+ * @param {Object} analysis - Analysis data from Stage 1
+ * @param {string} flagKey - Legacy flag key to check (e.g., "ReadingFromExternal")
+ * @param {string} minSeverity - Minimum severity to consider ("LOW", "MEDIUM", "HIGH")
+ * @returns {Object} { detected: boolean, flags: Array, confidence: number }
+ */
+const checkIntegrityFlag = (analysis, flagKey, minSeverity = "HIGH") => {
+  const integrityAnalysis = analysis?.integrityAnalysis;
+
+  // If no new structure present, return not detected (caller should fallback to legacy)
+  if (!integrityAnalysis || !integrityAnalysis.flags) {
+    return {
+      detected: false,
+      flags: [],
+      confidence: 0,
+      hasNewStructure: false,
+    };
+  }
+
+  const severityOrder = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+  const minSeverityLevel = severityOrder[minSeverity] || 3;
+
+  // Find all flag types that map to this legacy flag key
+  const matchingFlagTypes = Object.entries(INTEGRITY_FLAG_TYPE_MAP)
+    .filter(([_, legacyKeys]) => legacyKeys.includes(flagKey))
+    .map(([flagType]) => flagType);
+
+  // Check if any matching flags exist with sufficient severity
+  const matchingFlags = integrityAnalysis.flags.filter((flag) => {
+    const flagSeverityLevel = severityOrder[flag.severity] || 0;
+    return (
+      matchingFlagTypes.includes(flag.type) &&
+      flagSeverityLevel >= minSeverityLevel
+    );
+  });
+
+  const avgConfidence =
+    matchingFlags.length > 0
+      ? matchingFlags.reduce((sum, f) => sum + (f.confidence || 80), 0) /
+        matchingFlags.length
+      : 0;
+
+  return {
+    detected: matchingFlags.length > 0,
+    flags: matchingFlags,
+    confidence: avgConfidence,
+    hasNewStructure: true,
+    verdict: integrityAnalysis.verdict,
+    overallConfidence: integrityAnalysis.confidenceScore,
+  };
+};
+
+/**
+ * Check if the new visualIntegrity structure is present and get values
+ * @param {Object} analysis - Analysis data from Stage 1
+ * @returns {Object} Visual integrity values or null if not present
+ */
+const checkVisualIntegrity = (analysis) => {
+  const visualIntegrity = analysis?.visualIntegrity;
+
+  if (!visualIntegrity) {
+    return null;
+  }
+
+  return {
+    isLipSyncValid: visualIntegrity.isLipSyncValid,
+    isSinglePerson: visualIntegrity.isSinglePerson,
+    deviceDetected: visualIntegrity.deviceDetected,
+    externalScreenDetected: visualIntegrity.externalScreenDetected,
+    hasNewStructure: true,
+  };
 };
 
 /**
@@ -1409,9 +1571,11 @@ const processEnhancedFlags = (
   }
 
   // Always check content-based flags
+  // NOTE: Removed "AICopied" and "CopiedFromWebsite" due to low implementation quality
+  // These flags were triggering false positives frequently
   flagsToCheck.push(
-    "AICopied",
-    "CopiedFromWebsite",
+    // "AICopied",           // DISABLED: Low implementation quality
+    // "CopiedFromWebsite",  // DISABLED: Low implementation quality
     "ExternalAssistance",
     "TabSwitching",
     "QuestionCopying",
@@ -1463,68 +1627,90 @@ const checkFlagDetection = (
 ) => {
   switch (flagKey) {
     case "LipSyncMismatch":
-      return analysis.isLipSync === false;
+      // V3: Check new visualIntegrity structure first
+      const visualIntegrityLip = checkVisualIntegrity(analysis);
+      if (visualIntegrityLip?.hasNewStructure) {
+        return visualIntegrityLip.isLipSyncValid === false;
+      }
+      // V3: Check integrityAnalysis.flags with config-driven threshold
+      const lipSyncFlagCheck = checkIntegrityFlag(
+        analysis,
+        "LipSyncMismatch",
+        detectionConfig?.directDetection?.severity || "HIGH"
+      );
+      // V3 ONLY: Return detection result (no legacy fallback)
+      return lipSyncFlagCheck.detected;
 
     case "EyesMovement":
-      const behavioralAnalysisEyes = analysis.behavioralAnalysis || {};
-      const behavioralTimestampsEyes =
-        behavioralAnalysisEyes.behavioralTimestamps || {};
-
-      // Use cached analysis if available, otherwise calculate
-      const eyeMovementAnalysisEyes =
-        cachedAnalysis?.eyeMovementAnalysis ||
-        analyzeEyeMovementEvents(behavioralTimestampsEyes.eyeMovementEvents);
-
-      // FIX: Only flag if we have timestamp evidence
-      // Summary fields alone are not reliable enough - require actual event evidence
-      // This aligns with cheating detection logic that requires timestamp evidence
-      return eyeMovementAnalysisEyes.hasEvidence;
+      // V3: Check integrityAnalysis.flags with config-driven threshold
+      const eyesFlagCheck = checkIntegrityFlag(
+        analysis,
+        "EyesMovement",
+        detectionConfig?.readingRelated?.severity || "MEDIUM"
+      );
+      // V3 ONLY: Return detection result (no legacy fallback)
+      return eyesFlagCheck.detected;
 
     case "ReadingFromExternal":
-      const behavioralAnalysis = analysis.behavioralAnalysis || {};
-      const behavioralTimestamps =
-        behavioralAnalysis.behavioralTimestamps || {};
+      // V3: Check integrityAnalysis.flags with config-driven threshold
+      // NOTE: Using MEDIUM threshold (lowered from HIGH) for better reading detection
+      const readingFlagCheck = checkIntegrityFlag(
+        analysis,
+        "ReadingFromExternal",
+        detectionConfig?.readingRelated?.severity || "MEDIUM"
+      );
+      // V3 ONLY: Return detection result (no legacy fallback)
+      return readingFlagCheck.detected;
 
-      // Use cached analysis if available, otherwise calculate
-      const eyeMovementAnalysis =
-        cachedAnalysis?.eyeMovementAnalysis ||
-        analyzeEyeMovementEvents(behavioralTimestamps.eyeMovementEvents);
-      const deliveryAnalysis =
-        cachedAnalysis?.deliveryAnalysis ||
-        analyzeResponseDeliveryEvents(
-          behavioralTimestamps.responseDeliveryEvents
+    case "MultipleVoiceDetected":
+      // V3: Check integrityAnalysis.flags for MULTIPLE_VOICES or BACKGROUND_COACHING
+      const voiceFlagCheck = checkIntegrityFlag(
+        analysis,
+        "MultipleVoicesDetected",
+        "LOW"
+      );
+      if (voiceFlagCheck.detected) {
+        logger.debug(
+          "V3: MultipleVoiceDetected via integrityAnalysis.flags (MULTIPLE_VOICES)"
         );
-      const speakingToneAnalysis =
-        cachedAnalysis?.speakingToneAnalysis ||
-        analyzeSpeakingToneEvents(behavioralTimestamps.speakingToneEvents);
-      const sustainedAnalysis =
-        cachedAnalysis?.sustainedAnalysis ||
-        analyzeSustainedCheatingPatterns(behavioralTimestamps);
-
-      // FIX: Add audio-specific behavioral reading check
-      // This ensures audio behavioral reading detection aligns with flag system
-      if (type === "audio") {
-        const audioReadingDetected =
-          checkAudioBehavioralReading(behavioralAnalysis);
-        if (audioReadingDetected) {
+        return true;
+      }
+      // V3: Also check for BACKGROUND_COACHING (often includes whispered prompts)
+      const coachingFlagCheck = checkIntegrityFlag(
+        analysis,
+        "ExternalAssistance",
+        "LOW"
+      );
+      if (coachingFlagCheck.detected) {
+        // Check if any of the flags specifically mention background coaching or voices
+        const hasBackgroundVoice = coachingFlagCheck.flags?.some(
+          (f) =>
+            f.type === "BACKGROUND_COACHING" || f.type === "MULTIPLE_VOICES"
+        );
+        if (hasBackgroundVoice) {
+          logger.debug(
+            "V3: MultipleVoiceDetected via BACKGROUND_COACHING flag"
+          );
           return true;
         }
       }
-
-      // FIX: Require timestamp evidence - summary fields alone not sufficient
-      // This aligns with cheating detection logic that requires timestamp evidence
-      return (
-        eyeMovementAnalysis.hasEvidence ||
-        deliveryAnalysis.hasEvidence ||
-        speakingToneAnalysis.hasEvidence ||
-        sustainedAnalysis.hasSustainedCheating
-      );
-
-    case "MultipleVoiceDetected":
+      // Fallback: Check isOnlyOneVoiceInAudio
       return analysis.isOnlyOneVoiceInAudio === false;
 
     case "MultiplePersonsDetected":
-      return analysis.isOnlyOnePersonInVideo === false;
+      // V3: Check new visualIntegrity structure first
+      const visualIntegrityMulti = checkVisualIntegrity(analysis);
+      if (visualIntegrityMulti?.hasNewStructure) {
+        return visualIntegrityMulti.isSinglePerson === false;
+      }
+      // V3: Check integrityAnalysis.flags with config-driven threshold
+      const multiPersonFlagCheck = checkIntegrityFlag(
+        analysis,
+        "MultiplePersonsDetected",
+        detectionConfig?.directDetection?.severity || "HIGH"
+      );
+      // V3 ONLY: Return detection result (no legacy fallback)
+      return multiPersonFlagCheck.detected;
 
     case "CopyPasteBehavior":
       const pasteCount = responseData.typingAnalysis?.pasteEventCount || 0;
@@ -1618,131 +1804,79 @@ const checkFlagDetection = (
       return fullScreenExits >= 1;
 
     case "SuspiciousPatterns":
-      const behavioralAnalysisSusp = analysis.behavioralAnalysis || {};
-      const behavioralTimestampsSusp =
-        behavioralAnalysisSusp.behavioralTimestamps || {};
-
-      // Use cached analysis if available, otherwise calculate
-      const eyeMovementAnalysisSusp =
-        cachedAnalysis?.eyeMovementAnalysis ||
-        analyzeEyeMovementEvents(behavioralTimestampsSusp.eyeMovementEvents);
-      const speakingToneAnalysisSusp =
-        cachedAnalysis?.speakingToneAnalysis ||
-        analyzeSpeakingToneEvents(behavioralTimestampsSusp.speakingToneEvents);
-      const deliveryAnalysisSusp =
-        cachedAnalysis?.deliveryAnalysis ||
-        analyzeResponseDeliveryEvents(
-          behavioralTimestampsSusp.responseDeliveryEvents
-        );
-      const timingAnalysisSusp =
-        cachedAnalysis?.timingAnalysis ||
-        analyzeTimingPatternEvents(
-          behavioralTimestampsSusp.timingPatternEvents
-        );
-      const sustainedAnalysisSusp =
-        cachedAnalysis?.sustainedAnalysis ||
-        analyzeSustainedCheatingPatterns(behavioralTimestampsSusp);
-
-      // FIX: Require timestamp evidence when only summary indicators present
-      // Check for timestamp-based evidence
-      
-      // ENHANCED: Add confidence requirement for totalSuspiciousTime to reduce false positives
-      // Calculate average confidence from suspicious events if using totalSuspiciousTime
-      const totalSuspiciousTime = behavioralTimestampsSusp.totalSuspiciousTime || 0;
-      let hasTotalSuspiciousTimeEvidence = false;
-      
-      if (totalSuspiciousTime > 10) {
-        // Calculate average confidence from all suspicious events
-        const suspiciousEvents = behavioralTimestampsSusp.suspiciousEvents || [];
-        if (suspiciousEvents.length > 0) {
-          const totalConfidence = suspiciousEvents.reduce((sum, event) => {
-            const conf = event.confidence || 0;
-            // Convert confidence string to number if needed
-            const numConf = typeof conf === 'string' 
-              ? parseFloat(conf.replace('%', '')) || 0 
-              : conf;
-            return sum + numConf;
-          }, 0);
-          const avgConfidence = totalConfidence / suspiciousEvents.length;
-          // Require average confidence >= 50% when using totalSuspiciousTime
-          hasTotalSuspiciousTimeEvidence = avgConfidence >= 50;
-        } else {
-          // If no suspicious events but totalSuspiciousTime > 10, still allow it
-          // (fallback for cases where time is tracked but events aren't)
-          hasTotalSuspiciousTimeEvidence = true;
-        }
-      }
-      
-      const hasTimestampEvidence =
-        eyeMovementAnalysisSusp.hasEvidence ||
-        speakingToneAnalysisSusp.hasEvidence ||
-        deliveryAnalysisSusp.hasEvidence ||
-        timingAnalysisSusp.hasEvidence ||
-        sustainedAnalysisSusp.hasSustainedCheating ||
-        hasTotalSuspiciousTimeEvidence;
-
-      const hasSuspiciousIndicators =
-        behavioralAnalysisSusp.suspiciousIndicators?.length > 0;
-
-      // Only flag if we have timestamp evidence
-      // Summary indicators alone are not sufficient - require actual event evidence
-      // This aligns with cheating detection logic that requires timestamp evidence
-      return hasTimestampEvidence;
+      // V3: Check integrityAnalysis.flags with config-driven threshold
+      const suspPatternsFlagCheck = checkIntegrityFlag(
+        analysis,
+        "SuspiciousPatterns",
+        detectionConfig?.readingRelated?.severity || "MEDIUM"
+      );
+      // V3 ONLY: Detect if flag found OR SUSPECT verdict
+      return (
+        suspPatternsFlagCheck.detected ||
+        suspPatternsFlagCheck.verdict === "SUSPECT"
+      );
 
     case "ExternalAssistance":
-      // Check for external assistance indicators
-      const behavioralAnalysisExt = analysis.behavioralAnalysis || {};
-      const behavioralTimestampsExt =
-        behavioralAnalysisExt.behavioralTimestamps || {};
-
-      // Check for multiple persons/voices (direct indicators - always valid)
-      const hasMultiplePersonsOrVoices =
-        analysis.isOnlyOneVoiceInAudio === false ||
-        analysis.isOnlyOnePersonInVideo === false;
-
-      // Check suspicious events for external assistance patterns (timestamp evidence)
-      const suspiciousEvents = behavioralTimestampsExt.suspiciousEvents || [];
-      const hasExternalAssistanceEvents = suspiciousEvents.some((event) => {
-        if (event.category !== "concerning") return false;
-        const behavior = (event.behavior || "").toLowerCase();
-        const description = (event.description || "").toLowerCase();
-        return (
-          behavior.includes("external assistance") ||
-          behavior.includes("background coaching") ||
-          behavior.includes("multiple voices") ||
-          behavior.includes("voice inconsistency") ||
-          description.includes("external") ||
-          description.includes("coaching") ||
-          description.includes("whisper") ||
-          description.includes("background voice")
-        );
-      });
-
-      // FIX: Check suspicious indicators for external assistance keywords
-      // But only use them if we also have event evidence
-      const hasExternalAssistanceIndicators =
-        behavioralAnalysisExt.suspiciousIndicators?.some((indicator) => {
-          if (typeof indicator !== "string") return false;
-          const lower = indicator.toLowerCase();
-          return (
-            lower.includes("external") ||
-            lower.includes("assistance") ||
-            lower.includes("coaching") ||
-            lower.includes("help") ||
-            lower.includes("whisper") ||
-            lower.includes("background voice") ||
-            lower.includes("multiple voices") ||
-            lower.includes("other person")
-          );
-        }) || false;
-
-      // FIX: Require event evidence when only indicators present
-      // This aligns with cheating detection logic that requires timestamp evidence
-      return (
-        hasMultiplePersonsOrVoices ||
-        hasExternalAssistanceEvents ||
-        (hasExternalAssistanceIndicators && hasExternalAssistanceEvents)
+      // V3: Check integrityAnalysis.flags with config-driven threshold
+      const extAssistConfig = detectionConfig?.externalAssistance;
+      const extAssistFlagCheck = checkIntegrityFlag(
+        analysis,
+        "ExternalAssistance",
+        extAssistConfig?.severity || "MEDIUM"
       );
+      if (extAssistFlagCheck.detected) {
+        return true;
+      }
+
+      // V3: Check for multiple persons/voices via visualIntegrity
+      const visualIntegrityExt = checkVisualIntegrity(analysis);
+      if (visualIntegrityExt?.hasNewStructure) {
+        if (visualIntegrityExt.isSinglePerson === false) {
+          return true;
+        }
+      }
+
+      // V3: Paste-based detection for subjective questions
+      const extPastePercentage =
+        responseData.typingAnalysis?.pasteAnalysis?.pastePercentage || 0;
+      const pasteThreshold = extAssistConfig?.pasteThresholdHigh || 80;
+      if (extPastePercentage >= pasteThreshold) {
+        logger.debug("V3: ExternalAssistance detected via paste threshold", {
+          extPastePercentage,
+          pasteThreshold,
+        });
+        return true;
+      }
+
+      // V3: Multi-signal correlation detection
+      // If candidate copied question AND tab switched AND shows reading behavior = external assistance
+      if (extAssistConfig?.requiresMultiSignal !== false) {
+        const hasTabSwitchingExt = (responseData.tabSwitchCount || 0) >= 1;
+        const hasQuestionCopyingExt =
+          responseData.copyPasteAnalysis?.hasQuestionCopying ||
+          responseData.typingAnalysis?.copyPasteAnalysis?.hasQuestionCopying ||
+          false;
+        const hasReadingExt = checkIntegrityFlag(
+          analysis,
+          "ReadingFromExternal",
+          "MEDIUM"
+        ).detected;
+
+        if (hasQuestionCopyingExt && hasTabSwitchingExt && hasReadingExt) {
+          logger.debug(
+            "V3: ExternalAssistance detected via multi-signal correlation",
+            {
+              hasTabSwitchingExt,
+              hasQuestionCopyingExt,
+              hasReadingExt,
+            }
+          );
+          return true;
+        }
+      }
+
+      // V3 ONLY: No legacy fallback
+      return false;
 
     case "AICopied":
       // Check if analysis contains AI detection data
@@ -1776,12 +1910,72 @@ const checkFlagDetection = (
       );
 
     case "OtherRelevantNoise":
-      // Check for background noise/assistance indicators
+      // V3: Check backgroundNoise object first (most direct)
+      const bgNoise = analysis.backgroundNoise;
+      if (bgNoise) {
+        // Check for coaching sounds in description
+        const bgDesc = (bgNoise.description || "").toLowerCase();
+        if (
+          bgDesc.includes("voice") ||
+          bgDesc.includes("coach") ||
+          bgDesc.includes("whisper") ||
+          bgDesc.includes("prompt") ||
+          bgDesc.includes("speaking") ||
+          bgDesc.includes("talking")
+        ) {
+          logger.debug(
+            "V3: OtherRelevantNoise detected via backgroundNoise.description"
+          );
+          return true;
+        }
+        // Check for significant noise level
+        if (
+          bgNoise.level === "high" ||
+          bgNoise.contextualImpact === "Significant"
+        ) {
+          logger.debug(
+            "V3: OtherRelevantNoise detected via backgroundNoise level/impact"
+          );
+          return true;
+        }
+        // Check for medium level with voices
+        if (
+          bgNoise.level === "medium" &&
+          (bgDesc.includes("voices") || bgDesc.includes("background"))
+        ) {
+          logger.debug(
+            "V3: OtherRelevantNoise detected via medium backgroundNoise with voices"
+          );
+          return true;
+        }
+      }
+
+      // V3: Check integrityAnalysis.flags for BACKGROUND_COACHING or EXTERNAL_PROMPTS
+      const noiseFlagCheck = checkIntegrityFlag(
+        analysis,
+        "ExternalAssistance",
+        "LOW"
+      );
+      if (noiseFlagCheck.detected) {
+        const hasRelevantNoise = noiseFlagCheck.flags?.some(
+          (f) =>
+            f.type === "BACKGROUND_COACHING" ||
+            f.type === "EXTERNAL_PROMPTS" ||
+            f.type === "MULTIPLE_VOICES"
+        );
+        if (hasRelevantNoise) {
+          logger.debug(
+            "V3: OtherRelevantNoise detected via integrityAnalysis.flags"
+          );
+          return true;
+        }
+      }
+
+      // Fallback: Check behavioral analysis (existing logic)
       const behavioralAnalysisNoise = analysis.behavioralAnalysis || {};
       const behavioralTimestampsNoise =
         behavioralAnalysisNoise.behavioralTimestamps || {};
 
-      // FIX: Check for suspicious events (timestamp evidence) related to noise
       const suspiciousEventsNoise =
         behavioralTimestampsNoise.suspiciousEvents || [];
       const hasNoiseEvents = suspiciousEventsNoise.some((event) => {
@@ -1811,12 +2005,30 @@ const checkFlagDetection = (
               indicator.toLowerCase().includes("external assistance"))
         ) || false;
 
-      // FIX: Require event evidence when only indicators present
-      // This aligns with cheating detection logic that requires timestamp evidence
       return hasNoiseEvents || (hasNoiseIndicators && hasNoiseEvents);
 
     case "MobileDeviceDetected":
-      // Check for mobile device indicators
+      // V3: Check visualIntegrity structure first (most reliable)
+      const visualIntegrityDevice = checkVisualIntegrity(analysis);
+      if (visualIntegrityDevice?.hasNewStructure) {
+        if (visualIntegrityDevice.deviceDetected === true) {
+          logger.debug(
+            "V3: MobileDeviceDetected via visualIntegrity.deviceDetected"
+          );
+          return true;
+        }
+      }
+      // V3: Check integrityAnalysis.flags for DEVICE_DETECTED
+      const deviceFlagCheck = checkIntegrityFlag(
+        analysis,
+        "MobileDeviceDetected",
+        "LOW"
+      );
+      if (deviceFlagCheck.detected) {
+        logger.debug("V3: MobileDeviceDetected via integrityAnalysis.flags");
+        return true;
+      }
+      // Fallback: Check cheatingIndicators array
       return (
         analysis.cheatingIndicators?.some(
           (indicator) =>
@@ -1998,9 +2210,15 @@ module.exports = {
   checkFlagDetection,
   checkAudioBehavioralReading,
   validateCheatingFlagSync,
-  // NEW: Export new analysis functions for testing/debugging
+  // Analysis functions for testing/debugging
   analyzeEyeMovementEvents,
   analyzeSpeakingToneEvents,
   analyzeResponseDeliveryEvents,
   analyzeTimingPatternEvents,
+  // V3: Structured integrity flag helpers
+  checkIntegrityFlag,
+  checkVisualIntegrity,
+  INTEGRITY_FLAG_TYPE_MAP,
+  // V3: Config helpers
+  getDefaultDetectionConfig,
 };

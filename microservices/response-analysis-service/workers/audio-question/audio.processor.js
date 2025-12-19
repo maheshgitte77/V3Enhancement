@@ -1,6 +1,7 @@
 /**
- * V2.5 Audio Processor
+ * V3 Audio Processor
  * Multi-stage audio processing: Behavioral Analysis → Scoring → Cheating Detection
+ * Optimized with file cleanup, configurable polling, and enhanced error handling
  */
 
 const path = require("path");
@@ -24,16 +25,27 @@ const initializeAudioProcessor = (dependencies) => {
   cheatingDetector = dependencies.cheatingDetector;
   resultMerger = dependencies.resultMerger;
   databaseHandler = dependencies.databaseHandler;
+
+  // Allow overriding polling config
+  if (dependencies.pollConfig) {
+    POLL_CONFIG = { ...POLL_CONFIG, ...dependencies.pollConfig };
+  }
 };
 
 /**
  * File upload and polling utilities
  */
-const MAX_POLL_ATTEMPTS = 10;
+// Default polling configuration (can be overridden via initializeAudioProcessor)
+let POLL_CONFIG = {
+  maxAttempts: 10,
+  baseDelayMs: 1000,
+  maxDelayMs: 16000,
+  consecutiveErrorThreshold: 3,
+};
 
 const uploadFile = async (filePath, fileName, mimeType) => {
   try {
-    logger.info("V2.5: Starting audio file upload", {
+    logger.info("V3: Starting audio file upload", {
       fileName,
       filePath,
       mimeType,
@@ -47,7 +59,7 @@ const uploadFile = async (filePath, fileName, mimeType) => {
       },
     });
 
-    logger.info("V2.5: Audio file uploaded successfully", {
+    logger.info("V3: Audio file uploaded successfully", {
       fileName,
       fileId: uploadedFile.name,
       uri: uploadedFile.uri,
@@ -55,7 +67,7 @@ const uploadFile = async (filePath, fileName, mimeType) => {
 
     return uploadedFile;
   } catch (error) {
-    logger.error("V2.5: Audio file upload failed", {
+    logger.error("V3: Audio file upload failed", {
       fileName,
       error: error.message,
     });
@@ -63,16 +75,38 @@ const uploadFile = async (filePath, fileName, mimeType) => {
   }
 };
 
+/**
+ * Delete uploaded file from Google AI storage
+ * Called after processing to clean up storage and avoid costs/quota issues
+ */
+const deleteUploadedFile = async (fileName) => {
+  try {
+    if (!fileName) return;
+
+    logger.info("V3: Deleting uploaded file from Google AI", { fileName });
+    await client.files.delete({ name: fileName });
+    logger.info("V3: File deleted successfully", { fileName });
+  } catch (error) {
+    // Log but don't throw - cleanup failures shouldn't break processing
+    logger.warn("V3: Failed to delete uploaded file", {
+      fileName,
+      error: error.message,
+    });
+  }
+};
+
 const pollFileStatus = async (fileName) => {
   let lastKnownState = null;
   let consecutiveErrors = 0;
+  let lastKnownUri = null; // Track URI for optimistic fallback
+  let lastKnownMimeType = null; // Track mimeType for optimistic fallback
 
-  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < POLL_CONFIG.maxAttempts; attempt++) {
     try {
       logger.info(
-        `V2.5: Polling file status - attempt ${
-          attempt + 1
-        }/${MAX_POLL_ATTEMPTS}`,
+        `V3: Polling file status - attempt ${attempt + 1}/${
+          POLL_CONFIG.maxAttempts
+        }`,
         {
           fileName,
           attempt: attempt + 1,
@@ -83,8 +117,11 @@ const pollFileStatus = async (fileName) => {
       const file = await client.files.get({ name: fileName });
       consecutiveErrors = 0;
       lastKnownState = file.state;
+      // Capture URI and mimeType when available for fallback
+      if (file.uri) lastKnownUri = file.uri;
+      if (file.mimeType) lastKnownMimeType = file.mimeType;
 
-      logger.info("V2.5: File status check result", {
+      logger.info("V3: File status check result", {
         fileName,
         state: file.state,
         attempt: attempt + 1,
@@ -95,41 +132,49 @@ const pollFileStatus = async (fileName) => {
       if (file.state !== "PROCESSING")
         throw new Error(`Unexpected file state: ${file.state}`);
 
-      const delay = Math.min(1000 * Math.pow(2, attempt), 16000);
-      logger.info(`V2.5: Waiting ${delay}ms before next poll attempt`, {
+      const delay = Math.min(
+        POLL_CONFIG.baseDelayMs * Math.pow(2, attempt),
+        POLL_CONFIG.maxDelayMs
+      );
+      logger.info(`V3: Waiting ${delay}ms before next poll attempt`, {
         fileName,
         delay,
       });
       await new Promise((res) => setTimeout(res, delay));
     } catch (error) {
       consecutiveErrors++;
-      logger.warn(`V2.5: File status polling failed - attempt ${attempt + 1}`, {
+      logger.warn(`V3: File status polling failed - attempt ${attempt + 1}`, {
         fileName,
         error: error.message,
         consecutiveErrors,
       });
 
       // If we've had too many consecutive errors, use optimistic processing
-      if (consecutiveErrors >= 3) {
-        logger.warn("V2.5: Using optimistic processing due to polling errors", {
+      if (consecutiveErrors >= POLL_CONFIG.consecutiveErrorThreshold) {
+        logger.warn("V3: Using optimistic processing due to polling errors", {
           fileName,
           lastKnownState,
+          lastKnownUri,
         });
         return {
           name: fileName,
           state: lastKnownState || "UNKNOWN",
           optimisticProcessing: true,
           originalLastState: lastKnownState,
+          uri: lastKnownUri, // Include URI for fallback
+          mimeType: lastKnownMimeType, // Include mimeType for fallback
         };
       }
 
-      if (attempt === MAX_POLL_ATTEMPTS - 1) {
+      if (attempt === POLL_CONFIG.maxAttempts - 1) {
         throw error;
       }
     }
   }
 
-  throw new Error(`File polling timed out after ${MAX_POLL_ATTEMPTS} attempts`);
+  throw new Error(
+    `File polling timed out after ${POLL_CONFIG.maxAttempts} attempts`
+  );
 };
 
 /**
@@ -140,8 +185,9 @@ const pollFileStatus = async (fileName) => {
  */
 const processAudioResponse = async (responseData) => {
   const startTime = Date.now();
+  let uploadedFileName = null; // Track for cleanup
 
-  logger.info("V2.5: Starting audio processing with multi-stage pipeline", {
+  logger.info("V3: Starting audio processing with multi-stage pipeline", {
     questionId: responseData.questionId,
     candidateScreeningId: responseData.candidateScreeningId,
   });
@@ -157,6 +203,19 @@ const processAudioResponse = async (responseData) => {
     const fileName = file.filename || file.originalname;
     const fileMimetype = file.mimetype;
 
+    // Validate required file properties
+    if (!fileName) {
+      throw new Error(
+        "File name is missing: both filename and originalname are undefined"
+      );
+    }
+    if (!fileMimetype) {
+      throw new Error("File mimetype is missing in responseData.file");
+    }
+    if (!file.path) {
+      throw new Error("File path is missing in responseData.file");
+    }
+
     // Resolve file path - handle both absolute and relative paths
     let mediaPath;
     if (path.isAbsolute(file.path)) {
@@ -168,7 +227,7 @@ const processAudioResponse = async (responseData) => {
       mediaPath = path.resolve(projectRoot, file.path);
     }
 
-    logger.info("V2.5: Validating file path", {
+    logger.info("V3: Validating file path", {
       fileName: fileName,
       mediaPath,
       filePath: file.path,
@@ -185,35 +244,37 @@ const processAudioResponse = async (responseData) => {
 
     // Upload file to Google AI
     const uploadedFile = await uploadFile(mediaPath, fileName, fileMimetype);
+    uploadedFileName = uploadedFile.name; // Store for cleanup
+    const uploadedUri = uploadedFile.uri; // Capture immediately for fallback
 
     // Poll for file to be ready
     const polledFile = await pollFileStatus(uploadedFile.name);
 
-    // Prepare file input for AI
+    // Prepare file input for AI (use uploadedUri as fallback if polling returned optimistic result)
     const fileInput = [
       {
         fileData: {
           mimeType: polledFile.mimeType || fileMimetype,
-          fileUri: polledFile.uri,
+          fileUri: polledFile.uri || uploadedUri, // Fallback to uploaded URI
         },
       },
     ];
 
-    logger.info("V2.5: File ready for processing", {
+    logger.info("V3: File ready for processing", {
       fileName: fileName,
       fileUri: polledFile.uri,
       optimisticProcessing: !!polledFile.optimisticProcessing,
     });
 
     // ====== STAGE 1: Behavioral Analysis + Transcription ======
-    logger.info("V2.5: Stage 1 - Starting behavioral analysis");
+    logger.info("V3: Stage 1 - Starting behavioral analysis");
     const stage1Results = await aiExecutor.executeBehavioralAnalysis(
       fileInput,
       responseData,
       "audio"
     );
 
-    logger.info("V2.5: Stage 1 - Behavioral analysis completed", {
+    logger.info("V3: Stage 1 - Behavioral analysis completed", {
       hasTranscription: !!stage1Results.transcription,
       suspiciousIndicators:
         stage1Results.behavioralAnalysis?.suspiciousIndicators?.length || 0,
@@ -221,18 +282,18 @@ const processAudioResponse = async (responseData) => {
     });
 
     // ====== STAGES 2 & 3: Concurrent Execution ======
-    logger.info("V2.5: Starting concurrent Stages 2 & 3");
+    logger.info("V3: Starting concurrent Stages 2 & 3");
 
     const [stage2Results, stage3InitialResults] = await Promise.all([
       // Stage 2: Scoring (uses transcript from Stage 1)
       (async () => {
-        logger.info("V2.5: Stage 2 - Starting scoring");
+        logger.info("V3: Stage 2 - Starting scoring");
         const results = await aiExecutor.executeScoring(
           stage1Results,
           responseData,
           "audio"
         );
-        logger.info("V2.5: Stage 2 - Scoring completed", {
+        logger.info("V3: Stage 2 - Scoring completed", {
           correctPercentage: results.correctPercentage,
           overallRating: results.overallRating,
         });
@@ -241,7 +302,7 @@ const processAudioResponse = async (responseData) => {
 
       // Stage 3: Initial Cheating Detection (algorithmic, using Stage 1 data)
       (async () => {
-        logger.info("V2.5: Stage 3 - Starting initial cheating detection");
+        logger.info("V3: Stage 3 - Starting initial cheating detection");
         const results = cheatingDetector.detectCheating(
           stage1Results,
           null, // Stage 2 not available yet
@@ -249,7 +310,7 @@ const processAudioResponse = async (responseData) => {
           "audio",
           null // No typing analysis for audio
         );
-        logger.info("V2.5: Stage 3 - Initial cheating detection completed", {
+        logger.info("V3: Stage 3 - Initial cheating detection completed", {
           isCheatingDetected: results.isCheatingDetected,
           cheatingConfidence: results.cheatingConfidence,
         });
@@ -258,7 +319,7 @@ const processAudioResponse = async (responseData) => {
     ]);
 
     // ====== STAGE 3 REFINEMENT: Update with Stage 2 context ======
-    logger.info("V2.5: Refining cheating detection with Stage 2 context");
+    logger.info("V3: Refining cheating detection with Stage 2 context");
     const finalCheatingResults = cheatingDetector.refineCheatingDetection(
       stage3InitialResults,
       stage2Results,
@@ -294,7 +355,7 @@ const processAudioResponse = async (responseData) => {
 
     // Log warning if flags were auto-corrected
     if (syncValidation.wasAutoCorrected) {
-      logger.warn("V2.5: Flag sync issue detected and auto-corrected", {
+      logger.warn("V3: Flag sync issue detected and auto-corrected", {
         syncIssue: syncValidation.syncIssue,
         questionId: responseData.questionId,
         originalFlaggedChecks: flagResults.filter((f) => f.detected).length,
@@ -302,7 +363,7 @@ const processAudioResponse = async (responseData) => {
       });
     }
 
-    logger.info("V2.5: Flag processing completed", {
+    logger.info("V3: Flag processing completed", {
       flaggedChecks: flagStats.flaggedChecks,
       totalChecks: flagStats.totalChecks,
       isSynced: syncValidation.isSynced,
@@ -310,56 +371,61 @@ const processAudioResponse = async (responseData) => {
     });
 
     // ====== MERGE RESULTS ======
-    logger.info("V2.5: Merging all stage results");
+    logger.info("V3: Merging all stage results");
     const mergedAnalysis = resultMerger.mergeAnalysisResults(
       stage1Results,
       stage2Results,
       finalCheatingResults
     );
 
-    // Cleanup contradictory content
-    const cleanedAnalysis =
-      resultMerger.cleanupContradictoryContent(mergedAnalysis);
-
     // Validate results
-    const validation = resultMerger.validateMergedResults(cleanedAnalysis);
+    const validation = resultMerger.validateMergedResults(mergedAnalysis);
     if (!validation.isValid) {
-      logger.warn("V2.5: Validation issues found in merged results", {
+      logger.warn("V3: Validation issues found in merged results", {
         issues: validation.issues,
       });
     }
 
     // Calculate total processing cost
+    const hasCostMetadata = !!mergedAnalysis.processingMetadata?.totalCost;
+    if (!hasCostMetadata) {
+      logger.warn("V3: Processing cost metadata missing, using defaults", {
+        questionId: responseData.questionId,
+        hasProcessingMetadata: !!mergedAnalysis.processingMetadata,
+      });
+    }
+
     const processingCost = {
-      totalCost: cleanedAnalysis.processingMetadata?.totalCost || 0,
-      breakdown: cleanedAnalysis.processingMetadata?.breakdown || {},
+      totalCost: mergedAnalysis.processingMetadata?.totalCost || 0,
+      breakdown: mergedAnalysis.processingMetadata?.breakdown || {},
       currency: "USD",
+      isEstimated: !hasCostMetadata,
     };
 
     // ====== SAVE TO DATABASE ======
-    logger.info("V2.5: Saving results to database");
+    logger.info("V3: Saving results to database");
     const { questionAiResponse, doc, question } =
       await databaseHandler.saveToDatabase(
-        cleanedAnalysis,
+        mergedAnalysis,
         responseData,
-        flagResults,
+        validatedFlagResults, // Use validated/auto-corrected flags
         flagStats,
         processingCost
       );
 
     const totalDuration = Date.now() - startTime;
 
-    logger.info("V2.5: Audio processing completed successfully", {
+    logger.info("V3: Audio processing completed successfully", {
       questionId: responseData.questionId,
       totalDuration,
       stage1Duration: stage1Results.metadata?.duration || 0,
       stage2Duration: stage2Results.metadata?.duration || 0,
       totalCost: processingCost.totalCost,
-      isCheatingDetected: cleanedAnalysis.isCheatingDetected,
-      correctPercentage: cleanedAnalysis.correctPercentage,
+      isCheatingDetected: mergedAnalysis.isCheatingDetected,
+      correctPercentage: mergedAnalysis.correctPercentage,
     });
 
-    return {
+    const result = {
       success: true,
       questionAiResponse,
       doc,
@@ -367,7 +433,7 @@ const processAudioResponse = async (responseData) => {
       processingCost,
       duration: totalDuration,
       metadata: {
-        processingVersion: "V2.5-MultiStage",
+        processingVersion: "V3-MultiStage",
         stages: {
           stage1: stage1Results.metadata,
           stage2: stage2Results.metadata,
@@ -375,15 +441,96 @@ const processAudioResponse = async (responseData) => {
         },
       },
     };
+
+    // Cleanup uploaded file from Google AI storage
+    await deleteUploadedFile(uploadedFileName);
+
+    return result;
   } catch (error) {
-    logger.error("V2.5: Audio processing failed", {
+    const totalDuration = Date.now() - startTime;
+
+    // Categorize error type for monitoring/alerting
+    const errorCategory = categorizeError(error);
+    const failedStage = determineFailedStage(error);
+
+    // Cleanup on error
+    if (uploadedFileName) {
+      await deleteUploadedFile(uploadedFileName);
+    }
+
+    logger.error("V3: Audio processing failed", {
       questionId: responseData.questionId,
+      candidateScreeningId: responseData.candidateScreeningId,
       error: error.message,
       stack: error.stack,
+      errorCategory,
+      failedStage,
+      totalDuration,
     });
 
     throw error;
   }
+};
+
+/**
+ * Categorize error for monitoring/alerting
+ */
+const categorizeError = (error) => {
+  const message = error.message?.toLowerCase() || "";
+
+  if (message.includes("timeout") || message.includes("timed out")) {
+    return "TIMEOUT";
+  }
+  if (message.includes("not found") || message.includes("missing")) {
+    return "NOT_FOUND";
+  }
+  if (message.includes("upload") || message.includes("file")) {
+    return "FILE_ERROR";
+  }
+  if (
+    message.includes("stage 1") ||
+    message.includes("stage 2") ||
+    message.includes("behavioral") ||
+    message.includes("scoring")
+  ) {
+    return "AI_PROCESSING";
+  }
+  if (
+    message.includes("database") ||
+    message.includes("mongo") ||
+    message.includes("save")
+  ) {
+    return "DATABASE";
+  }
+  return "UNKNOWN";
+};
+
+/**
+ * Determine which stage failed based on error context
+ */
+const determineFailedStage = (error) => {
+  const message = error.message?.toLowerCase() || "";
+
+  if (message.includes("upload") || message.includes("polling")) {
+    return "PRE_STAGE";
+  }
+  if (message.includes("stage 1") || message.includes("behavioral")) {
+    return "STAGE_1";
+  }
+  if (message.includes("stage 2") || message.includes("scoring")) {
+    return "STAGE_2";
+  }
+  if (message.includes("cheating") || message.includes("flag")) {
+    return "STAGE_3";
+  }
+  if (
+    message.includes("merge") ||
+    message.includes("database") ||
+    message.includes("save")
+  ) {
+    return "POST_PROCESSING";
+  }
+  return "UNKNOWN";
 };
 
 module.exports = {
@@ -391,4 +538,5 @@ module.exports = {
   processAudioResponse,
   uploadFile,
   pollFileStatus,
+  deleteUploadedFile,
 };

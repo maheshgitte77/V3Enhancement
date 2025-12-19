@@ -31,7 +31,23 @@ const mergeAnalysisResults = (stage1Results, stage2Results, stage3Results) => {
 
     // Communication assessment
     if (stage1Results.communication) {
-      mergedAnalysis.communication = stage1Results.communication;
+      if (
+        typeof stage1Results.communication === "object" &&
+        stage1Results.communication.summary
+      ) {
+        mergedAnalysis.communication = stage1Results.communication.summary;
+
+        // Extract confidence level if not already present at root (V3 Video prompt specific)
+        if (
+          !stage1Results.confidenceLevel &&
+          stage1Results.communication.confidenceLevel
+        ) {
+          mergedAnalysis.confidenceLevel =
+            stage1Results.communication.confidenceLevel;
+        }
+      } else {
+        mergedAnalysis.communication = stage1Results.communication;
+      }
     }
 
     // Communication rating (from Stage 1 - based on actual audio/video)
@@ -78,6 +94,16 @@ const mergeAnalysisResults = (stage1Results, stage2Results, stage3Results) => {
     // Answer time (includes relevanceBreakdown from Stage 1)
     if (stage1Results.answerTime) {
       mergedAnalysis.answerTime = stage1Results.answerTime;
+    }
+
+    // Integrity analysis (V3 structure - video and audio)
+    if (stage1Results.integrityAnalysis) {
+      mergedAnalysis.integrityAnalysis = stage1Results.integrityAnalysis;
+    }
+
+    // Visual integrity (video-specific)
+    if (stage1Results.visualIntegrity) {
+      mergedAnalysis.visualIntegrity = stage1Results.visualIntegrity;
     }
   }
 
@@ -263,8 +289,10 @@ const validateMergedResults = (merged) => {
   if (merged.communication && merged.communicationRating) {
     const rating = parseFloat(merged.communicationRating);
     const hasNegative =
-      merged.communication.toLowerCase().includes("poor") ||
-      merged.communication.toLowerCase().includes("unclear");
+      (typeof merged.communication === "string" &&
+        (merged.communication.toLowerCase().includes("poor") ||
+          merged.communication.toLowerCase().includes("unclear"))) ||
+      false;
 
     if (rating >= 4.0 && hasNegative) {
       issues.push({
@@ -349,7 +377,10 @@ const cleanupContradictoryContent = (analysis) => {
 
   // If cheating detected, remove any statements saying "no integrity concerns" from text fields
   if (cleaned.isCheatingDetected) {
-    if (cleaned.detailedSummary) {
+    if (
+      cleaned.detailedSummary &&
+      typeof cleaned.detailedSummary === "string"
+    ) {
       cleaned.detailedSummary = cleaned.detailedSummary
         .replace(/no integrity concerns/gi, "")
         .replace(/honest assessment/gi, "")
@@ -357,7 +388,7 @@ const cleanupContradictoryContent = (analysis) => {
         .trim();
     }
 
-    if (cleaned.communication) {
+    if (cleaned.communication && typeof cleaned.communication === "string") {
       cleaned.communication = cleaned.communication
         .replace(/no concerns/gi, "")
         .replace(/honest/gi, "")
@@ -367,7 +398,10 @@ const cleanupContradictoryContent = (analysis) => {
 
   // If NOT cheating, remove any negative integrity statements
   if (!cleaned.isCheatingDetected) {
-    if (cleaned.detailedSummary) {
+    if (
+      cleaned.detailedSummary &&
+      typeof cleaned.detailedSummary === "string"
+    ) {
       cleaned.detailedSummary = cleaned.detailedSummary
         .replace(/reading from external/gi, "")
         .replace(/external assistance/gi, "")
@@ -449,6 +483,7 @@ const mergeSubjectiveResults = (
     hasScoring: !!scoringResults,
     hasCheating: !!cheatingResults,
     hasLanguageDetection: !!scoringResults?.languageDetection,
+    hasIntegrityAnalysis: !!behavioralAnalysis?.integrityAnalysis,
   });
 
   const merged = {
@@ -469,6 +504,11 @@ const mergeSubjectiveResults = (
       languageDetection: scoringResults.languageDetection,
     }),
 
+    // V3: Preserve integrityAnalysis from typing analysis
+    ...(behavioralAnalysis?.integrityAnalysis && {
+      integrityAnalysis: behavioralAnalysis.integrityAnalysis,
+    }),
+
     // Cheating detection
     isCheatingDetected: cheatingResults?.isCheatingDetected || false,
     cheatingConfidence: cheatingResults?.cheatingConfidence || 0,
@@ -486,6 +526,8 @@ const mergeSubjectiveResults = (
 
   logger.info("Subjective results merged successfully", {
     hasLanguageDetection: !!merged.languageDetection,
+    hasIntegrityAnalysis: !!merged.integrityAnalysis,
+    integrityVerdict: merged.integrityAnalysis?.verdict || "N/A",
     primaryLanguage:
       merged.languageDetection?.primaryLanguage || "Not detected",
   });
