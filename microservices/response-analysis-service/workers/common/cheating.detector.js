@@ -1437,7 +1437,7 @@ const detectCheating = (
 
 /**
  * Process enhanced flags for cheating detection
- * This function integrates with the existing flag system from responseWorkerV2.js
+ * This function integrates with the V2.5 multi-stage processing flag system
  */
 const processEnhancedFlags = (
   analysis,

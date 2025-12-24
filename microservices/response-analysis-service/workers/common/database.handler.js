@@ -749,10 +749,128 @@ const saveToDatabase = async (
   };
 };
 
+/**
+ * Save programming analysis to screeningprogramminganalyses collection
+ * (Same structure as old screening-service)
+ */
+const saveProgrammingAnalysis = async ({
+  candidateScreeningId,
+  screeningTestId,
+  questionId,
+  skill,
+  analysis,
+  tokenUsage,
+  processingCost,
+}) => {
+  const mongoose = require("mongoose");
+  const { ObjectId } = mongoose.Types;
+
+  // Use native MongoDB for this collection
+  const db = mongoose.connection.db;
+
+  const doc = {
+    candidateScreeningId: candidateScreeningId,
+    screeningTestId: new ObjectId(screeningTestId),
+    questionId: new ObjectId(questionId),
+    skill,
+    ...analysis, // logicalCorrectness, codeQuality, overallAssessment
+    tokenUsage: tokenUsage || {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    },
+    processingCost: processingCost || {
+      totalCost: 0,
+      currency: "USD",
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const result = await db
+    .collection("screeningprogramminganalyses")
+    .insertOne(doc);
+
+  logger.info("Programming analysis saved to database", {
+    candidateScreeningId,
+    questionId,
+    analysisId: result.insertedId,
+  });
+
+  return result.insertedId;
+};
+
+/**
+ * Update programming question with analysisId
+ */
+const updateProgrammingQuestionAnalysis = async ({
+  candidateScreeningId,
+  skill,
+  questionId,
+  analysisId,
+  processingCost,
+}) => {
+  const mongoose = require("mongoose");
+  const { ObjectId } = mongoose.Types;
+  const db = mongoose.connection.db;
+
+  // Convert candidateScreeningId to ObjectId if it's a string
+  const candidateScreeningObjectId =
+    typeof candidateScreeningId === "string"
+      ? new ObjectId(candidateScreeningId)
+      : candidateScreeningId;
+
+  // Fetch current document
+  const doc = await db.collection("candidatescreeningresults").findOne({
+    candidateScreeningId: candidateScreeningObjectId,
+  });
+
+  if (!doc) {
+    logger.error(
+      "Candidate screening result not found for programming update",
+      {
+        candidateScreeningId,
+        candidateScreeningIdType: typeof candidateScreeningId,
+      }
+    );
+    return;
+  }
+
+  // Update the specific question
+  const updatedSkills = doc.skills.map((skillItem) => {
+    if (skillItem.skill === skill && skillItem.programming) {
+      skillItem.programming = skillItem.programming.map((question) => {
+        if (question._id.toString() === questionId.toString()) {
+          question.programmingAnalysisId = analysisId;
+          question.programmingAnalysisTimestamp = new Date();
+          question.processingCost = processingCost;
+        }
+        return question;
+      });
+    }
+    return skillItem;
+  });
+
+  await db
+    .collection("candidatescreeningresults")
+    .updateOne(
+      { candidateScreeningId: candidateScreeningObjectId },
+      { $set: { skills: updatedSkills } }
+    );
+
+  logger.info("Programming question updated with analysisId", {
+    candidateScreeningId,
+    questionId,
+    analysisId,
+  });
+};
+
 module.exports = {
   initializeDatabaseHandler,
   saveToDatabase,
   createTypeSpecificRecord,
   generateTypeSpecificContextualFactors,
   normalizeCorrectPercentageForStorage,
+  saveProgrammingAnalysis,
+  updateProgrammingQuestionAnalysis,
 };

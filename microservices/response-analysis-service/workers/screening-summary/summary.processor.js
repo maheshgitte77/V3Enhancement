@@ -18,6 +18,7 @@ let logger;
 let client;
 let kafka;
 let producer;
+let v2_5ConfigGlobal; // Store V2_5_CONFIG for default fallback
 
 /**
  * Initialize the summary processor with dependencies
@@ -32,8 +33,12 @@ const initializeSummaryProcessor = (dependencies) => {
   client = dependencies.client;
   kafka = dependencies.kafka;
   producer = dependencies.producer;
+  v2_5ConfigGlobal = dependencies.v2_5Config; // Store V2_5_CONFIG
 
-  logger.info("V2.5: Summary Processor initialized");
+  logger.info("V2.5: Summary Processor initialized", {
+    hasConfig: !!v2_5ConfigGlobal,
+    model: v2_5ConfigGlobal?.ai?.model,
+  });
 };
 
 /**
@@ -727,9 +732,13 @@ const processScreeningSummary = async ({
   v2_5Config,
 }) => {
   try {
+    // Use stored V2_5_CONFIG as fallback
+    const config = v2_5Config || v2_5ConfigGlobal;
+
     logger.info("V2.5: Starting screening analysis", {
       candidateScreeningId,
       screeningAssessmentId,
+      usingGlobalConfig: !v2_5Config,
     });
 
     // Fetch screening result

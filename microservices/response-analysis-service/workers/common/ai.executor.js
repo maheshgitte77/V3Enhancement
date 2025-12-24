@@ -9,6 +9,7 @@ const {
   generateAudioBehavioralPrompt,
   generateMediaScoringPrompt,
   generateSubjectiveScoringPrompt,
+  generateProgrammingAnalysisPrompt,
 } = require("./prompt.generator");
 
 // Will be injected from parent module
@@ -453,11 +454,69 @@ const executeSubjectiveScoring = async (
   };
 };
 
+/**
+ * Execute Programming Code Analysis
+ * Provides code quality feedback (NOT scoring - that comes from test cases)
+ */
+const executeProgrammingAnalysis = async (responseData) => {
+  logger.info("Programming Analysis: Starting code quality analysis", {
+    questionId: responseData?.questionId,
+  });
+
+  const startTime = Date.now();
+
+  // Generate programming analysis prompt
+  const prompt = generateProgrammingAnalysisPrompt(responseData);
+
+  // Execute AI call with retry logic
+  const { parsedAnalysis, tokenUsage } = await executeAICall(
+    [], // No file input for programming
+    prompt,
+    responseData,
+    "1-ProgrammingAnalysis",
+    3 // maxRetries
+  );
+
+  // Remove grade field if it exists (backward compatibility with old prompts)
+  if (parsedAnalysis.overallAssessment?.grade) {
+    delete parsedAnalysis.overallAssessment.grade;
+  }
+
+  // Calculate cost (use text rate for code analysis)
+  const processingCost = calculateProcessingCost(
+    tokenUsage.inputTokens,
+    tokenUsage.outputTokens,
+    "text"
+  );
+
+  const duration = Date.now() - startTime;
+
+  logger.info("Programming Analysis: Completed", {
+    duration,
+    tokenUsage,
+    processingCost: processingCost.totalCost,
+    logicalCorrectnessScore: parsedAnalysis.logicalCorrectness?.score,
+    codeQualityScore: parsedAnalysis.codeQuality?.score,
+  });
+
+  return {
+    ...parsedAnalysis,
+    metadata: {
+      stage: "1-ProgrammingAnalysis",
+      type: "programming",
+      duration,
+      tokenUsage,
+      processingCost,
+    },
+  };
+};
+
 module.exports = {
   initializeAIExecutor,
   executeBehavioralAnalysis,
   executeScoring,
   executeSubjectiveScoring,
+  executeProgrammingAnalysis,
   calculateProcessingCost,
   extractTokenUsage,
   parseAIResponse,

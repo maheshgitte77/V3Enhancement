@@ -1,10 +1,13 @@
 /**
  * V2.5 Video Processor
  * Multi-stage video processing: Behavioral Analysis → Scoring → Cheating Detection
+ * ENHANCED: Supports direct Azure-to-Google streaming
  */
 
 const path = require("path");
 const fs = require("fs").promises;
+const axios = require("axios");
+const { Readable } = require("stream");
 
 // Dependencies will be injected
 let logger = console;
@@ -42,9 +45,12 @@ let POLL_CONFIG = {
   consecutiveErrorThreshold: 3,
 };
 
+/**
+ * Upload file from local path to Google AI
+ */
 const uploadFile = async (filePath, fileName, mimeType) => {
   try {
-    logger.info("V2.5: Starting video file upload", {
+    logger.info("V2.5: Starting video file upload from disk", {
       fileName,
       filePath,
       mimeType,
@@ -75,6 +81,99 @@ const uploadFile = async (filePath, fileName, mimeType) => {
 };
 
 /**
+ * Upload file from Azure URL directly to Google AI (TRUE STREAMING)
+ * Uses Node.js streams to minimize memory usage - only ~64KB buffer at a time
+ * Pipes directly from Azure to temp file, then uploads to Google AI
+ *
+ * @param {string} azureUrl - Azure Blob Storage URL with SAS token
+ * @param {string} fileName - Display name for the file
+ * @param {string} mimeType - MIME type of the file
+ * @returns {Promise<Object>} Uploaded file object from Google AI
+ */
+const uploadFileFromUrl = async (azureUrl, fileName, mimeType) => {
+  const { pipeline } = require("stream/promises");
+  const { createWriteStream } = require("fs");
+
+  // Create temp directory if needed
+  const tempDir = path.join(__dirname, "../../Uploads/temp");
+  await fs.mkdir(tempDir, { recursive: true });
+  const tempFilePath = path.join(tempDir, `stream-${Date.now()}-${fileName}`);
+
+  try {
+    logger.info("V2.5: Starting memory-efficient Azure-to-Google streaming", {
+      fileName,
+      mimeType,
+      urlPrefix: azureUrl.substring(0, 50) + "...",
+    });
+
+    // Stream from Azure URL - responseType: "stream" keeps memory usage minimal (~64KB buffer)
+    const response = await axios({
+      method: "GET",
+      url: azureUrl,
+      responseType: "stream", // TRUE STREAMING - not loading into memory
+      timeout: 300000, // 5 minute timeout for large files
+    });
+
+    // Get file size from headers if available
+    const contentLength = response.headers["content-length"];
+    logger.info("V2.5: Azure stream started", {
+      fileName,
+      contentLength: contentLength
+        ? `${Math.round((contentLength / 1024 / 1024) * 100) / 100} MB`
+        : "unknown",
+    });
+
+    // Pipe Azure stream directly to temp file (minimal memory - only stream buffer)
+    const writeStream = createWriteStream(tempFilePath);
+    await pipeline(response.data, writeStream);
+
+    logger.info("V2.5: File streamed to temp location", {
+      fileName,
+      tempFilePath,
+    });
+
+    // Upload to Google AI from temp file
+    const uploadedFile = await client.files.upload({
+      file: tempFilePath,
+      config: {
+        mimeType: mimeType,
+        displayName: fileName,
+      },
+    });
+
+    logger.info("V2.5: Azure file uploaded to Google AI successfully", {
+      fileName,
+      fileId: uploadedFile.name,
+      uri: uploadedFile.uri,
+      method: "memory-efficient-streaming",
+    });
+
+    return uploadedFile;
+  } catch (error) {
+    logger.error("V2.5: Memory-efficient streaming upload failed", {
+      fileName,
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  } finally {
+    // Always clean up temp file
+    try {
+      await fs.unlink(tempFilePath);
+      logger.debug("V2.5: Cleaned up temp streaming file", { tempFilePath });
+    } catch (cleanupErr) {
+      // File might not exist if error occurred before writing
+      if (cleanupErr.code !== "ENOENT") {
+        logger.warn("V2.5: Failed to clean up temp file", {
+          tempFilePath,
+          error: cleanupErr.message,
+        });
+      }
+    }
+  }
+};
+
+/**
  * Delete uploaded file from Google AI storage
  * Called after processing to clean up storage and avoid costs/quota issues
  */
@@ -100,8 +199,15 @@ const pollFileStatus = async (fileName) => {
   let lastKnownUri = null; // Track URI for optimistic fallback
   let lastKnownMimeType = null; // Track mimeType for optimistic fallback
 
+  // Helper to yield to event loop, preventing blocking during long polling
+  const yieldToEventLoop = () =>
+    new Promise((resolve) => setImmediate(resolve));
+
   for (let attempt = 0; attempt < POLL_CONFIG.maxAttempts; attempt++) {
     try {
+      // Yield to event loop at start of each iteration to prevent blocking
+      await yieldToEventLoop();
+
       logger.info(
         `V2.5: Polling file status - attempt ${attempt + 1}/${
           POLL_CONFIG.maxAttempts
@@ -181,6 +287,7 @@ const pollFileStatus = async (fileName) => {
  * Stage 1: Behavioral Analysis + Transcription
  * Stage 2: Scoring (concurrent with Stage 3)
  * Stage 3: Cheating Detection (concurrent with Stage 2)
+ * ENHANCED: Supports Azure URL streaming for direct file transfer
  */
 const processVideoResponse = async (responseData) => {
   const startTime = Date.now();
@@ -189,61 +296,94 @@ const processVideoResponse = async (responseData) => {
   logger.info("V2.5: Starting video processing with multi-stage pipeline", {
     questionId: responseData.questionId,
     candidateScreeningId: responseData.candidateScreeningId,
+    hasAzureUrl: !!(responseData.azureUrl || responseData.fileUri),
   });
 
   try {
     // ====== PRE-STAGE: File Upload & Polling ======
-    // Extract file information from responseData.file object
-    if (!responseData.file) {
-      throw new Error("File object is missing in responseData");
-    }
+    let uploadedFile;
+    let fileMimetype;
+    let fileName;
 
-    const file = responseData.file;
-    const fileName = file.filename || file.originalname;
-    const fileMimetype = file.mimetype;
+    // Check if we have an Azure URL for direct streaming
+    const azureUrl = responseData.azureUrl || responseData.fileUri;
 
-    // Validate required file properties
-    if (!fileName) {
-      throw new Error(
-        "File name is missing: both filename and originalname are undefined"
-      );
-    }
-    if (!fileMimetype) {
-      throw new Error("File mimetype is missing in responseData.file");
-    }
-    if (!file.path) {
-      throw new Error("File path is missing in responseData.file");
-    }
+    if (azureUrl) {
+      // OPTIMIZED PATH: Stream directly from Azure to Google AI
+      logger.info("V2.5: Using Azure-to-Google streaming upload", {
+        questionId: responseData.questionId,
+        hasAzureUrl: !!responseData.azureUrl,
+        hasFileUri: !!responseData.fileUri,
+      });
 
-    // Resolve file path - handle both absolute and relative paths
-    let mediaPath;
-    if (path.isAbsolute(file.path)) {
-      mediaPath = file.path;
+      // Get mime type and filename from responseData or defaults
+      fileMimetype =
+        responseData.mimetype || responseData.file?.mimetype || "video/webm";
+      fileName =
+        responseData.file?.filename ||
+        responseData.file?.originalname ||
+        `video-${Date.now()}.webm`;
+
+      // Stream from Azure URL directly to Google AI
+      uploadedFile = await uploadFileFromUrl(azureUrl, fileName, fileMimetype);
+      uploadedFileName = uploadedFile.name;
     } else {
-      // If relative path, resolve it from the project root (two levels up from this file)
-      // file.path is typically "Uploads/filename.webm"
-      const projectRoot = path.join(__dirname, "../../");
-      mediaPath = path.resolve(projectRoot, file.path);
+      // STANDARD PATH: Upload from local disk
+      // Extract file information from responseData.file object
+      if (!responseData.file) {
+        throw new Error(
+          "File object is missing in responseData and no Azure URL provided"
+        );
+      }
+
+      const file = responseData.file;
+      fileName = file.filename || file.originalname;
+      fileMimetype = file.mimetype;
+
+      // Validate required file properties
+      if (!fileName) {
+        throw new Error(
+          "File name is missing: both filename and originalname are undefined"
+        );
+      }
+      if (!fileMimetype) {
+        throw new Error("File mimetype is missing in responseData.file");
+      }
+      if (!file.path) {
+        throw new Error("File path is missing in responseData.file");
+      }
+
+      // Resolve file path - handle both absolute and relative paths
+      let mediaPath;
+      if (path.isAbsolute(file.path)) {
+        mediaPath = file.path;
+      } else {
+        // If relative path, resolve it from the project root (two levels up from this file)
+        // file.path is typically "Uploads/filename.webm"
+        const projectRoot = path.join(__dirname, "../../");
+        mediaPath = path.resolve(projectRoot, file.path);
+      }
+
+      logger.info("V2.5: Validating file path", {
+        fileName: fileName,
+        mediaPath,
+        filePath: file.path,
+      });
+
+      // Validate file exists
+      const fileExists = await fs
+        .access(mediaPath)
+        .then(() => true)
+        .catch(() => false);
+      if (!fileExists) {
+        throw new Error(`Video file not found: ${mediaPath}`);
+      }
+
+      // Upload file to Google AI from disk
+      uploadedFile = await uploadFile(mediaPath, fileName, fileMimetype);
+      uploadedFileName = uploadedFile.name; // Store for cleanup
     }
 
-    logger.info("V2.5: Validating file path", {
-      fileName: fileName,
-      mediaPath,
-      filePath: file.path,
-    });
-
-    // Validate file exists
-    const fileExists = await fs
-      .access(mediaPath)
-      .then(() => true)
-      .catch(() => false);
-    if (!fileExists) {
-      throw new Error(`Video file not found: ${mediaPath}`);
-    }
-
-    // Upload file to Google AI
-    const uploadedFile = await uploadFile(mediaPath, fileName, fileMimetype);
-    uploadedFileName = uploadedFile.name; // Store for cleanup
     const uploadedUri = uploadedFile.uri; // Capture immediately for fallback
 
     // Poll for file to be ready
@@ -536,6 +676,7 @@ module.exports = {
   initializeVideoProcessor,
   processVideoResponse,
   uploadFile,
+  uploadFileFromUrl,
   pollFileStatus,
   deleteUploadedFile,
 };

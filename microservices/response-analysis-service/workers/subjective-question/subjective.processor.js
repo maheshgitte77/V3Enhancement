@@ -10,7 +10,7 @@ let aiExecutor = null;
 let cheatingDetector = null;
 let resultMerger = null;
 let databaseHandler = null;
-let typingAnalyzer = null; // Will reference analyzeSubjectiveTypingPatterns from responseWorkerV2.js
+let typingAnalyzer = null; // Typing pattern analysis for subjective responses
 
 /**
  * Initialize subjective processor with dependencies

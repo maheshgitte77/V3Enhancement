@@ -19,8 +19,8 @@ const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
 const ProgrammingAnalysis = require("../model/ProgrammingAnalysis");
 
-// Import V2.5 processor
-const v2_5Processor = require("../workers/response.processor.v2.5");
+// Import orchestrator
+const orchestrator = require("../workers/orchestrator");
 
 // Import V2.5 Summary Processor
 const summaryProcessor = require("../workers/screening-summary/summary.processor");
@@ -30,8 +30,8 @@ const { GoogleGenAI } = require("@google/genai");
 // Import typing analyzer module (entire module needed for setLogger)
 const typingAnalyzer = require("../workers/common/typing.analyzer");
 
-// Import V2.5 logger with rotation
-const v2_5Logger = require("../utils/v2.5.logger");
+// Import logger with rotation
+const responseLogger = require("../utils/logger");
 
 dotenv.config();
 
@@ -47,7 +47,7 @@ const producer = kafka.producer({
 
 // Connect Kafka producer asynchronously
 producer.connect().catch((error) => {
-  v2_5Logger.error("Kafka producer connection failed", {
+  responseLogger.error("Kafka producer connection failed", {
     error: error.message,
     stack: error.stack,
   });
@@ -59,7 +59,7 @@ const client = new GoogleGenAI({
 });
 
 // Logger instance (using Winston with rotation)
-const logger = v2_5Logger;
+const logger = responseLogger;
 
 // ============================================
 // V2.5 INDEPENDENT INITIALIZATION
@@ -69,7 +69,7 @@ logger.info("Initializing V2.5 Multi-Stage Processor (Independent)...");
 
 // Initialize V2.5 processor with all dependencies
 try {
-  v2_5Processor.initializeV2_5Processor({
+  orchestrator.initializeV2_5Processor({
     logger,
     client,
     models: {
@@ -195,25 +195,37 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
 
   try {
     // Check if V2.5 processor is initialized
-    if (!v2_5Processor.isInitialized()) {
+    if (!orchestrator.isInitialized()) {
       logger.error("Processor not initialized");
       return res.status(500).json({
         success: false,
-        error: "V2.5 processor not initialized",
+        error: "Orchestrator not initialized",
       });
     }
 
     // Handle file upload or URI
-    let file;
+    let file = null;
+    let azureUrl = null;
 
     if (req.body.file_uri) {
-      // Option 1: URI-based file download
-      logger.debug("Processing file from URI", { fileUri: req.body.file_uri });
-      file = await downloadFileFromUri(req.body.file_uri, req.body.mimetype);
-      fileToDelete = file.path;
+      // Option 1: OPTIMIZED - Pass Azure URL directly to processor for streaming
+      // The processor will stream directly from Azure to Google AI
+      logger.debug("OPTIMIZED: Passing Azure URL directly to processor", {
+        fileUri: req.body.file_uri.substring(0, 50) + "...",
+      });
+      azureUrl = req.body.file_uri;
+      // Create minimal file object with metadata only
+      file = {
+        filename: `streaming-${Date.now()}.webm`,
+        mimetype: req.body.mimetype || "video/webm",
+      };
+      // No local file to delete - streaming direct to Google AI
+      fileToDelete = null;
     } else if (req.file) {
       // Option 2: File already uploaded by middleware (route uses upload.single('file'))
-      logger.debug("Processing uploaded file", { filename: req.file.filename });
+      logger.debug("Processing uploaded file from disk", {
+        filename: req.file.filename,
+      });
       file = req.file;
       fileToDelete = file.path;
     } else {
@@ -226,10 +238,11 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
       });
     }
 
-    logger.debug("File acquired successfully", {
+    logger.debug("File metadata acquired", {
       filename: file.filename || file.originalname,
-      size: file.size,
+      size: file.size || "streaming",
       mimetype: file.mimetype,
+      method: azureUrl ? "azure-streaming" : "disk-upload",
     });
 
     // Parse copyPasteAnalysis if provided (similar to V2)
@@ -267,6 +280,10 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
       type: req.body.type,
       maxTime: req.body.maxTime,
       file: file,
+      // Pass Azure URL for direct streaming (processor will use if available)
+      azureUrl: azureUrl,
+      fileUri: azureUrl, // Alias for backward compatibility
+      mimetype: req.body.mimetype || file.mimetype,
       fullScreenExitCount: req.body.fullScreenExitCount
         ? parseInt(req.body.fullScreenExitCount)
         : 0,
@@ -291,7 +308,7 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
     });
 
     // Process using V2.5 multi-stage processor
-    const result = await v2_5Processor.processTypeWiseResponse(responseData);
+    const result = await orchestrator.processTypeWiseResponse(responseData);
 
     // Clean up file
     if (fileToDelete && fs.existsSync(fileToDelete)) {
@@ -389,11 +406,11 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
 
   try {
     // Check if V2.5 processor is initialized
-    if (!v2_5Processor.isInitialized()) {
+    if (!orchestrator.isInitialized()) {
       logger.error("Processor not initialized");
       return res.status(500).json({
         success: false,
-        error: "V2.5 processor not initialized",
+        error: "Orchestrator not initialized",
       });
     }
 
@@ -504,7 +521,7 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
     });
 
     // Process using V2.5 multi-stage processor
-    const result = await v2_5Processor.processTypeWiseResponse(responseData);
+    const result = await orchestrator.processTypeWiseResponse(responseData);
 
     logger.info("Processing completed successfully", {
       questionId: responseData.questionId,
@@ -570,7 +587,7 @@ const analyzeScreeningV2_5 = async (req, res) => {
     const result = await summaryProcessor.processScreeningSummary({
       candidateScreeningId,
       screeningAssessmentId,
-      v2_5Config: v2_5Processor.getConfig(),
+      v2_5Config: orchestrator.getConfig(),
     });
 
     // Handle immediate score release (Kafka + Email notification)
@@ -628,13 +645,13 @@ const analyzeScreeningV2_5 = async (req, res) => {
  */
 const healthCheckV2_5 = async (req, res) => {
   try {
-    const config = v2_5Processor.getConfig();
+    const config = orchestrator.getConfig();
 
     return res.status(200).json({
       success: true,
       version: "v2.5",
       status: "operational",
-      initialized: v2_5Processor.isInitialized(),
+      initialized: orchestrator.isInitialized(),
       config: {
         model: config.ai.model,
         environment: config.environment,

@@ -20,22 +20,17 @@ const express = require("express");
 const cors = require("cors");
 const connectDB = require("./utils/dbConnect");
 const bodyParser = require("body-parser");
-const responseRoutes = require("./routes/analyzeResponseRoutes");
-const responseRoutesV2_5 = require("./routes/analyzeResponseRoutes.v2.5");
+const responseRoutes = require("./routes/routes");
 
 /**
- * Initialize worker modules for different API versions
- * @type {Object} Workers for handling different versions of response analysis
+ * Response Analysis Service - V2.5 Only
+ * All legacy versions (V0, V1, V2) have been removed
+ * @type {Object} V2.5 Multi-Stage Processing - Modular architecture
  */
-const workerV0 = require("./workers/responseWorker");
-const workerV1 = require("./workers/responseWorkerV1");
-const workerV2 = require("./workers/responseWorkerV2");
 
-console.log(`🔄 Initializing Response Analysis Workers:`);
-console.log(`   ✅ V0 (Default) - responseWorker.js`);
-console.log(`   ✅ V1 - responseWorkerV1.js`);
-console.log(`   ✅ V2 - responseWorkerV2.js`);
-console.log(`   🔗 V2.5 routes loaded (V2.5 initializes independently)`);
+console.log(`🔄 Initializing Response Analysis Service:`);
+console.log(`   ✅ V2.5 Multi-Stage Processing - ACTIVE`);
+console.log(`   🎯 Lightweight & Optimized - Legacy versions removed`);
 
 /**
  * Express application instance
@@ -64,31 +59,51 @@ app.use(express.urlencoded({ extended: true }));
 })();
 
 // Mount routes
-app.use("/api/response", responseRoutes);
-app.use("/api/response/v2.5", responseRoutesV2_5);
+app.use("/api/response/v2.5", responseRoutes);
 
 /**
  * Start the server and listen for incoming requests
  * @listens {number} PORT - The port number to listen on
  */
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Response Analysis Service running on port ${PORT}`);
-  console.log(`📋 Available endpoints:`);
-  console.log(`   • /api/response/analyzeMediaResponse (V0 - Default)`);
-  console.log(`   • /api/response/analyzeMediaResponse/v1 (V1)`);
-  console.log(`   • /api/response/analyzeMediaResponse/v2 (V2)`);
-  console.log(`   • /api/response/analyzeSubjective (V0 - Default)`);
-  console.log(`   • /api/response/analyzeSubjective/v1 (V1)`);
-  console.log(`   • /api/response/analyzeSubjective/v2 (V2)`);
-  console.log(`   • /api/response/analyzeScreening (V0 - Default)`);
-  console.log(`   • /api/response/analyzeScreening/v1 (V1)`);
-  console.log(`   • /api/response/analyzeScreening/v2 (V2)`);
-  console.log(`\n   ⭐ V2.5 Multi-Stage Processing:`);
-  console.log(
-    `   • /api/response/v2.5/analyzeMediaResponse (V2.5 - Multi-Stage)`
-  );
-  console.log(`   • /api/response/v2.5/analyzeSubjective (V2.5 - Multi-Stage)`);
-  console.log(`   • /api/response/v2.5/analyzeScreening (V2.5 - Multi-Stage)`);
-  console.log(`   • /api/response/v2.5/health (V2.5 - Health Check)`);
-  console.log(`   • /api/response/v2.5/ (V2.5 - API Info)`);
+  console.log(`📋 Available V2.5 Endpoints:`);
+  console.log(`   • POST /api/response/v2.5/analyzeMediaResponse`);
+  console.log(`   • POST /api/response/v2.5/analyzeSubjective`);
+  console.log(`   • POST /api/response/v2.5/analyzeScreening`);
+  console.log(`   • GET  /api/response/v2.5/health`);
+  console.log(`   • GET  /api/response/v2.5/`);
+
+  // Initialize Kafka consumer if enabled
+  const USE_KAFKA = process.env.USE_KAFKA === "true";
+  if (USE_KAFKA) {
+    console.log(`\n   🔗 Kafka Integration: ENABLED`);
+    try {
+      const kafkaConsumer = require("./workers/kafkaConsumer");
+      const videoProcessor = require("./workers/video-question/video.processor");
+      const audioProcessor = require("./workers/audio-question/audio.processor");
+      const subjectiveProcessor = require("./workers/subjective-question/subjective.processor");
+      const programmingProcessor = require("./workers/programming-question/programming.processor");
+      const summaryProcessor = require("./workers/screening-summary/summary.processor");
+      const responseLogger = require("./utils/logger");
+
+      await kafkaConsumer.initializeKafkaConsumer({
+        videoProc: videoProcessor,
+        audioProc: audioProcessor,
+        subjectiveProc: subjectiveProcessor,
+        programmingProc: programmingProcessor,
+        summaryProc: summaryProcessor,
+        loggerInstance: responseLogger,
+      });
+
+      await kafkaConsumer.startConsuming();
+      console.log(`   ✅ Kafka consumer started successfully`);
+    } catch (error) {
+      console.error(`   ❌ Kafka consumer failed to start:`, error.message);
+      console.error(`   ⚠️ HTTP endpoints still available`);
+    }
+  } else {
+    console.log(`\n   ℹ️  Kafka Integration: DISABLED (USE_KAFKA=false)`);
+    console.log(`   📡 Using HTTP endpoints only`);
+  }
 });

@@ -7,7 +7,6 @@
  * @version 2.5.0
  */
 
-// Import V2.5 modules
 const aiExecutor = require("./common/ai.executor");
 const cheatingDetector = require("./common/cheating.detector");
 const resultMerger = require("./common/result.merger");
@@ -15,6 +14,8 @@ const databaseHandler = require("./common/database.handler");
 const videoProcessor = require("./video-question/video.processor");
 const audioProcessor = require("./audio-question/audio.processor");
 const subjectiveProcessor = require("./subjective-question/subjective.processor");
+const programmingProcessor = require("./programming-question/programming.processor");
+const summaryProcessor = require("./screening-summary/summary.processor");
 
 /**
  * V2.5 Configuration
@@ -238,6 +239,24 @@ const initializeV2_5Processor = (dependencies) => {
     typingAnalyzer, // Reference to typing analysis function
   });
 
+  // Initialize programming processor (V3 - AI analysis only, scoring from test cases)
+  programmingProcessor.initializeProgrammingProcessor({
+    logger,
+    aiExecutor,
+    databaseHandler,
+  });
+
+  // Initialize summary processor with V2_5_CONFIG
+  summaryProcessor.initializeSummaryProcessor({
+    CandidateScreeningResult: models.CandidateScreeningResult,
+    CandidateScreening: models.CandidateScreening,
+    CandidateAnswerAiResponse: models.CandidateAnswerAiResponse,
+    ProgrammingAnalysis: models.ProgrammingAnalysis,
+    logger,
+    client,
+    v2_5Config: config, // Pass V2_5_CONFIG to summary processor
+  });
+
   initialized = true;
   logger.info("V2.5 Multi-Stage Processor initialized successfully", {
     stages: Object.keys(config.stages).length,
@@ -281,6 +300,11 @@ const processTypeWiseResponse = async (responseData) => {
         break;
       case "subjective":
         result = await subjectiveProcessor.processSubjectiveResponse(
+          responseData
+        );
+        break;
+      case "programming":
+        result = await programmingProcessor.processProgrammingResponse(
           responseData
         );
         break;

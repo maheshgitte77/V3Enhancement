@@ -7,7 +7,7 @@
  * @version 2.5.0
  * @requires express
  * @requires multer
- * @requires ../controllers/analyzeResponseControllers.v2.5
+ * @requires ../controllers/controllers
  */
 
 const express = require("express");
@@ -17,7 +17,7 @@ const {
   analyzeSubjectiveV2_5,
   analyzeScreeningV2_5,
   healthCheckV2_5,
-} = require("../controllers/analyzeResponseControllers.v2.5");
+} = require("../controllers/controllers");
 
 /**
  * Express router instance
