@@ -232,7 +232,11 @@ const handleAnalysisRequest = async (request) => {
         break;
 
       case "subjective-analysis":
-        result = await subjectiveProcessor.processSubjectiveResponse(request);
+        // Map candidateAnswer to textAnswer (matching REST controller behavior)
+        result = await subjectiveProcessor.processSubjectiveResponse({
+          ...request,
+          textAnswer: request.candidateAnswer,
+        });
         break;
 
       case "programming-analysis":
