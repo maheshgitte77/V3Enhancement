@@ -290,6 +290,25 @@ const handleSummaryRequest = async (request) => {
       v2_5Config: config,
     });
 
+    // Handle immediate score release (Email + Kafka notification) if enabled
+    if (
+      releaseScoreImmediately === true ||
+      releaseScoreImmediately === "true"
+    ) {
+      logger.info("Triggering immediate score release from Kafka consumer", {
+        candidateScreeningId,
+        releaseScoreImmediately,
+      });
+
+      await summaryProcessor.handleImmediateScoreRelease({
+        candidateScreeningId,
+        screeningAssessmentId,
+        candidateFitScore: result.candidateFitScore,
+        status: result.status,
+        recommendation: result.recommendation,
+      });
+    }
+
     // Publish summary result
     await producer.send({
       topic: TOPICS.SUMMARY_RESULTS,
