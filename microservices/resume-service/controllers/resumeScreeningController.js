@@ -148,13 +148,22 @@ const analyzeResumes = async (req, res) => {
       for (const file of validFiles) {
         const ext = path.extname(file.originalname).slice(1).toLowerCase();
 
+        // Build context for S3 path resolution
+        const context = {
+          clientId,
+          jobId,
+          moduleType: "resume",
+        };
+
         // Upload to S3
         const { uploadUrl, fileId } = await fileService.generateUploadUrl({
           userId: jobId,
           name: file.originalname,
           extension: ext,
-          module: "jobResume",
+          // Legacy module string for backward compatibility
+          module: "clientId/job_title_jobId/job_applications/resumes",
           size: file.size,
+          context,
         });
 
         const fileBuffer = await fs.readFile(file.path);
