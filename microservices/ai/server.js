@@ -8,6 +8,18 @@ require("dotenv").config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Add cors policy,all more than one origin
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://staging.app.hirecorrecto.com",
+      "https://app.hirecorrecto.com",
+      "https://hirecorrecto.com",
+    ],
+    credentials: true,
+  })
+);
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
   broker.trim()
 );
@@ -19,7 +31,7 @@ const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: "response-group" });
 
 const pendingRequests = new Map(); // Stores Express response objects
-const responseCache = new Map(); // Stores aggregated responses
+const responseCache = new Map(); // Stores aggregated responses by requestId -> category -> questionType
 
 const ensureTopics = async () => {
   const admin = kafka.admin();
@@ -75,46 +87,161 @@ const ensureTopics = async () => {
             return;
           }
 
-          if (
-            responseData.questions &&
-            Array.isArray(responseData.questions.questions)
-          ) {
-            responseData.questions.questions.forEach((question) => {
-              // Add ai: true to all question types
-              if (question[question.type]) {
-                question[question.type].forEach((q) => {
-                  q.isAiGenerated = true;
-                  // Add retakeCount: 2 only for Audio & Video types
-                  if (question.type === "Audio" || question.type === "Video") {
-                    q.retakeCount = 2;
-                    q.prepTime = 30;
-                  }
-                });
-              }
-            });
-          } else {
+          // Handle error responses
+          if (responseData.error) {
             console.error(
-              "❌ Invalid questions format:",
-              responseData.questions
+              `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`
             );
+            const requestInfo = pendingRequests.get(key);
+            if (requestInfo) {
+              // Track error but continue waiting for other responses
+              if (!requestInfo.errors) {
+                requestInfo.errors = [];
+              }
+              requestInfo.errors.push({
+                category: responseData.category,
+                questionType: responseData.questionType,
+                message: responseData.message,
+              });
+            }
             return;
           }
 
-          if (!responseCache.has(key)) {
-            responseCache.set(key, []);
-          }
-          responseCache.get(key).push(responseData.questions);
-
           const requestInfo = pendingRequests.get(key);
-          if (responseCache.get(key).length === requestInfo.expectedResponses) {
+          if (!requestInfo) {
+            console.error(`❌ No pending request found for requestId: ${key}`);
+            return;
+          }
+
+          const categoryName =
+            responseData.category ||
+            responseData.questions?.skillName ||
+            "unknown";
+          const questionType =
+            responseData.questionType ||
+            responseData.questions?.type ||
+            "unknown";
+
+          // Initialize cache structure if needed
+          if (!responseCache.has(key)) {
+            responseCache.set(key, {});
+          }
+          const categoryCache = responseCache.get(key);
+
+          // Initialize token usage tracking if needed
+          if (!requestInfo.tokenUsage) {
+            requestInfo.tokenUsage = {
+              byType: {},
+              total: {
+                promptTokens: 0,
+                completionTokens: 0,
+                totalTokens: 0,
+              },
+            };
+          }
+
+          // Track token usage for this question type
+          if (responseData.tokenUsage) {
+            const typeTokenUsage = responseData.tokenUsage;
+            requestInfo.tokenUsage.byType[questionType] = {
+              promptTokens: typeTokenUsage.promptTokens || 0,
+              completionTokens: typeTokenUsage.completionTokens || 0,
+              totalTokens: typeTokenUsage.totalTokens || 0,
+              batches: typeTokenUsage.batches || [], // For Programming batches
+            };
+
+            // Add to total
+            requestInfo.tokenUsage.total.promptTokens +=
+              typeTokenUsage.promptTokens || 0;
+            requestInfo.tokenUsage.total.completionTokens +=
+              typeTokenUsage.completionTokens || 0;
+            requestInfo.tokenUsage.total.totalTokens +=
+              typeTokenUsage.totalTokens || 0;
+          }
+
+          if (!categoryCache[categoryName]) {
+            categoryCache[categoryName] = {
+              skillName: categoryName,
+              skillType: responseData.questions?.skillType || "unknown",
+              questions: [],
+            };
+          }
+
+          // Process the question response
+          if (responseData.questions) {
+            const questionObj = responseData.questions;
+
+            // Add ai: true to all question types
+            if (questionObj[questionType]) {
+              questionObj[questionType].forEach((q) => {
+                q.isAiGenerated = true;
+                // Add retakeCount: 2 only for Audio & Video types
+                if (questionType === "Audio" || questionType === "Video") {
+                  q.retakeCount = 2;
+                  q.prepTime = 30;
+                }
+              });
+            }
+
+            // Add this question type to the category
+            categoryCache[categoryName].questions.push({
+              type: questionType,
+              [questionType]: questionObj[questionType],
+            });
+          }
+
+          // Check if we've received all expected responses
+          const receivedCount = Object.values(categoryCache).reduce(
+            (sum, cat) => sum + cat.questions.length,
+            0
+          );
+
+          if (receivedCount === requestInfo.expectedResponses) {
             console.log(`✅ All responses received for Request ID: ${key}`);
+
+            // Log token usage summary
+            if (requestInfo.tokenUsage) {
+              console.log(`\n📊 Token Usage Summary for Request ${key}:`);
+              console.log(
+                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`
+              );
+              console.log(`By Type:`);
+              Object.entries(requestInfo.tokenUsage.byType).forEach(
+                ([type, usage]) => {
+                  console.log(
+                    `  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`
+                  );
+                  if (usage.batches && usage.batches.length > 0) {
+                    console.log(`    Batches:`);
+                    usage.batches.forEach((batch) => {
+                      console.log(
+                        `      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`
+                      );
+                    });
+                  }
+                }
+              );
+            }
+
+            // Convert category cache to array format matching original structure
+            const questionsArray = Object.values(categoryCache).map((cat) => ({
+              skillName: cat.skillName,
+              skillType: cat.skillType,
+              questions: cat.questions,
+            }));
+
             requestInfo.res.json({
               requestId: key,
-              questions: responseCache.get(key),
+              questions: questionsArray,
+              tokenUsage: requestInfo.tokenUsage, // Include aggregated token usage
             });
 
             pendingRequests.delete(key);
             responseCache.delete(key);
+          } else {
+            console.log(
+              `📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`
+            );
           }
         } catch (error) {
           console.error("❌ Error in Kafka consumer:", error);

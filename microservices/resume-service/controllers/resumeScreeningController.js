@@ -12,6 +12,7 @@ const { v4: uuidv4 } = require("uuid");
 const CandidateSchema = require("../model/Candidate");
 const Candidate =
   mongoose.models.Candidate || mongoose.model("Candidate", CandidateSchema);
+const CandidateJourney = require("../model/CandidateJourney");
 const creditServiceClient = require("../utils/creditServiceClient");
 
 const supportedExtensions = new Set([
@@ -25,6 +26,7 @@ const supportedExtensions = new Set([
   "png",
   "tiff",
 ]);
+
 const allowedMimeTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -93,6 +95,7 @@ const analyzeResumes = async (req, res) => {
         createRecord,
         expectedSalary,
         currentSalary,
+        hrSource,
         addedBy,
         clientId,
       } = req.body;
@@ -134,7 +137,7 @@ const analyzeResumes = async (req, res) => {
           });
         }
         console.warn(
-          "⚠️ Credit Deduction Failed (Non-blocking):",
+          "⚠ Credit Deduction Failed (Non-blocking):",
           error.message
         );
         // Allow proceeding if credit service is down/errored (for resilience/debug)
@@ -171,13 +174,22 @@ const analyzeResumes = async (req, res) => {
       for (const file of validFiles) {
         const ext = path.extname(file.originalname).slice(1).toLowerCase();
 
+        // Build context for S3 path resolution
+        const context = {
+          clientId,
+          jobId,
+          moduleType: "resume",
+        };
+
         // Upload to S3
         const { uploadUrl, fileId } = await fileService.generateUploadUrl({
           userId: jobId,
           name: file.originalname,
           extension: ext,
-          module: "jobResume",
+          // Legacy module string for backward compatibility
+          module: "clientId/job_title_jobId/job_applications/resumes",
           size: file.size,
+          context,
         });
 
         const fileBuffer = await fs.readFile(file.path);
@@ -185,124 +197,114 @@ const analyzeResumes = async (req, res) => {
           headers: { "Content-Type": file.mimetype },
         });
 
-        try {
-          await produceMessage(
-            {
-              files: [
-                {
-                  path: file.path,
-                  originalname: file.originalname,
-                  mimetype: file.mimetype,
-                  size: file.size,
-                  fileId,
-                },
-              ],
-              jobDescription,
-              primarySkills: [...primarySkillList],
-              secondarySkills: [...secondarySkillList],
-              prompt,
-              requestId,
-              jobId,
-              noticePeriod,
-              referralDetails,
-              preferredLocations,
-              createRecord,
-              expectedSalary,
-              currentSalary,
-              candidateType,
-              // addedBy: addedBy || null,
-              clientCoolingPeriod,
-              processedEmails: Array.from(processedEmails),
-              clientObjectId,
-            },
-            "resume-screening",
-            validFiles.indexOf(file)
-          );
-        } catch (kafkaError) {
-          console.warn(
-            "⚠️ Kafka produce failed. Using local mock fallback for debugging:",
-            kafkaError.message
-          );
-
-          // --- MOCK FALLBACK FOR LOCAL DEBUGGING ---
-          // This allows the frontend to proceed even if Kafka/Docker is down.
-          const mockEmail = `mock_${Date.now()}@example.com`;
-          const mockAnalysis = {
-            name: "Local Debug Candidate",
-            email: mockEmail,
-            mobile: { countryCode: "+91", number: "1234567890" },
-            skills: [
-              { name: "Mock Skill 1", proficiency: "Advanced" },
-              { name: "Mock Skill 2", proficiency: "Intermediate" },
+        await produceMessage(
+          {
+            files: [
+              {
+                path: file.path,
+                originalname: file.originalname,
+                mimetype: file.mimetype,
+                size: file.size,
+                fileId,
+              },
             ],
-            experience: { years: 2, months: 0 },
-            educationDetails: [],
-            matchExplanation:
-              "This is a mock response because Kafka is unavailable locally.",
-            resumeSummary: "Mock summary for local debugging.",
-            overallMatch: 85,
-          };
-
-          const redis = req.redis;
-          const jobData = {
-            status: "Valid",
-            details: "Mocked processing (Kafka unavailable)",
+            jobDescription,
+            primarySkills: [...primarySkillList],
+            secondarySkills: [...secondarySkillList],
+            prompt,
+            requestId,
             jobId,
-            resumeFileId: fileId,
-            resumeFileReference: file.originalname,
-            email: mockEmail,
-            ...mockAnalysis,
-            InvitedOn: new Date(),
-            ExpiredOn: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
-          };
-
-          // Cache data so getRequestData works
-          await redis.set(
-            `request:${requestId}:jobData`,
-            JSON.stringify([jobData]) // Store as array as expected by controller
-          );
-
-          // Add to pendingRequests to simulate "Completion" logic if needed,
-          // OR directly handle it here if we want to short-circuit the wait.
-          // Since we are mocking, we can just let reasonable "success" flow happen.
-          // However, index.js is waiting for an event to call res.json().
-          // If we don't trigger that event or use the res, the request hangs.
-
-          if (isLive || validFiles.length === 1) {
-            // We need to simulate the response that index.js would send.
-            // But we are inside the uploads() loop.
-            // We can't easily trigger the socket logic from here without emitting to a local event emitter or just handling it.
-            // Simplest hack: Emit to the socket if we have access, or just let the user know they need to hit getRequestData.
-            // BUT: analyzeResumes (lines 223+) sets pendingRequests.
-
-            // WE WILL NOT SET pendingRequests if we mocked it, and just respond immediately!
-            // So we need to control the flow below this loop.
-            req.isMocked = true;
-            req.mockResponseData = jobData;
-          }
-          // -----------------------------------------
-        }
+            noticePeriod,
+            referralDetails,
+            preferredLocations,
+            createRecord,
+            expectedSalary,
+            currentSalary,
+            candidateType,
+            hrSource,
+            // addedBy: addedBy || null,
+            clientCoolingPeriod,
+            processedEmails: Array.from(processedEmails),
+            clientObjectId,
+          },
+          "resume-screening",
+          validFiles.indexOf(file)
+        );
       }
 
-      if ((isLive || validFiles.length === 1) && !req.isMocked) {
+      if (isLive || validFiles.length === 1) {
         req.pendingRequests.set(requestId, {
           res: validFiles.length === 1 ? res : { json: () => {} },
           expectedResponses: validFiles.length,
           jobId: jobId,
           requestBy: addedBy || null,
         });
-      } else if (req.isMocked) {
-        // If mocked, return immediate success
-        return res.status(200).json({
-          requestId,
-          message: "Mock processing completed (Kafka unavailable)",
-          responses: [req.mockResponseData],
-        });
       }
     });
   } catch (error) {
     console.error("Unexpected error:", error.message, error.stack);
     res.status(500).json({ error: "An error occurred during processing" });
+  }
+};
+
+const addJobApplicationJourneyStage = async (
+  jobApplicationId,
+  stage,
+  addedBy
+) => {
+  try {
+    if (!jobApplicationId) return;
+
+    const jobAppId =
+      jobApplicationId instanceof ObjectId
+        ? jobApplicationId
+        : new ObjectId(jobApplicationId);
+
+    // Convert addedBy to ObjectId if provided
+    const invitedBy = addedBy
+      ? addedBy instanceof ObjectId
+        ? addedBy
+        : new ObjectId(addedBy)
+      : undefined;
+
+    const journey = await CandidateJourney.findOne({
+      jobApplicationId: jobAppId,
+    });
+
+    // Build journey stage object
+    const journeyStage = {
+      stage,
+      timestamp: new Date(),
+    };
+
+    // Add invitedBy if provided
+    if (invitedBy) {
+      journeyStage.invitedBy = invitedBy;
+    }
+
+    if (!journey) {
+      await CandidateJourney.create({
+        jobApplicationId: jobAppId,
+        candidateScreeningAssessmentIds: [],
+        candidateAssessmentIds: [],
+        candidateInterviewIds: [],
+        journey: [journeyStage],
+      });
+    } else {
+      await CandidateJourney.updateOne(
+        { _id: journey._id },
+        {
+          $push: {
+            journey: journeyStage,
+          },
+          $set: {
+            updatedAt: new Date(),
+          },
+        }
+      );
+    }
+  } catch (error) {
+    console.error("❌ Error adding job application journey stage:", error);
   }
 };
 
@@ -334,7 +336,7 @@ const getRequestData = async (req, res) => {
 const addToJobApplication = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { jobId, changeStatus, emails } = req.body;
+    const { jobId, changeStatus, emails, addedBy } = req.body;
     const redis = req.redis;
 
     if (!jobId || !Array.isArray(emails) || emails.length === 0) {
@@ -408,6 +410,32 @@ const addToJobApplication = async (req, res) => {
 
     if (bulkOps.length > 0) {
       await JobApplication.bulkWrite(bulkOps);
+    }
+
+    // Add CandidateJourney entries for each JobApplication
+    try {
+      // Fetch all JobApplications that were just created/updated
+      const jobApplicationQueries = recordsToAdd.map((record) => ({
+        jobId: new ObjectId(record.jobId),
+        email: record.email,
+      }));
+
+      const jobApplications = await JobApplication.find({
+        $or: jobApplicationQueries,
+      });
+
+      // Add journey stage "Added" for each job application
+      for (const jobApp of jobApplications) {
+        if (jobApp && jobApp._id) {
+          await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Error adding CandidateJourney entries:",
+        error.message,
+        error.stack
+      );
     }
 
     try {
@@ -534,6 +562,7 @@ const addToJobApplication = async (req, res) => {
                 record.currentSalary,
                 record.currency
               ),
+              hrSource: record.hrSource?.trim() || undefined,
               willingnessToRelocate:
                 record.willingnessToRelocate?.trim() || undefined,
               workAuthorization: record.workAuthorization?.trim() || undefined,
@@ -553,10 +582,7 @@ const addToJobApplication = async (req, res) => {
                 record.preferredCompanyType?.trim() || undefined,
               socials: record.socials || undefined,
               resumeSummary: record.resumeSummary?.trim() || undefined,
-              source:
-                record.candidateType?.trim() ||
-                record.source?.trim() ||
-                undefined,
+              source: "HR Invited",
             };
 
             // Remove undefined and null fields to keep insert clean
@@ -595,13 +621,7 @@ const addToJobApplication = async (req, res) => {
       if (candidateBulkOps.length > 0) {
         try {
           const result = await Candidate.bulkWrite(candidateBulkOps);
-          console.log(
-            `Successfully processed ${
-              result.upsertedCount || 0
-            } new candidates and updated ${
-              result.modifiedCount || 0
-            } existing candidates`
-          );
+          // console.log(`Successfully processed ${result.upsertedCount || 0} new candidates and updated ${result.modifiedCount || 0} existing candidates`);
         } catch (bulkWriteError) {
           console.error(
             "Error in bulk write operation:",

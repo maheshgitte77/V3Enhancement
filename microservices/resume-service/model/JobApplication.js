@@ -221,11 +221,7 @@ const JobApplicationSchema = new mongoose.Schema(
     },
     candidateType: {
       type: String,
-      enum: [
-        "Uploaded",
-        "Applied",
-        "Referral"
-      ],
+      enum: ["Uploaded", "Applied", "Referral"],
       default: "Uploaded",
     },
     address: {
@@ -273,11 +269,62 @@ const JobApplicationSchema = new mongoose.Schema(
       mobile: String,
       code: String,
     },
+    hrSource: {
+      type: String,
+    },
+    source: {
+      type: String,
+      default: "HR Invited",
+    },
     InvitedOn: {
       type: Date,
     },
     ExpiredOn: {
       type: Date,
+    },
+    processingCost: {
+      inputTokens: {
+        type: Number,
+        default: 0,
+      },
+      outputTokens: {
+        type: Number,
+        default: 0,
+      },
+      totalTokens: {
+        type: Number,
+        default: 0,
+      },
+      inputCost: {
+        type: Number,
+        default: 0,
+      },
+      outputCost: {
+        type: Number,
+        default: 0,
+      },
+      totalCost: {
+        type: Number,
+        default: 0,
+      },
+      mediaType: {
+        type: String,
+        enum: ["text", "image", "video", "audio"],
+      },
+      pageCount: {
+        type: Number,
+        default: 0,
+      },
+      currency: {
+        type: String,
+        default: "USD",
+      },
+      inputRate: {
+        type: Number,
+      },
+      outputRate: {
+        type: Number,
+      },
     },
   },
   {

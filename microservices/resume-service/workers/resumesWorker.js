@@ -35,6 +35,101 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "models/gemini-2.0-flash" });
 const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 
+// Pricing configuration for Gemini 2.0 Flash
+const RESUME_PROCESSING_PRICING = {
+  inputRates: {
+    text: 0.1,
+    image: 0.1,
+    video: 0.1,
+    audio: 0.7,
+  },
+  outputRate: 0.4,
+};
+
+// Constants for token calculation
+const TOKENS_PER_PAGE = 258; // Each PDF page/image = 258 tokens (Gemini 2.0 Flash)
+const TOKENS_PER_CHAR = 0.25; // Approximately 4 characters = 1 token for text
+
+/**
+ * Get page count from PDF file
+ * @param {string} filePath - Path to PDF file
+ * @returns {Promise<number>} Number of pages
+ */
+async function getPdfPageCount(filePath) {
+  try {
+    const pdfParse = require("pdf-parse");
+    const dataBuffer = await fs.readFile(filePath);
+    const pdfData = await pdfParse(dataBuffer);
+    return pdfData.numpages || 1;
+  } catch (error) {
+    console.warn(
+      `⚠️ Could not get PDF page count, defaulting to 1: ${error.message}`
+    );
+    // Fallback: estimate based on file size (rough approximation)
+    try {
+      const stats = await fs.stat(filePath);
+      // Rough estimate: ~50KB per page for typical resumes
+      const estimatedPages = Math.max(1, Math.ceil(stats.size / 51200));
+      return estimatedPages;
+    } catch (statError) {
+      return 1; // Default to 1 page if we can't even get file stats
+    }
+  }
+}
+
+/**
+ * Calculate processing cost based on token usage and file type
+ * @param {number} inputTokens - Number of input tokens (from API or estimated)
+ * @param {number} outputTokens - Number of output tokens (from API)
+ * @param {string} mediaType - Type of media: 'text', 'image', 'video', 'audio'
+ * @param {number} pageCount - Number of pages (for PDFs/images)
+ * @returns {Object} Cost breakdown with total
+ */
+const calculateResumeProcessingCost = (
+  inputTokens,
+  outputTokens,
+  mediaType = "text",
+  pageCount = 0
+) => {
+  // Determine input rate based on media type
+  let inputRate;
+  switch (mediaType.toLowerCase()) {
+    case "video":
+      inputRate = RESUME_PROCESSING_PRICING.inputRates.video;
+      break;
+    case "audio":
+      inputRate = RESUME_PROCESSING_PRICING.inputRates.audio;
+      break;
+    case "image":
+      inputRate = RESUME_PROCESSING_PRICING.inputRates.image;
+      break;
+    case "text":
+    default:
+      inputRate = RESUME_PROCESSING_PRICING.inputRates.text;
+      break;
+  }
+
+  // Calculate costs (convert to per-token cost - rates are per 1M tokens)
+  const inputCost = (inputTokens / 1000000) * inputRate;
+  const outputCost =
+    (outputTokens / 1000000) * RESUME_PROCESSING_PRICING.outputRate;
+  const totalCost = inputCost + outputCost;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    inputCost: parseFloat(inputCost.toFixed(6)),
+    outputCost: parseFloat(outputCost.toFixed(6)),
+    totalCost: parseFloat(totalCost.toFixed(6)),
+    mediaType: mediaType.toLowerCase(),
+    inputRate: inputRate,
+    outputRate: RESUME_PROCESSING_PRICING.outputRate,
+    currency: "USD",
+    pageCount: pageCount,
+  };
+};
+
 const supportedExtensions = new Set([
   "pdf",
   "docx",
@@ -87,6 +182,7 @@ const startConsumers = async () => {
     await createConsumer(i);
   }
 };
+
 const formatDate = (dateString) => {
   if (!dateString) return "";
   const date = new Date(dateString);
@@ -366,6 +462,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     preferredLocations,
     expectedSalary,
     currentSalary,
+    hrSource,
     candidateType,
     createRecord = "true",
     clientCoolingPeriod,
@@ -418,7 +515,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     if (
       ext === "docx" &&
       mimetype ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       const pdfPath = path.join(
         __dirname,
@@ -655,9 +752,57 @@ Return the output in the specified JSON format.
     }
 
     let parsedAnalysis;
+    let processingCost = null;
+    let pageCount = 0;
+
     try {
       const geminiResult = await model.generateContent([geminiPart, prompt]);
       const responseText = geminiResult.response.text();
+
+      // Extract token usage from API response
+      const usageMetadata = geminiResult.response?.usageMetadata || {};
+      const inputTokens = usageMetadata.promptTokenCount || 0;
+      const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
+      // Get page count for PDFs
+      if (ext === "pdf" || mimetype === "application/pdf") {
+        pageCount = await getPdfPageCount(finalFilePath);
+      } else if (["jpg", "jpeg", "png", "tiff"].includes(ext)) {
+        pageCount = 1; // Each image counts as 1 page
+      }
+
+      // Determine media type based on file extension
+      const mediaType = ["pdf", "jpg", "jpeg", "png", "tiff"].includes(ext)
+        ? "image"
+        : "text";
+
+      // Calculate cost if we have token data
+      if (inputTokens > 0 || outputTokens > 0) {
+        processingCost = calculateResumeProcessingCost(
+          inputTokens,
+          outputTokens,
+          mediaType,
+          pageCount
+        );
+
+        console.log(
+          `💰 Resume processing cost: $${processingCost.totalCost.toFixed(6)}`,
+          {
+            fileName: file.originalname,
+            pageCount,
+            inputTokens,
+            outputTokens,
+            totalTokens: processingCost.totalTokens,
+            mediaType: processingCost.mediaType,
+            costBreakdown: {
+              inputCost: `$${processingCost.inputCost.toFixed(6)}`,
+              outputCost: `$${processingCost.outputCost.toFixed(6)}`,
+              totalCost: `$${processingCost.totalCost.toFixed(6)}`,
+            },
+          }
+        );
+      }
+
       const jsonStartIndex = responseText.indexOf("{");
       const jsonEndIndex = responseText.lastIndexOf("}");
       const cleanedJson = responseText.substring(
@@ -680,8 +825,8 @@ Return the output in the specified JSON format.
       let details = !email
         ? "Missing email in resume."
         : !isValidEmail(email)
-          ? "Invalid email format in resume."
-          : "Missing name in resume.";
+        ? "Invalid email format in resume."
+        : "Missing name in resume.";
 
       await saveResumeData(
         requestId,
@@ -700,7 +845,11 @@ Return the output in the specified JSON format.
           expectedSalary,
           currentSalary,
           candidateType,
-        }
+          hrSource,
+        },
+        null, // lastApplicationId
+        null, // coolingData
+        processingCost
       );
 
       await sendResponse(
@@ -711,7 +860,9 @@ Return the output in the specified JSON format.
         file.originalname,
         null,
         parsedAnalysis.analysis,
-        fileId
+        fileId,
+        null,
+        hrSource
       );
 
       await cleanupFiles(finalFilePath, originalFilePath);
@@ -743,9 +894,11 @@ Return the output in the specified JSON format.
         expectedSalary,
         currentSalary,
         candidateType,
+        hrSource,
       },
       candidateStatus?.lastApplicationId || null,
-      candidateStatus.coolingData
+      candidateStatus.coolingData,
+      processingCost
     );
 
     if (candidateStatus.status !== "Valid") {
@@ -758,7 +911,8 @@ Return the output in the specified JSON format.
         candidateStatus.cachedId,
         parsedAnalysis.analysis,
         fileId,
-        candidateStatus?.lastApplicationId || null
+        candidateStatus?.lastApplicationId || null,
+        hrSource
       );
       await cleanupFiles(finalFilePath, originalFilePath);
       return;
@@ -783,7 +937,9 @@ Return the output in the specified JSON format.
       file.originalname,
       cacheKey,
       parsedAnalysis.analysis,
-      fileId
+      fileId,
+      null,
+      hrSource
     );
 
     await cleanupFiles(finalFilePath, originalFilePath);
@@ -819,7 +975,11 @@ Return the output in the specified JSON format.
         expectedSalary: data.expectedSalary,
         currentSalary: data.currentSalary,
         candidateType: data.candidateType,
-      }
+        hrSource: data.hrSource,
+      },
+      null, // lastApplicationId
+      null, // coolingData
+      null // processingCost (null for errors)
     );
 
     await sendResponse(
@@ -830,12 +990,15 @@ Return the output in the specified JSON format.
       originalFileName,
       null,
       null,
-      files?.fileId
+      files?.fileId,
+      null,
+      hrSource
     );
     await cleanupFiles(finalFilePath, originalFilePath);
     if (retryCount < MAX_RETRIES && isTransientError(error)) {
       console.log(
-        `Retrying file ${originalFileName} (Attempt ${retryCount + 1
+        `Retrying file ${originalFileName} (Attempt ${
+          retryCount + 1
         }/${MAX_RETRIES})`
       );
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
@@ -856,7 +1019,8 @@ async function saveResumeData(
   createRecord,
   additionalData,
   lastApplicationId,
-  coolingData
+  coolingData,
+  processingCost = null
 ) {
   if (createRecord !== "true") return;
 
@@ -871,6 +1035,7 @@ async function saveResumeData(
     ...analysis,
     ...additionalData,
     ...coolingData,
+    ...(processingCost && { processingCost }),
   };
 
   const redisKey = `request:${requestId}:jobData`;
@@ -889,7 +1054,8 @@ async function sendResponse(
   cachedId,
   analysis,
   fileId,
-  lastApplicationId
+  lastApplicationId,
+  hrSource
 ) {
   await producer.send({
     topic: replyTopic,
@@ -906,6 +1072,7 @@ async function sendResponse(
           cachedId,
           analysis,
           fileId,
+          hrSource,
         }),
       },
     ],

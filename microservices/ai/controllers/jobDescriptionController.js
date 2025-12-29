@@ -1,6 +1,7 @@
 const model = require("../utils/googleGenerativeAI");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
+const { calculateProcessingCost } = require("../utils/costCalculator");
 
 // Configure multer to handle file uploads
 const storage = multer.memoryStorage();
@@ -94,12 +95,38 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     const jobDescription =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
+    // Extract token usage and calculate cost
+    const usageMetadata = result.response?.usageMetadata || {};
+    const inputTokens = usageMetadata.promptTokenCount || 0;
+    const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
+    let processingCost = null;
+    if (inputTokens > 0 || outputTokens > 0) {
+      processingCost = calculateProcessingCost(
+        inputTokens,
+        outputTokens,
+        "text" // This is text-only processing
+      );
+
+      console.log(
+        `💰 Job Description (short) processing cost: $${processingCost.totalCost.toFixed(
+          6
+        )}`,
+        {
+          inputTokens,
+          outputTokens,
+          totalCost: processingCost.totalCost,
+        }
+      );
+    }
+
     return res.status(200).json({
       message: "Job description generated successfully",
       jobDescription, // This contains only the required sections
+      ...(processingCost && { processingCost }),
     });
   } catch (error) {
-    console.error("❌ Error in generateJobDescription:", error);
+    console.error("❌ Error in generateJobDescriptionForJobOverview:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
@@ -184,11 +211,39 @@ const generateJobDescriptionFormFile = async (req, res) => {
         result.response.candidates[0]?.content?.parts[0]?.text ||
         "AI formatting failed.";
 
+      // Extract token usage and calculate cost
+      const usageMetadata = result.response?.usageMetadata || {};
+      const inputTokens = usageMetadata.promptTokenCount || 0;
+      const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
+      let processingCost = null;
+      if (inputTokens > 0 || outputTokens > 0) {
+        processingCost = calculateProcessingCost(
+          inputTokens,
+          outputTokens,
+          "text" // Text processing (PDF content is extracted as text)
+        );
+
+        console.log(
+          `💰 Job Description (from file) processing cost: $${processingCost.totalCost.toFixed(
+            6
+          )}`,
+          {
+            fileName: req.file.originalname,
+            numPages: pdfData.numpages,
+            inputTokens,
+            outputTokens,
+            totalCost: processingCost.totalCost,
+          }
+        );
+      }
+
       return res.json({
         formattedText,
         documentType: "Analyzed by AI",
         numPages: pdfData.numpages,
         metadata: pdfData.metadata,
+        ...(processingCost && { processingCost }),
       });
     } else {
       return res.json({

@@ -353,4 +353,6 @@ CandidateSchema.index({ preferredCompanySize: 1 });
 CandidateSchema.index({ preferredCompanyType: 1 });
 CandidateSchema.index({ isProfileComplete: 1 });
 
-module.exports = CandidateSchema;
+module.exports =
+  mongoose.models.Candidate ||
+  mongoose.model("Candidate", CandidateSchema);

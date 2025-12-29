@@ -192,6 +192,22 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               type: mongoose.Schema.Types.Mixed,
               default: null,
             },
+            processingCost: {
+              inputTokens: { type: Number, default: 0 },
+              outputTokens: { type: Number, default: 0 },
+              totalTokens: { type: Number, default: 0 },
+              inputCost: { type: Number, default: 0 },
+              outputCost: { type: Number, default: 0 },
+              totalCost: { type: Number, default: 0 },
+              mediaType: {
+                type: String,
+                enum: ["text", "video", "audio", "subjective"],
+                default: "text",
+              },
+              inputRate: { type: Number, default: 0.3 },
+              outputRate: { type: Number, default: 2.5 },
+              currency: { type: String, default: "USD" },
+            },
           },
         ],
         audio: [
@@ -280,6 +296,22 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               type: mongoose.Schema.Types.Mixed,
               default: null,
             },
+            processingCost: {
+              inputTokens: { type: Number, default: 0 },
+              outputTokens: { type: Number, default: 0 },
+              totalTokens: { type: Number, default: 0 },
+              inputCost: { type: Number, default: 0 },
+              outputCost: { type: Number, default: 0 },
+              totalCost: { type: Number, default: 0 },
+              mediaType: {
+                type: String,
+                enum: ["text", "video", "audio", "subjective"],
+                default: "text",
+              },
+              inputRate: { type: Number, default: 0.3 },
+              outputRate: { type: Number, default: 2.5 },
+              currency: { type: String, default: "USD" },
+            },
           },
         ],
         subjective: [
@@ -360,6 +392,22 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
               type: mongoose.Schema.Types.Mixed,
               default: null,
             },
+            processingCost: {
+              inputTokens: { type: Number, default: 0 },
+              outputTokens: { type: Number, default: 0 },
+              totalTokens: { type: Number, default: 0 },
+              inputCost: { type: Number, default: 0 },
+              outputCost: { type: Number, default: 0 },
+              totalCost: { type: Number, default: 0 },
+              mediaType: {
+                type: String,
+                enum: ["text", "video", "audio", "subjective"],
+                default: "text",
+              },
+              inputRate: { type: Number, default: 0.3 },
+              outputRate: { type: Number, default: 2.5 },
+              currency: { type: String, default: "USD" },
+            },
           },
         ],
       },
@@ -417,9 +465,15 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    candidateRank: {
-      type: Number,
-      default: 0,
+    recommendation: {
+      type: String,
+      enum: [
+        "Strongly Recommended",
+        "Recommended",
+        "Not Recommended",
+        "Not Calculated",
+      ],
+      default: "Not Calculated",
     },
     communicationClarity: {
       type: Number,
@@ -497,6 +551,64 @@ const CandidateScreeningResultSchema = new mongoose.Schema(
       min: 0,
       max: 100,
       description: "Percentage of questions attempted out of total questions",
+    },
+    totalTokensUsed: {
+      type: Number,
+      default: 0,
+      min: 0,
+      description:
+        "Total Gemini API tokens used for all questions and screening summary",
+    },
+    totalInputTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+      description:
+        "Total input tokens used for all questions and screening summary",
+    },
+    totalOutputTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+      description:
+        "Total output tokens used for all questions and screening summary",
+    },
+    tokenBreakdown: {
+      questionAnalysisTokens: {
+        type: Number,
+        default: 0,
+        description:
+          "Tokens used for analyzing individual questions (video/audio/subjective)",
+      },
+      programmingAnalysisTokens: {
+        type: Number,
+        default: 0,
+        description: "Tokens used for analyzing programming questions",
+      },
+      screeningSummaryTokens: {
+        type: Number,
+        default: 0,
+        description: "Tokens used for generating screening summary",
+      },
+      totalInputTokens: {
+        type: Number,
+        default: 0,
+        description: "Total input tokens across all analysis types",
+      },
+      totalOutputTokens: {
+        type: Number,
+        default: 0,
+        description: "Total output tokens across all analysis types",
+      },
+    },
+    costBreakdown: {
+      videoQuestionsCost: { type: Number, default: 0 },
+      audioQuestionsCost: { type: Number, default: 0 },
+      subjectiveQuestionsCost: { type: Number, default: 0 },
+      programmingQuestionsCost: { type: Number, default: 0 },
+      screeningSummaryCost: { type: Number, default: 0 },
+      totalProcessingCost: { type: Number, default: 0 },
+      currency: { type: String, default: "USD" },
     },
   },
   {
