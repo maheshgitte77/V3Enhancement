@@ -6,6 +6,14 @@ services:
     container_name: zookeeper
     ports:
       - "2181:2181"
+    environment:
+      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
+      ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     networks:
       - kafka-network
 
@@ -24,6 +32,12 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_CREATE_TOPICS: "response_analyze:6:3,screening.analysis.requests:6:3,screening.analysis.results:6:3,screening.analysis.failures:3:3,screening.summary.requests:3:3,screening.summary.results:3:3"
+      # Log retention settings to prevent disk overflow
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_LOG_SEGMENT_BYTES: 536870912
+      KAFKA_LOG_CLEANUP_POLICY: delete
+      KAFKA_LOG_CLEANER_ENABLE: "true"
     depends_on:
       - zookeeper
     healthcheck:
@@ -35,6 +49,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     networks:
       - kafka-network
 
@@ -53,6 +72,12 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_CREATE_TOPICS: "response_analyze:6:3,screening.analysis.requests:6:3,screening.analysis.results:6:3,screening.analysis.failures:3:3,screening.summary.requests:3:3,screening.summary.results:3:3"
+      # Log retention settings to prevent disk overflow
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_LOG_SEGMENT_BYTES: 536870912
+      KAFKA_LOG_CLEANUP_POLICY: delete
+      KAFKA_LOG_CLEANER_ENABLE: "true"
     depends_on:
       - zookeeper
     healthcheck:
@@ -64,6 +89,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     networks:
       - kafka-network
 
@@ -82,6 +112,12 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_CREATE_TOPICS: "response_analyze:6:3,screening.analysis.requests:6:3,screening.analysis.results:6:3,screening.analysis.failures:3:3,screening.summary.requests:3:3,screening.summary.results:3:3"
+      # Log retention settings to prevent disk overflow
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_LOG_SEGMENT_BYTES: 536870912
+      KAFKA_LOG_CLEANUP_POLICY: delete
+      KAFKA_LOG_CLEANER_ENABLE: "true"
     depends_on:
       - zookeeper
     healthcheck:
@@ -93,6 +129,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     networks:
       - kafka-network
 
@@ -126,6 +167,11 @@ services:
       - kafka1
       - kafka2
       - kafka3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     networks:
       - kafka-network
 
@@ -171,6 +217,11 @@ services:
     networks:
       - kafka-network
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     healthcheck:
       test:
         ["CMD", "curl", "-f", "http://localhost:7010/api/response/v2.5/health"]
@@ -197,6 +248,11 @@ services:
       - kafka1
       - kafka2
       - kafka3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     networks:
       - kafka-network
 
