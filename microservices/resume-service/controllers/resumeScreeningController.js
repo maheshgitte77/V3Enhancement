@@ -9,8 +9,11 @@ const { ObjectId } = require("mongodb");
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 // Bind Candidate model from schema (avoid OverwriteModelError on hot reloads)
-const Candidate = require("../model/Candidate");
+const CandidateSchema = require("../model/Candidate");
+const Candidate =
+  mongoose.models.Candidate || mongoose.model("Candidate", CandidateSchema);
 const CandidateJourney = require("../model/CandidateJourney");
+const creditServiceClient = require("../utils/creditServiceClient");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -107,16 +110,36 @@ const analyzeResumes = async (req, res) => {
         .collection("clients")
         .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1 } });
       const clientCoolingPeriod = client?.coolingPeriod;
-      const hasValidReferral =
-        !!(
-          referralDetails &&
-          referralDetails?.name?.trim() &&
-          referralDetails?.email?.trim()
-        );
+      const hasValidReferral = !!(
+        referralDetails &&
+        referralDetails?.name?.trim() &&
+        referralDetails?.email?.trim()
+      );
 
       const candidateType = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
       const isLive = live ? live : false;
+
+      // Note: Credit deduction is now handled dynamically in the resumesWorker
+      // based on actual token usage from Gemini 2.0 Flash.
+
+      // Pre-check balance to ensure user has any credits at all
+      try {
+        const wallet = await creditServiceClient.getBalance(clientId);
+        if (parseFloat(wallet.balance) <= 0) {
+          return res.status(402).json({
+            error:
+              "Insufficient credits to process resumes. Please top up your wallet.",
+          });
+        }
+      } catch (error) {
+        console.warn(
+          "⚠ [Controller] Credit Balance Check Failed (Continuing):",
+          error.message,
+          "\nError stack:",
+          error.stack
+        );
+      }
 
       const primarySkillList = new Set(
         primarySkills?.split(",").map((s) => s.trim())
@@ -148,19 +171,49 @@ const analyzeResumes = async (req, res) => {
       for (const file of validFiles) {
         const ext = path.extname(file.originalname).slice(1).toLowerCase();
 
+        // Build context for S3 path resolution
+        const context = {
+          clientId,
+          jobId,
+          moduleType: "resume",
+        };
+
         // Upload to S3
         const { uploadUrl, fileId } = await fileService.generateUploadUrl({
           userId: jobId,
           name: file.originalname,
           extension: ext,
-          module: "jobResume",
+          // Legacy module string for backward compatibility
+          module: "clientId/job_title_jobId/job_applications/resumes",
           size: file.size,
+          context,
         });
 
         const fileBuffer = await fs.readFile(file.path);
         await axios.put(uploadUrl, fileBuffer, {
           headers: { "Content-Type": file.mimetype },
         });
+
+        // --- Storage Credit Deduction ---
+        try {
+          await creditServiceClient.registerStorage({
+            client_id: clientId,
+            job_id: jobId,
+            file_type:
+              ext.toUpperCase() === "PDF" ? "RESUME_PDF" : "RESUME_DOCX",
+            size_bytes: file.size,
+            reference_id: fileId,
+            duration_months: 6,
+          });
+        } catch (storageError) {
+          console.warn(
+            "⚠️ [Controller] Storage Credit Deduction Failed (Non-blocking):",
+            storageError.message,
+            "\nError stack:",
+            storageError.stack
+          );
+        }
+        // ---------------------------------
 
         await produceMessage(
           {
@@ -199,7 +252,7 @@ const analyzeResumes = async (req, res) => {
 
       if (isLive || validFiles.length === 1) {
         req.pendingRequests.set(requestId, {
-          res: validFiles.length === 1 ? res : { json: () => { } },
+          res: validFiles.length === 1 ? res : { json: () => {} },
           expectedResponses: validFiles.length,
           jobId: jobId,
           requestBy: addedBy || null,
@@ -212,7 +265,11 @@ const analyzeResumes = async (req, res) => {
   }
 };
 
-const addJobApplicationJourneyStage = async (jobApplicationId, stage, addedBy) => {
+const addJobApplicationJourneyStage = async (
+  jobApplicationId,
+  stage,
+  addedBy
+) => {
   try {
     if (!jobApplicationId) return;
 
@@ -347,7 +404,7 @@ const addToJobApplication = async (req, res) => {
           jobId,
           status: "Added",
           ExpiredOn,
-          InvitedOn
+          InvitedOn,
         };
         recordsToAdd.push(jobData);
       }
@@ -389,10 +446,31 @@ const addToJobApplication = async (req, res) => {
       for (const jobApp of jobApplications) {
         if (jobApp && jobApp._id) {
           await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
+
+          // --- Candidate Invitation Credit Deduction ---
+          try {
+            await creditServiceClient.deductInviteCredits(
+              clientId,
+              "SCREENING_INVITE",
+              `invite_${requestId}_${jobApp.email}`,
+              1,
+              { jobId, email: jobApp.email }
+            );
+          } catch (error) {
+            console.warn(
+              `⚠️ Invite Credit Deduction Failed for ${jobApp.email}:`,
+              error.message
+            );
+          }
+          // --------------------------------------------
         }
       }
     } catch (error) {
-      console.error("Error adding CandidateJourney entries:", error.message, error.stack);
+      console.error(
+        "Error adding CandidateJourney entries:",
+        error.message,
+        error.stack
+      );
     }
 
     try {
@@ -424,7 +502,8 @@ const addToJobApplication = async (req, res) => {
             };
 
             const normalizeSalary = (val, currencyFallback) => {
-              if (val === undefined || val === null || val === "") return undefined;
+              if (val === undefined || val === null || val === "")
+                return undefined;
               try {
                 if (typeof val === "object" && val !== null) {
                   const obj = {};
@@ -444,12 +523,13 @@ const addToJobApplication = async (req, res) => {
               }
             };
 
-            const experience = record.experience && typeof record.experience === "object"
-              ? {
-                years: Number(record.experience.years) || undefined,
-                months: Number(record.experience.months) || undefined,
-              }
-              : undefined;
+            const experience =
+              record.experience && typeof record.experience === "object"
+                ? {
+                    years: Number(record.experience.years) || undefined,
+                    months: Number(record.experience.months) || undefined,
+                  }
+                : undefined;
 
             // Validate and clean the email
             const email = record.email?.toLowerCase()?.trim();
@@ -461,10 +541,13 @@ const addToJobApplication = async (req, res) => {
             const candidateDoc = {
               name: record.name?.trim() || undefined,
               email: email,
-              mobile: record.mobile && typeof record.mobile === "object" ? {
-                countryCode: record.mobile.countryCode?.trim() || "+91",
-                number: record.mobile.number?.trim() || undefined,
-              } : undefined,
+              mobile:
+                record.mobile && typeof record.mobile === "object"
+                  ? {
+                      countryCode: record.mobile.countryCode?.trim() || "+91",
+                      number: record.mobile.number?.trim() || undefined,
+                    }
+                  : undefined,
               gender: record.gender?.trim() || undefined,
               dateOfBirth: safeDate(record.dateOfBirth),
               address: record.address?.trim() || undefined,
@@ -477,14 +560,30 @@ const addToJobApplication = async (req, res) => {
               resumeFileId: record.resumeFileId || undefined,
               profilePictureFileId: record.profilePictureFileId || undefined,
               skills: Array.isArray(record.skills) ? record.skills : undefined,
-              additionalSkills: Array.isArray(record.additionalSkills) ? record.additionalSkills : undefined,
-              educationDetails: Array.isArray(record.educationDetails) ? record.educationDetails : undefined,
-              workExperience: Array.isArray(record.workExperience) ? record.workExperience : undefined,
-              certifications: Array.isArray(record.certifications) ? record.certifications : undefined,
-              projects: Array.isArray(record.projects) ? record.projects : undefined,
-              languages: Array.isArray(record.languages) ? record.languages : undefined,
-              interests: Array.isArray(record.interests) ? record.interests : undefined,
-              hobbies: Array.isArray(record.hobbies) ? record.hobbies : undefined,
+              additionalSkills: Array.isArray(record.additionalSkills)
+                ? record.additionalSkills
+                : undefined,
+              educationDetails: Array.isArray(record.educationDetails)
+                ? record.educationDetails
+                : undefined,
+              workExperience: Array.isArray(record.workExperience)
+                ? record.workExperience
+                : undefined,
+              certifications: Array.isArray(record.certifications)
+                ? record.certifications
+                : undefined,
+              projects: Array.isArray(record.projects)
+                ? record.projects
+                : undefined,
+              languages: Array.isArray(record.languages)
+                ? record.languages
+                : undefined,
+              interests: Array.isArray(record.interests)
+                ? record.interests
+                : undefined,
+              hobbies: Array.isArray(record.hobbies)
+                ? record.hobbies
+                : undefined,
               preferredLocations: toArray(record.preferredLocations),
               preferredJobType: toArray(record.preferredJobType),
               preferredWorkStyle: toArray(record.preferredWorkStyle),
@@ -494,18 +593,28 @@ const addToJobApplication = async (req, res) => {
                 record.preferredSalary ?? record.expectedSalary,
                 record.currency
               ),
-              currentSalary: normalizeSalary(record.currentSalary, record.currency),
+              currentSalary: normalizeSalary(
+                record.currentSalary,
+                record.currency
+              ),
               hrSource: record.hrSource?.trim() || undefined,
-              willingnessToRelocate: record.willingnessToRelocate?.trim() || undefined,
+              willingnessToRelocate:
+                record.willingnessToRelocate?.trim() || undefined,
               workAuthorization: record.workAuthorization?.trim() || undefined,
               offersInHand: record.offersInHand?.trim() || undefined,
-              noticePeriod: record.noticePeriod !== undefined && record.noticePeriod !== null && record.noticePeriod !== ""
-                ? Number(record.noticePeriod)
-                : undefined,
+              noticePeriod:
+                record.noticePeriod !== undefined &&
+                record.noticePeriod !== null &&
+                record.noticePeriod !== ""
+                  ? Number(record.noticePeriod)
+                  : undefined,
               expectedJoiningDate: safeDate(record.expectedJoiningDate),
-              servingNoticePeriod: record.servingNoticePeriod?.trim() || undefined,
-              preferredCompanySize: record.preferredCompanySize?.trim() || undefined,
-              preferredCompanyType: record.preferredCompanyType?.trim() || undefined,
+              servingNoticePeriod:
+                record.servingNoticePeriod?.trim() || undefined,
+              preferredCompanySize:
+                record.preferredCompanySize?.trim() || undefined,
+              preferredCompanyType:
+                record.preferredCompanyType?.trim() || undefined,
               socials: record.socials || undefined,
               resumeSummary: record.resumeSummary?.trim() || undefined,
               source: "HR Invited",
@@ -520,7 +629,9 @@ const addToJobApplication = async (req, res) => {
 
             // Ensure we have at least name and email
             if (!candidateDoc.name || !candidateDoc.email) {
-              console.warn(`Missing required fields for candidate: ${record.email}`);
+              console.warn(
+                `Missing required fields for candidate: ${record.email}`
+              );
               return null; // Skip this record
             }
 
@@ -533,7 +644,10 @@ const addToJobApplication = async (req, res) => {
               },
             };
           } catch (recordError) {
-            console.error(`Error processing candidate record for ${record.email}:`, recordError.message);
+            console.error(
+              `Error processing candidate record for ${record.email}:`,
+              recordError.message
+            );
             return null; // Skip this record
           }
         })
@@ -544,19 +658,29 @@ const addToJobApplication = async (req, res) => {
           const result = await Candidate.bulkWrite(candidateBulkOps);
           // console.log(`Successfully processed ${result.upsertedCount || 0} new candidates and updated ${result.modifiedCount || 0} existing candidates`);
         } catch (bulkWriteError) {
-          console.error("Error in bulk write operation:", bulkWriteError.message);
+          console.error(
+            "Error in bulk write operation:",
+            bulkWriteError.message
+          );
           // Try individual operations as fallback
           for (const op of candidateBulkOps) {
             try {
               await Candidate.bulkWrite([op]);
             } catch (individualError) {
-              console.error(`Failed to process individual candidate operation:`, individualError.message);
+              console.error(
+                `Failed to process individual candidate operation:`,
+                individualError.message
+              );
             }
           }
         }
       }
     } catch (error) {
-      console.error("Error adding to Candidate collection:", error.message, error.stack);
+      console.error(
+        "Error adding to Candidate collection:",
+        error.message,
+        error.stack
+      );
     }
 
     await redis.del(redisKey);
@@ -585,7 +709,11 @@ const addToJobApplication = async (req, res) => {
         }
       );
     } catch (error) {
-      console.error("Error notifying external service:", error.message, error.stack);
+      console.error(
+        "Error notifying external service:",
+        error.message,
+        error.stack
+      );
     }
     res.status(200).json({
       message: "Successfully added records to JobApplication",
