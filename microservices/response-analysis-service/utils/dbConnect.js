@@ -3,14 +3,7 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    const username = process.env.DB_USERNAME;
-    const password = process.env.DB_PASSWORD;
-    const databaseName = process.env.DB_NAME;
-    const host = process.env.DB_HOST;
-    const port = process.env.DB_PORT;
-    const authSource = process.env.DB_AUTH_SOURCE || "admin";
-
-    const mongoURI = `mongodb://${username}:${password}@${host}:${port}/${databaseName}?retryWrites=true&authSource=${authSource}`;
+    const mongoURI = process.env.MONGODB_URI;
 
     await mongoose.connect(mongoURI, {
       useNewUrlParser: true,
@@ -26,7 +19,7 @@ const connectDB = async () => {
       retryReads: true,
     });
 
-    console.log(`✅  MongoDB connected to database ${databaseName}`);
+    console.log(`✅  MongoDB connected to database.`);
   } catch (error) {
     console.log(`❌  Failed: Error establishing database connection`);
     console.error(error);
