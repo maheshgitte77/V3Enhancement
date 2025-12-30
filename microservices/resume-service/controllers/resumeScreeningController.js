@@ -134,8 +134,10 @@ const analyzeResumes = async (req, res) => {
         }
       } catch (error) {
         console.warn(
-          "⚠ Credit Balance Check Failed (Continuing):",
-          error.message
+          "⚠ [Controller] Credit Balance Check Failed (Continuing):",
+          error.message,
+          "\nError stack:",
+          error.stack
         );
       }
 
@@ -205,8 +207,10 @@ const analyzeResumes = async (req, res) => {
           });
         } catch (storageError) {
           console.warn(
-            "⚠️ Storage Credit Deduction Failed (Non-blocking):",
-            storageError.message
+            "⚠️ [Controller] Storage Credit Deduction Failed (Non-blocking):",
+            storageError.message,
+            "\nError stack:",
+            storageError.stack
           );
         }
         // ---------------------------------

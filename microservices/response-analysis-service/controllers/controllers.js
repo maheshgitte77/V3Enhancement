@@ -292,6 +292,7 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
         : 0,
       hasCopyPasteAnalysis: req.body.hasCopyPasteAnalysis === "true",
       copyPasteAnalysis: parsedCopyPasteAnalysis,
+      clientId: req.body.clientId,
     };
 
     logger.info("Starting multi-stage processing", {
@@ -507,6 +508,7 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
       fullScreenExitCount: req.body.fullScreenExitCount
         ? parseInt(req.body.fullScreenExitCount)
         : 0,
+      clientId: req.body.clientId,
     };
 
     logger.info("Starting multi-stage processing", {
@@ -570,6 +572,7 @@ const analyzeScreeningV2_5 = async (req, res) => {
     candidateScreeningId,
     screeningAssessmentId,
     releaseScoreImmediately,
+    clientId,
   } = req.query;
 
   try {
@@ -587,6 +590,7 @@ const analyzeScreeningV2_5 = async (req, res) => {
     const result = await summaryProcessor.processScreeningSummary({
       candidateScreeningId,
       screeningAssessmentId,
+      clientId,
       v2_5Config: orchestrator.getConfig(),
     });
 

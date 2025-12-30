@@ -5,6 +5,10 @@ class CreditServiceClient {
     this.baseUrl =
       process.env.CREDIT_SERVICE_URL ||
       "https://staging.api.credit-system.hirecorrecto.com";
+    console.log(
+      "🔧 [CreditServiceClient] Initialized with baseUrl:",
+      this.baseUrl
+    );
   }
 
   /**
@@ -99,6 +103,7 @@ class CreditServiceClient {
         `${this.baseUrl}/credits/transaction/ai-usage`,
         {
           client_id: clientId,
+          service_key: "AI_RESUME_ANALYSIS", // Proper service categorization
           reference_id: referenceId,
           usage_data: {
             model_id: modelId,

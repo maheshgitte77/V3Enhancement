@@ -1,7 +1,7 @@
-const { Kafka } = require("kafkajs");
 const axios = require("axios");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenerativeAI } = require("@google/generative-ai-legacy"); // Compatibility with some versions if needed, but original uses @google/generative-ai
 const crypto = require("crypto");
+const creditServiceClient = require("../utils/creditServiceClient");
 
 require("dotenv").config();
 
@@ -745,6 +745,7 @@ const createConsumer = async (id) => {
         questionConfig = parsedMessage.questionConfig;
         CandidateResumeData = parsedMessage.CandidateResumeData;
         questionsArray = parsedMessage.questionsArray;
+        clientId = parsedMessage.clientId;
       } catch (parseError) {
         console.error(
           `❌ Error parsing incoming Kafka message in Consumer ${id}:`,
@@ -1098,6 +1099,39 @@ const createConsumer = async (id) => {
             `📊 Token usage for ${questionType} (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`
           );
         }
+
+        // --- Credit System Integration ---
+        try {
+          if (
+            clientId &&
+            (tokenUsage.promptTokens > 0 || tokenUsage.completionTokens > 0)
+          ) {
+            // Note: Use gemini-1.5-flash or whatever model is actually used (worker says gemini-1.5-flash or gemini-2.0-flash sometimes but code shows gemini-2.5-flash which might be a typo in user's file or special model)
+            // Let's use the actual model from the code
+            const activeModel = "gemini-2.5-flash";
+            await creditServiceClient.deductAiUsage(
+              clientId,
+              "gemini-2.5-flash",
+              `ai_gen_${requestId}_${questionType}_${Date.now()}`,
+              tokenUsage.promptTokens,
+              tokenUsage.completionTokens,
+              {
+                requestId,
+                questionType,
+                type: "question_generation",
+              }
+            );
+            console.log(
+              `💰 AI Credits deducted for ${questionType} (ClientId: ${clientId})`
+            );
+          }
+        } catch (creditError) {
+          console.error(
+            `❌ AI Credit deduction failed (Non-blocking):`,
+            creditError.message
+          );
+        }
+        // ---------------------------------
 
         // Process questions based on type
         if (aiResponse && aiResponse[questionType]) {

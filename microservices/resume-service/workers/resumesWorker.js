@@ -768,7 +768,7 @@ Return the output in the specified JSON format.
       // --- Credit System Integration (Token-Based) ---
       try {
         if (inputTokens > 0 || outputTokens > 0) {
-          await creditServiceClient.deductAiCredits(
+          const aiCreditResult = await creditServiceClient.deductAiCredits(
             clientObjectId.toString(),
             "gemini-2.0-flash",
             `ai_${fileId}_${Date.now()}`,
@@ -778,7 +778,10 @@ Return the output in the specified JSON format.
           );
         }
       } catch (creditError) {
-        console.error("⚠️ AI Credit Deduction Failed:", creditError.message);
+        console.error(
+          "⚠️ [Worker] AI Credit Deduction Failed:",
+          creditError.message
+        );
         // We might want to continue processing even if credit deduction fails in worker
         // to avoid losing results, or we could stop.
         // Given this is a worker, we log and continue.
