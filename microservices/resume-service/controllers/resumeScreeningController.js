@@ -120,29 +120,24 @@ const analyzeResumes = async (req, res) => {
       const requestId = `req-${Date.now()}`;
       const isLive = live ? live : false;
 
-      // --- Credit System Integration ---
+      // Note: Credit deduction is now handled dynamically in the resumesWorker
+      // based on actual token usage from Gemini 2.0 Flash.
+
+      // Pre-check balance to ensure user has any credits at all
       try {
-        await creditServiceClient.deductUnitCredits(
-          clientId,
-          "RESUME_PARSE",
-          `parse_${requestId}`,
-          validFiles.length,
-          { jobId, type: "RESUME_BULK_PARSE" }
-        );
-      } catch (error) {
-        if (error.message === "INSUFFICIENT_FUNDS") {
+        const wallet = await creditServiceClient.getBalance(clientId);
+        if (parseFloat(wallet.balance) <= 0) {
           return res.status(402).json({
             error:
               "Insufficient credits to process resumes. Please top up your wallet.",
           });
         }
+      } catch (error) {
         console.warn(
-          "⚠ Credit Deduction Failed (Non-blocking):",
+          "⚠ Credit Balance Check Failed (Continuing):",
           error.message
         );
-        // Allow proceeding if credit service is down/errored (for resilience/debug)
       }
-      // ---------------------------------
 
       const primarySkillList = new Set(
         primarySkills?.split(",").map((s) => s.trim())
@@ -196,6 +191,25 @@ const analyzeResumes = async (req, res) => {
         await axios.put(uploadUrl, fileBuffer, {
           headers: { "Content-Type": file.mimetype },
         });
+
+        // --- Storage Credit Deduction ---
+        try {
+          await creditServiceClient.registerStorage({
+            client_id: clientId,
+            job_id: jobId,
+            file_type:
+              ext.toUpperCase() === "PDF" ? "RESUME_PDF" : "RESUME_DOCX",
+            size_bytes: file.size,
+            reference_id: fileId,
+            duration_months: 6,
+          });
+        } catch (storageError) {
+          console.warn(
+            "⚠️ Storage Credit Deduction Failed (Non-blocking):",
+            storageError.message
+          );
+        }
+        // ---------------------------------
 
         await produceMessage(
           {
@@ -428,6 +442,23 @@ const addToJobApplication = async (req, res) => {
       for (const jobApp of jobApplications) {
         if (jobApp && jobApp._id) {
           await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
+
+          // --- Candidate Invitation Credit Deduction ---
+          try {
+            await creditServiceClient.deductInviteCredits(
+              clientId,
+              "SCREENING_INVITE",
+              `invite_${requestId}_${jobApp.email}`,
+              1,
+              { jobId, email: jobApp.email }
+            );
+          } catch (error) {
+            console.warn(
+              `⚠️ Invite Credit Deduction Failed for ${jobApp.email}:`,
+              error.message
+            );
+          }
+          // --------------------------------------------
         }
       }
     } catch (error) {

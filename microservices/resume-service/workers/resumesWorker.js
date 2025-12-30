@@ -9,6 +9,7 @@ const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
 const mongoose = require("mongoose");
+const creditServiceClient = require("../utils/creditServiceClient");
 
 dotenv.config();
 
@@ -763,6 +764,26 @@ Return the output in the specified JSON format.
       const usageMetadata = geminiResult.response?.usageMetadata || {};
       const inputTokens = usageMetadata.promptTokenCount || 0;
       const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
+      // --- Credit System Integration (Token-Based) ---
+      try {
+        if (inputTokens > 0 || outputTokens > 0) {
+          await creditServiceClient.deductAiCredits(
+            clientObjectId.toString(),
+            "gemini-2.0-flash",
+            `ai_${fileId}_${Date.now()}`,
+            inputTokens,
+            outputTokens,
+            { jobId, fileId, type: "RESUME_PARSE_DYNAMIC" }
+          );
+        }
+      } catch (creditError) {
+        console.error("⚠️ AI Credit Deduction Failed:", creditError.message);
+        // We might want to continue processing even if credit deduction fails in worker
+        // to avoid losing results, or we could stop.
+        // Given this is a worker, we log and continue.
+      }
+      // ------------------------------------------------
 
       // Get page count for PDFs
       if (ext === "pdf" || mimetype === "application/pdf") {
