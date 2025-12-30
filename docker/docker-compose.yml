@@ -112,12 +112,8 @@ services:
       NOTIFICATION_SER_URL: ${NOTIFICATION_SERVICE_URL}
       GROUP_ID_RESUME_SCREENING: "resume-screening-group"
       NUM_CONSUMERS: ${NUM_CONSUMERS}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
-      DB_HOST: ${DB_HOST}
+      MONGODB_URI: ${MONGODB_URI}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
-      DB_PORT: ${DB_PORT}
       S3_REGION: ${S3_REGION}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
@@ -151,11 +147,7 @@ services:
       BUCKET_NAME: "techevalhelloassistance"
       NUM_CONSUMERS: ${NUM_CONSUMERS}
       # Database
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
+      MONGODB_URI: ${MONGODB_URI}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
       # Code execution (for programming analysis)
       SCREENING_SERVICE_URL: "http://host.docker.internal:8080"
