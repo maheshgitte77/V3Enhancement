@@ -25,6 +25,30 @@ const generateScreeningQuestion = async (req, res) => {
         .json({ message: "Missing or invalid data in request" });
     }
 
+    // --- Credit Check ---
+    try {
+      if (clientId) {
+        const balanceData = await creditServiceClient.getBalance(clientId);
+        // Assuming minimal cost is around 1-5 credits.
+        // A safer check is to ensure they have > 0 or specific amount.
+        // Balance might be { balance: 100, currency: 'CREDITS' }
+        const balance = balanceData?.balance || 0;
+        if (balance <= 5) {
+          // Threshold: 5 credits
+          return res.status(402).json({
+            message: "Insufficient credits. Please top up your wallet.",
+            code: "INSUFFICIENT_FUNDS",
+          });
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "⚠️ Credit check failed, proceeding with caution:",
+        err.message
+      );
+    }
+    // --------------------
+
     // Generate unique request ID using crypto
     const requestId = `req-${Date.now()}-${crypto
       .randomBytes(4)
@@ -87,6 +111,7 @@ const generateScreeningQuestion = async (req, res) => {
         category: cat.category,
         skills: cat.skills || "unknown",
       })),
+      clientId, // Store clientId for billing
     });
   } catch (error) {
     console.error("❌ Error in generateScreeningQuestion:", error);
