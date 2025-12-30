@@ -2,9 +2,7 @@ const axios = require("axios");
 
 class CreditServiceClient {
   constructor() {
-    this.baseUrl =
-      process.env.CREDIT_SERVICE_URL ||
-      "https://staging.api.credit-system.hirecorrecto.com";
+    this.baseUrl = process.env.CREDIT_SERVICE_URL;
   }
 
   /**

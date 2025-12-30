@@ -7,7 +7,6 @@
  * @version 2.5.0
  */
 
-const mongoose = require("mongoose");
 const creditServiceClient = require("../../utils/creditServiceClient");
 
 // Models will be injected during initialization
