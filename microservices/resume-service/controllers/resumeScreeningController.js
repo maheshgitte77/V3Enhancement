@@ -406,6 +406,7 @@ const addToJobApplication = async (req, res) => {
           status: "Added",
           ExpiredOn,
           InvitedOn,
+          addedBy,
         };
         recordsToAdd.push(jobData);
       }
