@@ -469,6 +469,8 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     clientCoolingPeriod,
     processedEmails = [],
     clientObjectId,
+    addedBy,
+    clientId,
   } = data;
   try {
     if (!files?.length) {
@@ -870,6 +872,8 @@ Return the output in the specified JSON format.
           currentSalary,
           candidateType,
           hrSource,
+          addedBy,
+          clientId,
         },
         null, // lastApplicationId
         null, // coolingData
@@ -919,6 +923,8 @@ Return the output in the specified JSON format.
         currentSalary,
         candidateType,
         hrSource,
+        addedBy,
+        clientId,
       },
       candidateStatus?.lastApplicationId || null,
       candidateStatus.coolingData,
@@ -1000,6 +1006,8 @@ Return the output in the specified JSON format.
         currentSalary: data.currentSalary,
         candidateType: data.candidateType,
         hrSource: data.hrSource,
+        addedBy: data.addedBy,
+        clientId: data.clientId,
       },
       null, // lastApplicationId
       null, // coolingData

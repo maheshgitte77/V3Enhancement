@@ -240,7 +240,8 @@ const analyzeResumes = async (req, res) => {
             currentSalary,
             candidateType,
             hrSource,
-            // addedBy: addedBy || null,
+            addedBy: addedBy || null,
+            clientId,
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
             clientObjectId,
@@ -354,7 +355,7 @@ const getRequestData = async (req, res) => {
 const addToJobApplication = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { jobId, changeStatus, emails, addedBy } = req.body;
+    const { jobId, changeStatus, emails, addedBy, clientId } = req.body;
     const redis = req.redis;
 
     if (!jobId || !Array.isArray(emails) || emails.length === 0) {
@@ -445,7 +446,11 @@ const addToJobApplication = async (req, res) => {
       // Add journey stage "Added" for each job application
       for (const jobApp of jobApplications) {
         if (jobApp && jobApp._id) {
-          await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
+          await addJobApplicationJourneyStage(
+            jobApp._id,
+            "Added",
+            addedBy
+          );
 
           // --- Candidate Invitation Credit Deduction ---
           try {
@@ -700,6 +705,7 @@ const addToJobApplication = async (req, res) => {
     }));
     try {
       // Notify external service
+
       await axios.post(
         `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
         {
