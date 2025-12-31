@@ -219,6 +219,7 @@ Ensure the JSON is valid and each language name matches exactly with the provide
           {
             type: "boilerplate_generation",
             questionTitle,
+            service_key: "AI_QUESTION_GENERATION",
           }
         );
         console.log(

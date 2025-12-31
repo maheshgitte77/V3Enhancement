@@ -225,6 +225,7 @@ const ensureTopics = async () => {
                       type: "screening_question_generation",
                       requestId: key,
                       categories: Object.keys(categoryCache).join(","),
+                      service_key: "AI_QUESTION_GENERATION",
                     }
                   );
                   console.log(

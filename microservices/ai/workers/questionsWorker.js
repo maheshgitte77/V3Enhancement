@@ -1,5 +1,6 @@
 const axios = require("axios");
-const { GoogleGenerativeAI } = require("@google/generative-ai-legacy"); // Compatibility with some versions if needed, but original uses @google/generative-ai
+const { Kafka } = require("kafkajs");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
 const creditServiceClient = require("../utils/creditServiceClient");
 
@@ -745,7 +746,7 @@ const createConsumer = async (id) => {
         questionConfig = parsedMessage.questionConfig;
         CandidateResumeData = parsedMessage.CandidateResumeData;
         questionsArray = parsedMessage.questionsArray;
-        clientId = parsedMessage.clientId;
+        const clientId = parsedMessage.clientId;
       } catch (parseError) {
         console.error(
           `❌ Error parsing incoming Kafka message in Consumer ${id}:`,
@@ -795,7 +796,7 @@ const createConsumer = async (id) => {
         // );
 
         const model = genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
+          model: "gemini-2.0-flash",
         });
 
         let aiResponse;
@@ -1106,12 +1107,12 @@ const createConsumer = async (id) => {
             clientId &&
             (tokenUsage.promptTokens > 0 || tokenUsage.completionTokens > 0)
           ) {
-            // Note: Use gemini-1.5-flash or whatever model is actually used (worker says gemini-1.5-flash or gemini-2.0-flash sometimes but code shows gemini-2.5-flash which might be a typo in user's file or special model)
+            // Note: Use gemini-1.5-flash or whatever model is actually used (worker says gemini-1.5-flash or gemini-2.0-flash sometimes but code shows gemini-2.0-flash which might be a typo in user's file or special model)
             // Let's use the actual model from the code
-            const activeModel = "gemini-2.5-flash";
+            const activeModel = "gemini-2.0-flash";
             await creditServiceClient.deductAiUsage(
               clientId,
-              "gemini-2.5-flash",
+              "gemini-2.0-flash",
               `ai_gen_${requestId}_${questionType}_${Date.now()}`,
               tokenUsage.promptTokens,
               tokenUsage.completionTokens,
@@ -1119,6 +1120,7 @@ const createConsumer = async (id) => {
                 requestId,
                 questionType,
                 type: "question_generation",
+                service_key: "AI_QUESTION_GENERATION",
               }
             );
             console.log(

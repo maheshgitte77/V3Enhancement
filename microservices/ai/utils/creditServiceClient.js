@@ -3,6 +3,7 @@ const axios = require("axios");
 class CreditServiceClient {
   constructor() {
     this.baseUrl = process.env.CREDIT_SERVICE_URL;
+    console.log(`🔗 CreditServiceClient initialized with URL: ${this.baseUrl}`);
   }
 
   /**
@@ -22,11 +23,16 @@ class CreditServiceClient {
         return null;
       }
 
+      const sKey = meta.service_key || "AI_QUESTION_GENERATION";
+      console.log(
+        `💰 Attempting to deduct AI usage: Client=${clientId}, Key=${sKey}, Ref=${referenceId}`
+      );
+
       const response = await axios.post(
         `${this.baseUrl}/credits/transaction/ai-usage`,
         {
           client_id: clientId,
-          service_key: "AI_QUESTION_GENERATION",
+          service_key: sKey,
           reference_id: referenceId,
           usage_data: {
             model_id: modelId,
@@ -36,8 +42,13 @@ class CreditServiceClient {
           },
         }
       );
+      console.log(`✅ Credit deduction SUCCESS: ${referenceId}`, response.data);
       return response.data;
     } catch (error) {
+      console.error(
+        `❌ Credit deduction FAILED: ${referenceId}`,
+        error.response?.data || error.message
+      );
       if (error.response) {
         const status = error.response.status;
         const data = error.response.data;

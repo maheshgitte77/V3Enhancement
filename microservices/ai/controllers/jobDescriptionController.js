@@ -50,6 +50,7 @@ const generateJobDescription = async (req, res) => {
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
+      console.log(`🔍 JD Gen Debug: clientId="${clientId}"`);
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         await creditServiceClient.deductAiUsage(
           clientId,
@@ -60,6 +61,7 @@ const generateJobDescription = async (req, res) => {
           {
             type: "jd_generation",
             jobTitle: jobDetails.jobTitle,
+            service_key: "AI_JOB_DESCRIPTION_GENERATION",
           }
         );
       }
@@ -152,6 +154,7 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
+      console.log(`🔍 JD Short Debug: clientId="${clientId}"`);
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         await creditServiceClient.deductAiUsage(
           clientId,
@@ -162,6 +165,7 @@ Generate a professional job description for a ${jobDetails.seniority.join(
           {
             type: "jd_overview_generation",
             jobTitle: jobDetails.jobTitle,
+            service_key: "AI_JOB_DESCRIPTION_GENERATION",
           }
         );
       }
@@ -226,6 +230,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
+      console.log(`🔍 JD Skills Debug: clientId="${clientId}"`);
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         await creditServiceClient.deductAiUsage(
           clientId,
@@ -235,6 +240,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
           outputTokens,
           {
             type: "jd_skills_extraction",
+            service_key: "AI_JOB_DESCRIPTION_GENERATION",
           }
         );
       }
@@ -320,6 +326,7 @@ const generateJobDescriptionFormFile = async (req, res) => {
         // --- Credit System Integration ---
         try {
           const clientId = req.body.clientId;
+          console.log(`🔍 JD File Debug: clientId="${clientId}"`);
           if (clientId && (inputTokens > 0 || outputTokens > 0)) {
             await creditServiceClient.deductAiUsage(
               clientId,
@@ -330,6 +337,7 @@ const generateJobDescriptionFormFile = async (req, res) => {
               {
                 type: "jd_generation_from_file",
                 fileName: req.file.originalname,
+                service_key: "AI_JOB_DESCRIPTION_GENERATION",
               }
             );
           }
