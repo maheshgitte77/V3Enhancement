@@ -170,6 +170,8 @@ services:
         max-file: "3"
     networks:
       - kafka-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   response-analysis-service:
     build: ../microservices/response-analysis-service
@@ -221,6 +223,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   ai-service:
     build: ../microservices/ai
