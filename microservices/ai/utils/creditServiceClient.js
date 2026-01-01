@@ -2,7 +2,7 @@ const axios = require("axios");
 
 class CreditServiceClient {
   constructor() {
-    this.baseUrl = process.env.CREDIT_SERVICE_URL;
+    this.baseUrl = import.meta.env.CREDIT_SERVICE_URL;
     console.log(`🔗 CreditServiceClient initialized with URL: ${this.baseUrl}`);
   }
 
