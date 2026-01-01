@@ -732,6 +732,7 @@ const createConsumer = async (id) => {
       let questionConfig = null;
       let CandidateResumeData = null;
       let questionsArray = null;
+      let clientId = null;
 
       try {
         const parsedMessage = JSON.parse(message.value.toString());
@@ -746,7 +747,7 @@ const createConsumer = async (id) => {
         questionConfig = parsedMessage.questionConfig;
         CandidateResumeData = parsedMessage.CandidateResumeData;
         questionsArray = parsedMessage.questionsArray;
-        const clientId = parsedMessage.clientId;
+        clientId = parsedMessage.clientId;
       } catch (parseError) {
         console.error(
           `❌ Error parsing incoming Kafka message in Consumer ${id}:`,
@@ -1101,15 +1102,13 @@ const createConsumer = async (id) => {
           );
         }
 
-        // --- Credit System Integration ---
+        // --- Credit System Integration (Commented out to prevent double charging - handled by summary in server.js) ---
+        /*
         try {
           if (
             clientId &&
             (tokenUsage.promptTokens > 0 || tokenUsage.completionTokens > 0)
           ) {
-            // Note: Use gemini-1.5-flash or whatever model is actually used (worker says gemini-1.5-flash or gemini-2.0-flash sometimes but code shows gemini-2.0-flash which might be a typo in user's file or special model)
-            // Let's use the actual model from the code
-            const activeModel = "gemini-2.0-flash";
             await creditServiceClient.deductAiUsage(
               clientId,
               "gemini-2.0-flash",
@@ -1133,6 +1132,7 @@ const createConsumer = async (id) => {
             creditError.message
           );
         }
+        */
         // ---------------------------------
 
         // Process questions based on type

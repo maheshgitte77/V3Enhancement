@@ -2,8 +2,27 @@ const axios = require("axios");
 
 class CreditServiceClient {
   constructor() {
-    this.baseUrl = import.meta.env.CREDIT_SERVICE_URL;
+    this.baseUrl = process.env.CREDIT_SERVICE_URL;
     console.log(`🔗 CreditServiceClient initialized with URL: ${this.baseUrl}`);
+  }
+
+  /**
+   * Get wallet balance for a client
+   */
+  async getBalance(clientId) {
+    try {
+      if (!clientId) return null;
+      const response = await axios.get(
+        `${this.baseUrl}/credits/wallet/${clientId}/balance`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `❌ Failed to fetch balance for client ${clientId}:`,
+        error.message
+      );
+      return null;
+    }
   }
 
   /**
@@ -25,7 +44,6 @@ class CreditServiceClient {
 
       const sKey = meta.service_key || "AI_JOB_DESCRIPTION_GENERATION";
 
-      
       const response = await axios.post(
         `${this.baseUrl}/credits/transaction/ai-usage`,
         {
