@@ -2,6 +2,7 @@ const model = require("../utils/googleGenerativeAI");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
 const { calculateProcessingCost } = require("../utils/costCalculator");
+const creditServiceClient = require("../utils/creditServiceClient");
 
 // Configure multer to handle file uploads
 const storage = multer.memoryStorage();
@@ -41,6 +42,35 @@ const generateJobDescription = async (req, res) => {
 
     const jobDescription =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
+
+    const usageMetadata = result.response?.usageMetadata || {};
+    const inputTokens = usageMetadata.promptTokenCount || 0;
+    const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
+    // --- Credit System Integration ---
+    try {
+      const clientId = req.body.clientId;
+      if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        await creditServiceClient.deductAiUsage(
+          clientId,
+          "gemini-2.0-flash",
+          `jd_gen_${Date.now()}`,
+          inputTokens,
+          outputTokens,
+          {
+            type: "jd_generation",
+            jobTitle: jobDetails.jobTitle,
+            service_key: "AI_JOB_DESCRIPTION_GENERATION",
+          }
+        );
+      }
+    } catch (creditError) {
+      console.error(
+        `❌ AI Credit deduction failed (Non-blocking):`,
+        creditError.message
+      );
+    }
+    // ---------------------------------
 
     const totalTokenCount = result.response.usageMetadata?.totalTokenCount || 0;
 
@@ -120,6 +150,31 @@ Generate a professional job description for a ${jobDetails.seniority.join(
       );
     }
 
+    // --- Credit System Integration ---
+    try {
+      const clientId = req.body.clientId;
+      if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        await creditServiceClient.deductAiUsage(
+          clientId,
+          "gemini-2.0-flash",
+          `jd_short_${Date.now()}`,
+          inputTokens,
+          outputTokens,
+          {
+            type: "jd_overview_generation",
+            jobTitle: jobDetails.jobTitle,
+            service_key: "AI_JOB_DESCRIPTION_GENERATION",
+          }
+        );
+      }
+    } catch (creditError) {
+      console.error(
+        `❌ AI Credit deduction failed (Non-blocking):`,
+        creditError.message
+      );
+    }
+    // ---------------------------------
+
     return res.status(200).json({
       message: "Job description generated successfully",
       jobDescription, // This contains only the required sections
@@ -163,8 +218,37 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
     const result = await model.generateContent(prompt);
     const aiResponse =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
+    const usageMetadata = result.response?.usageMetadata || {};
+    const inputTokens = usageMetadata.promptTokenCount || 0;
+    const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
     const totalTokenCount = result.response.usageMetadata?.totalTokenCount || 0;
     const aiResponseJson = aiResponse.replace(/```json|```/g, "").trim();
+
+    // --- Credit System Integration ---
+    try {
+      const clientId = req.body.clientId;
+      console.log(`🔍 JD Skills Debug: clientId="${clientId}"`);
+      if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        await creditServiceClient.deductAiUsage(
+          clientId,
+          "gemini-2.0-flash",
+          `jd_skills_${Date.now()}`,
+          inputTokens,
+          outputTokens,
+          {
+            type: "jd_skills_extraction",
+            service_key: "AI_JOB_DESCRIPTION_GENERATION",
+          }
+        );
+      }
+    } catch (creditError) {
+      console.error(
+        `❌ AI Credit deduction failed (Non-blocking):`,
+        creditError.message
+      );
+    }
+    // ---------------------------------
 
     const response = JSON.parse(aiResponseJson);
     return res.status(200).json({
@@ -236,6 +320,31 @@ const generateJobDescriptionFormFile = async (req, res) => {
             totalCost: processingCost.totalCost,
           }
         );
+
+        // --- Credit System Integration ---
+        try {
+          const clientId = req.body.clientId;
+          if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+            await creditServiceClient.deductAiUsage(
+              clientId,
+              "gemini-2.0-flash",
+              `jd_file_${Date.now()}`,
+              inputTokens,
+              outputTokens,
+              {
+                type: "jd_generation_from_file",
+                fileName: req.file.originalname,
+                service_key: "AI_JOB_DESCRIPTION_GENERATION",
+              }
+            );
+          }
+        } catch (creditError) {
+          console.error(
+            `❌ AI Credit deduction failed (Non-blocking):`,
+            creditError.message
+          );
+        }
+        // ---------------------------------
       }
 
       return res.json({

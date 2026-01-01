@@ -3,6 +3,7 @@ const { Kafka } = require("kafkajs");
 const cors = require("cors");
 const questionRoutes = require("./routes/questionsRoutes");
 const jobDescriptionRoutes = require("./routes/jobDescriptionRoutes");
+const creditServiceClient = require("./utils/creditServiceClient");
 require("dotenv").config();
 
 const app = express();
@@ -205,6 +206,40 @@ const ensureTopics = async () => {
               console.log(
                 `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`
               );
+
+              // --- Credit System Integration ---
+              const clientId = requestInfo.clientId;
+              const inputTokens = requestInfo.tokenUsage.total.promptTokens;
+              const outputTokens =
+                requestInfo.tokenUsage.total.completionTokens;
+
+              if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+                try {
+                  await creditServiceClient.deductAiUsage(
+                    clientId,
+                    "gemini-2.0-flash", // Assuming default model across questions
+                    `ai_questions_${key}`,
+                    inputTokens,
+                    outputTokens,
+                    {
+                      type: "screening_question_generation",
+                      requestId: key,
+                      categories: Object.keys(categoryCache).join(","),
+                      service_key: "AI_QUESTION_GENERATION",
+                    }
+                  );
+                  console.log(
+                    `💰 AI Credits deducted for Request ${key} (ClientId: ${clientId})`
+                  );
+                } catch (creditError) {
+                  console.error(
+                    `❌ AI Credit deduction failed for Request ${key}:`,
+                    creditError.message
+                  );
+                }
+              }
+              // ---------------------------------
+
               console.log(`By Type:`);
               Object.entries(requestInfo.tokenUsage.byType).forEach(
                 ([type, usage]) => {

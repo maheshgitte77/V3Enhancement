@@ -9,6 +9,7 @@ const { GoogleAIFileManager } = require("@google/generative-ai/server");
 const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
 const mongoose = require("mongoose");
+const creditServiceClient = require("../utils/creditServiceClient");
 
 dotenv.config();
 
@@ -468,6 +469,8 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     clientCoolingPeriod,
     processedEmails = [],
     clientObjectId,
+    addedBy,
+    clientId,
   } = data;
   try {
     if (!files?.length) {
@@ -764,6 +767,29 @@ Return the output in the specified JSON format.
       const inputTokens = usageMetadata.promptTokenCount || 0;
       const outputTokens = usageMetadata.candidatesTokenCount || 0;
 
+      // --- Credit System Integration (Token-Based) ---
+      try {
+        if (inputTokens > 0 || outputTokens > 0) {
+          const aiCreditResult = await creditServiceClient.deductAiCredits(
+            clientObjectId.toString(),
+            "gemini-2.0-flash",
+            `ai_${fileId}_${Date.now()}`,
+            inputTokens,
+            outputTokens,
+            { jobId, fileId, type: "RESUME_PARSE_DYNAMIC" }
+          );
+        }
+      } catch (creditError) {
+        console.error(
+          "⚠️ [Worker] AI Credit Deduction Failed:",
+          creditError.message
+        );
+        // We might want to continue processing even if credit deduction fails in worker
+        // to avoid losing results, or we could stop.
+        // Given this is a worker, we log and continue.
+      }
+      // ------------------------------------------------
+
       // Get page count for PDFs
       if (ext === "pdf" || mimetype === "application/pdf") {
         pageCount = await getPdfPageCount(finalFilePath);
@@ -846,6 +872,8 @@ Return the output in the specified JSON format.
           currentSalary,
           candidateType,
           hrSource,
+          addedBy,
+          clientId,
         },
         null, // lastApplicationId
         null, // coolingData
@@ -895,6 +923,8 @@ Return the output in the specified JSON format.
         currentSalary,
         candidateType,
         hrSource,
+        addedBy,
+        clientId,
       },
       candidateStatus?.lastApplicationId || null,
       candidateStatus.coolingData,
@@ -976,6 +1006,8 @@ Return the output in the specified JSON format.
         currentSalary: data.currentSalary,
         candidateType: data.candidateType,
         hrSource: data.hrSource,
+        addedBy: data.addedBy,
+        clientId: data.clientId,
       },
       null, // lastApplicationId
       null, // coolingData

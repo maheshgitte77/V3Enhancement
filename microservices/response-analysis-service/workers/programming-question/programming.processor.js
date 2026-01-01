@@ -1,4 +1,4 @@
-/**
+  /**
  * Programming Processor
  *
  * Handles AI code quality analysis for programming questions.
@@ -183,12 +183,9 @@ const processProgrammingResponse = async (responseData) => {
     logger.info("Running AI code quality analysis", { questionId });
 
     const aiAnalysis = await aiExecutor.executeProgrammingAnalysis({
+      ...responseData,
       candidateCode,
-      questionTitle,
-      questionDescription,
-      testCases,
       languageName,
-      questionId,
     });
 
     const processingCost = aiAnalysis.metadata?.processingCost || {

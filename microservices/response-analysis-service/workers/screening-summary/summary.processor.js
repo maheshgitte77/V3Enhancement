@@ -7,7 +7,7 @@
  * @version 2.5.0
  */
 
-const mongoose = require("mongoose");
+const creditServiceClient = require("../../utils/creditServiceClient");
 
 // Models will be injected during initialization
 let CandidateScreeningResult;
@@ -729,6 +729,7 @@ const calculateProcessingCosts = (screeningResult) => {
 const processScreeningSummary = async ({
   candidateScreeningId,
   screeningAssessmentId,
+  clientId,
   v2_5Config,
 }) => {
   try {
@@ -840,7 +841,9 @@ const processScreeningSummary = async ({
         prompt,
         aiResponses,
         screeningResult,
-        v2_5Config
+        v2_5Config,
+        clientId,
+        candidateScreeningId
       );
 
     // Collect languages used
@@ -1251,7 +1254,9 @@ const generateScreeningSummary = async (
   prompt,
   aiResponses,
   screeningResult,
-  v2_5Config
+  v2_5Config,
+  clientId,
+  candidateScreeningId
 ) => {
   let screeningSummaryTokens = 0;
   let screeningSummaryInputTokens = 0;
@@ -1317,6 +1322,37 @@ const generateScreeningSummary = async (
     screeningSummaryInputTokens,
     screeningSummaryOutputTokens,
   });
+
+  // --- Credit System Integration ---
+  try {
+    if (
+      clientId &&
+      (screeningSummaryInputTokens > 0 || screeningSummaryOutputTokens > 0)
+    ) {
+      const modelId = v2_5Config.ai.model || "gemini-2.0-flash";
+      await creditServiceClient.deductAiUsage(
+        clientId,
+        modelId,
+        `summary_${candidateScreeningId}_${Date.now()}`,
+        screeningSummaryInputTokens,
+        screeningSummaryOutputTokens,
+        {
+          candidateScreeningId: candidateScreeningId,
+          type: "screening_summary",
+        }
+      );
+      logger.info(`💰 AI Credits deducted for screening summary`, {
+        clientId: clientId,
+        candidateScreeningId: candidateScreeningId,
+      });
+    }
+  } catch (creditError) {
+    logger.error(`❌ AI Credit deduction failed (Non-blocking):`, {
+      error: creditError.message,
+      candidateScreeningId: candidateScreeningId,
+    });
+  }
+  // ---------------------------------
 
   // Parse AI response
   const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || [

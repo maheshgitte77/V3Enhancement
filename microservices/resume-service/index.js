@@ -110,9 +110,8 @@ const createConsumerInstance = async (id) => {
           if (
             requestInfo &&
             responseCache.get(requestId).length ===
-            requestInfo.expectedResponses
+              requestInfo.expectedResponses
           ) {
-
             io.emit(`completion:${requestId}`, {
               requestId,
               message: "All resumes processed",
@@ -123,7 +122,7 @@ const createConsumerInstance = async (id) => {
             if (requestInfo.expectedResponses > 1) {
               try {
                 await axios.post(
-                  `${process.env.NOTIFICATION_SER_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
+                  `${process.env.NOTIFICATION_SERVICE_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
                 );
 
                 const db = mongoose.connection.db;
@@ -136,7 +135,6 @@ const createConsumerInstance = async (id) => {
                     },
                   }
                 );
-
               } catch (error) {
                 console.error("Error while completing request:", error);
               }

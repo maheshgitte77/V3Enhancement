@@ -7,6 +7,10 @@ const JobApplicationSchema = new mongoose.Schema(
       required: true,
       ref: "Job",
     },
+    addedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
     name: {
       type: String,
     },

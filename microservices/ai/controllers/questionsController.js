@@ -1,5 +1,6 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
+const creditServiceClient = require("../utils/creditServiceClient");
 require("dotenv").config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -15,6 +16,7 @@ const generateScreeningQuestion = async (req, res) => {
       JD,
       CandidateResumeData,
       questionsArray,
+      clientId,
     } = req.body;
 
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -23,8 +25,34 @@ const generateScreeningQuestion = async (req, res) => {
         .json({ message: "Missing or invalid data in request" });
     }
 
+    // --- Credit Check ---
+    try {
+      if (clientId) {
+        const balanceData = await creditServiceClient.getBalance(clientId);
+        // Assuming minimal cost is around 1-5 credits.
+        // A safer check is to ensure they have > 0 or specific amount.
+        // Balance might be { balance: 100, currency: 'CREDITS' }
+        const balance = balanceData?.balance || 0;
+        if (balance <= 5) {
+          // Threshold: 5 credits
+          return res.status(402).json({
+            message: "Insufficient credits. Please top up your wallet.",
+            code: "INSUFFICIENT_FUNDS",
+          });
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "⚠️ Credit check failed, proceeding with caution:",
+        err.message
+      );
+    }
+    // --------------------
+
     // Generate unique request ID using crypto
-    const requestId = `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const requestId = `req-${Date.now()}-${crypto
+      .randomBytes(4)
+      .toString("hex")}`;
 
     // Split each category's questions by type - each type gets its own message
     const producerMessages = [];
@@ -34,8 +62,12 @@ const generateScreeningQuestion = async (req, res) => {
       if (category.questions && Array.isArray(category.questions)) {
         category.questions.forEach((questionConfig) => {
           // Use type-specific questionsArray from questionConfig if available, otherwise use global questionsArray
-          const typeSpecificQuestionsArray = questionConfig.questionsArray || questionsArray || [];
-          console.log("typeSpecificQuestionsArray", typeSpecificQuestionsArray.length);
+          const typeSpecificQuestionsArray =
+            questionConfig.questionsArray || questionsArray || [];
+          console.log(
+            "typeSpecificQuestionsArray",
+            typeSpecificQuestionsArray.length
+          );
           producerMessages.push({
             key: `req-${messageIndex++}`,
             value: JSON.stringify({
@@ -53,6 +85,7 @@ const generateScreeningQuestion = async (req, res) => {
               tailorMade,
               CandidateResumeData,
               questionsArray: typeSpecificQuestionsArray, // Use type-specific array
+              clientId,
             }),
           });
         });
@@ -63,9 +96,7 @@ const generateScreeningQuestion = async (req, res) => {
     const totalExpectedResponses = producerMessages.length;
 
     if (producerMessages.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "No questions to generate" });
+      return res.status(400).json({ message: "No questions to generate" });
     }
 
     await req.producer.send({
@@ -76,10 +107,11 @@ const generateScreeningQuestion = async (req, res) => {
     req.pendingRequests.set(requestId, {
       res,
       expectedResponses: totalExpectedResponses,
-      categories: data.map(cat => ({
+      categories: data.map((cat) => ({
         category: cat.category,
         skills: cat.skills || "unknown",
       })),
+      clientId, // Store clientId for billing
     });
   } catch (error) {
     console.error("❌ Error in generateScreeningQuestion:", error);
@@ -89,16 +121,27 @@ const generateScreeningQuestion = async (req, res) => {
 
 const generateBoilerplateCode = async (req, res) => {
   try {
-    const { questionTitle, question, testCases, languages } = req.body;
+    const { questionTitle, question, testCases, languages, clientId } =
+      req.body;
 
-    if (!questionTitle || !question || !testCases || !languages || !Array.isArray(languages) || languages.length === 0) {
+    if (
+      !questionTitle ||
+      !question ||
+      !testCases ||
+      !languages ||
+      !Array.isArray(languages) ||
+      languages.length === 0
+    ) {
       return res.status(400).json({
-        message: "Missing required fields: questionTitle, question, testCases, and languages array are required"
+        message:
+          "Missing required fields: questionTitle, question, testCases, and languages array are required",
       });
     }
 
     // Extract language names for the prompt
-    const languageNames = languages.map(lang => lang.languageName || lang.name).join(", ");
+    const languageNames = languages
+      .map((lang) => lang.languageName || lang.name)
+      .join(", ");
 
     const prompt = `
 Generate boilerplate code for the following programming problem for the following languages: ${languageNames}
@@ -112,7 +155,12 @@ Test Cases:
 ${JSON.stringify(testCases, null, 2)}
 
 For each of the following languages, generate appropriate boilerplate code:
-${languages.map(lang => `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`).join("\n")}
+${languages
+  .map(
+    (lang) =>
+      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
+  )
+  .join("\n")}
 
 CRITICAL BOILERPLATE CODE REQUIREMENTS:
 1. DO NOT include any solution code, even if commented out
@@ -136,8 +184,12 @@ CRITICAL FORMATTING REQUIREMENTS:
 Return ONLY a valid JSON object in this exact format:
 {
   "boilerplateCode": {
-    "${languages[0].languageName || languages[0].name}": "generated code here with \\n for newlines",
-    "${languages.length > 1 ? languages[1].languageName || languages[1].name : ""}": "generated code here with \\n for newlines"
+    "${
+      languages[0].languageName || languages[0].name
+    }": "generated code here with \\n for newlines",
+    "${
+      languages.length > 1 ? languages[1].languageName || languages[1].name : ""
+    }": "generated code here with \\n for newlines"
   }
 }
 
@@ -150,13 +202,43 @@ Ensure the JSON is valid and each language name matches exactly with the provide
 
     const result = await model.generateContent(prompt);
     const response = result.response;
+
+    // --- Credit System Integration ---
+    try {
+      const usageMetadata = response.usageMetadata || {};
+      const inputTokens = usageMetadata.promptTokenCount || 0;
+      const outputTokens = usageMetadata.candidatesTokenCount || 0;
+
+      if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        await creditServiceClient.deductAiUsage(
+          clientId,
+          "gemini-2.0-flash",
+          `ai_boilerplate_${Date.now()}`,
+          inputTokens,
+          outputTokens,
+          {
+            type: "boilerplate_generation",
+            questionTitle,
+            service_key: "AI_QUESTION_GENERATION",
+          }
+        );
+        console.log(
+          `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`
+        );
+      }
+    } catch (creditError) {
+      console.error(
+        "❌ AI Credit deduction failed (Non-blocking):",
+        creditError.message
+      );
+    }
+    // ---------------------------------
+
     const candidate = response.candidates?.[0]?.content;
 
     if (candidate && candidate.parts) {
       const aiResponseText = candidate.parts[0]?.text;
-      const aiResponseJson = aiResponseText
-        .replace(/```json|```/g, "")
-        .trim();
+      const aiResponseJson = aiResponseText.replace(/```json|```/g, "").trim();
 
       let aiResponse;
       try {
@@ -188,7 +270,9 @@ Ensure the JSON is valid and each language name matches exactly with the provide
     }
   } catch (error) {
     console.error("❌ Error in generateBoilerplateCode:", error);
-    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Internal Server Error", error: error.message });
   }
 };
 
