@@ -23,7 +23,7 @@ class CreditServiceClient {
         return null;
       }
 
-      const sKey = meta.service_key || "AI_QUESTION_GENERATION";
+      const sKey = meta.service_key || "AI_JOB_DESCRIPTION_GENERATION";
       console.log(
         `💰 Attempting to deduct AI usage: Client=${clientId}, Key=${sKey}, Ref=${referenceId}`
       );

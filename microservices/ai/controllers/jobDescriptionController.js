@@ -326,7 +326,6 @@ const generateJobDescriptionFormFile = async (req, res) => {
         // --- Credit System Integration ---
         try {
           const clientId = req.body.clientId;
-          console.log(`🔍 JD File Debug: clientId="${clientId}"`);
           if (clientId && (inputTokens > 0 || outputTokens > 0)) {
             await creditServiceClient.deductAiUsage(
               clientId,
