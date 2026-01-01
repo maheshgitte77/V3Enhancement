@@ -50,7 +50,6 @@ const generateJobDescription = async (req, res) => {
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
-      console.log(`🔍 JD Gen Debug: clientId="${clientId}"`);
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         await creditServiceClient.deductAiUsage(
           clientId,
@@ -154,7 +153,6 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
-      console.log(`🔍 JD Short Debug: clientId="${clientId}"`);
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         await creditServiceClient.deductAiUsage(
           clientId,

@@ -24,10 +24,8 @@ class CreditServiceClient {
       }
 
       const sKey = meta.service_key || "AI_JOB_DESCRIPTION_GENERATION";
-      console.log(
-        `💰 Attempting to deduct AI usage: Client=${clientId}, Key=${sKey}, Ref=${referenceId}`
-      );
 
+      
       const response = await axios.post(
         `${this.baseUrl}/credits/transaction/ai-usage`,
         {
