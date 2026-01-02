@@ -102,19 +102,27 @@ const analyzeResumes = async (req, res) => {
       // Use existing mongoose connection for schemaless operations
       const db = mongoose.connection.db;
       const clientObjectId = new ObjectId(clientId);
+      const jobObjectId = new ObjectId(jobId);
       const preferredLocations = locationPreference
         ?.split(",")
         ?.map((e) => e.trim());
       // 1. Get client's cooling period
       const client = await db
         .collection("clients")
-        .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1 } });
+        .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1, companyName: 1 } });
+      const job = await db
+        .collection("jobs")
+        .findOne({ _id: jobObjectId }, { projection: { jobTitle: 1 } });
+
+      const jobName = job?.jobTitle;
       const clientCoolingPeriod = client?.coolingPeriod;
-      const hasValidReferral = !!(
-        referralDetails &&
-        referralDetails?.name?.trim() &&
-        referralDetails?.email?.trim()
-      );
+      const clientName = client?.companyName;
+      const hasValidReferral =
+        !!(
+          referralDetails &&
+          referralDetails?.name?.trim() &&
+          referralDetails?.email?.trim()
+        );
 
       const candidateType = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
@@ -176,6 +184,8 @@ const analyzeResumes = async (req, res) => {
           clientId,
           jobId,
           moduleType: "resume",
+          clientName,
+          jobName,
         };
 
         // Upload to S3

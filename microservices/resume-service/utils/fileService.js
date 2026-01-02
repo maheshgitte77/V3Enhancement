@@ -25,6 +25,8 @@ const fileService = {
    * @param {String} options.module - Module associated with the file (legacy)
    * @param {Number} options.size - File size in bytes
    * @param {Object} [options.context] - Context for path resolution (clientId, jobId, moduleType, etc.)
+   * @param {String} [options.clientName] - Client name
+   * @param {String} [options.jobName] - Job name
    * @returns {Promise<Object>} - Signed upload URL and file metadata
    */
   async generateUploadUrl({ userId, name, extension, module, size, context = {} }) {
