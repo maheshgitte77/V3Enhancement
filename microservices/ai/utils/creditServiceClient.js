@@ -1,19 +1,19 @@
 const axios = require("axios");
 
+/**
+ * Credit Service API Client
+ * Simplified version using static methods for consistency across services
+ */
 class CreditServiceClient {
-  constructor() {
-    this.baseUrl = process.env.CREDIT_SERVICE_URL;
-    console.log(`🔗 CreditServiceClient initialized with URL: ${this.baseUrl}`);
-  }
-
   /**
    * Get wallet balance for a client
    */
-  async getBalance(clientId) {
+  static async getBalance(clientId) {
     try {
       if (!clientId) return null;
+      const baseUrl = process.env.CREDIT_SERVICE_URL;
       const response = await axios.get(
-        `${this.baseUrl}/credits/wallet/${clientId}/balance`
+        `${baseUrl}/credits/wallet/${clientId}/balance`
       );
       return response.data;
     } catch (error) {
@@ -28,7 +28,7 @@ class CreditServiceClient {
   /**
    * Deduct credits for AI usage (Token-based)
    */
-  async deductAiUsage(
+  static async deductAiUsage(
     clientId,
     modelId,
     referenceId,
@@ -42,10 +42,11 @@ class CreditServiceClient {
         return null;
       }
 
+      const baseUrl = process.env.CREDIT_SERVICE_URL;
       const sKey = meta.service_key || "AI_JOB_DESCRIPTION_GENERATION";
 
       const response = await axios.post(
-        `${this.baseUrl}/credits/transaction/ai-usage`,
+        `${baseUrl}/credits/transaction/ai-usage`,
         {
           client_id: clientId,
           service_key: sKey,
@@ -89,4 +90,4 @@ class CreditServiceClient {
   }
 }
 
-module.exports = new CreditServiceClient();
+module.exports = CreditServiceClient;
