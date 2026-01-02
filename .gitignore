@@ -21,7 +21,7 @@ extensions.json
 .env.local
 .env.development.local
 .env.test.local
-.env.production.local
+.env.production
 docker/.env
 
 # Service-specific secret files (if any exist)
