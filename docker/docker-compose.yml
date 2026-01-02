@@ -21,39 +21,24 @@ services:
     image: wurstmeister/kafka
     container_name: kafka1
     ports:
-      - "9092:9092"
+      - "9092:9092" # Exposed to Host for PM2
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka1:9092
+      # 1. Define Internal and External protocols
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # 2. Listen on both ports (29092 for docker, 9092 for host)
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      # 3. Advertise 'kafka1' to docker apps, and 'localhost' to host apps
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_CREATE_TOPICS: "response_analyze:6:3,screening.analysis.requests:6:3,screening.analysis.results:6:3,screening.analysis.failures:3:3,screening.summary.requests:3:3,screening.summary.results:3:3"
-      # Log retention settings to prevent disk overflow
-      KAFKA_LOG_RETENTION_HOURS: 168
-      KAFKA_LOG_RETENTION_BYTES: 1073741824
-      KAFKA_LOG_SEGMENT_BYTES: 536870912
-      KAFKA_LOG_CLEANUP_POLICY: delete
-      KAFKA_LOG_CLEANER_ENABLE: "true"
     depends_on:
       - zookeeper
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "kafka-topics.sh --bootstrap-server localhost:9092 --list",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
     networks:
       - kafka-network
 
@@ -61,39 +46,20 @@ services:
     image: wurstmeister/kafka
     container_name: kafka2
     ports:
-      - "9093:9093"
+      - "9093:9093" # Exposed to Host for PM2
     environment:
       KAFKA_BROKER_ID: 2
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29093,EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:29093,EXTERNAL://localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_NUM_PARTITIONS: 6
-      KAFKA_CREATE_TOPICS: "response_analyze:6:3,screening.analysis.requests:6:3,screening.analysis.results:6:3,screening.analysis.failures:3:3,screening.summary.requests:3:3,screening.summary.results:3:3"
-      # Log retention settings to prevent disk overflow
-      KAFKA_LOG_RETENTION_HOURS: 168
-      KAFKA_LOG_RETENTION_BYTES: 1073741824
-      KAFKA_LOG_SEGMENT_BYTES: 536870912
-      KAFKA_LOG_CLEANUP_POLICY: delete
-      KAFKA_LOG_CLEANER_ENABLE: "true"
     depends_on:
       - zookeeper
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "kafka-topics.sh --bootstrap-server localhost:9093 --list",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
     networks:
       - kafka-network
 
@@ -101,41 +67,24 @@ services:
     image: wurstmeister/kafka
     container_name: kafka3
     ports:
-      - "9094:9094"
+      - "9094:9094" # Exposed to Host for PM2
     environment:
       KAFKA_BROKER_ID: 3
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29094,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:29094,EXTERNAL://localhost:9094
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_NUM_PARTITIONS: 6
-      KAFKA_CREATE_TOPICS: "response_analyze:6:3,screening.analysis.requests:6:3,screening.analysis.results:6:3,screening.analysis.failures:3:3,screening.summary.requests:3:3,screening.summary.results:3:3"
-      # Log retention settings to prevent disk overflow
-      KAFKA_LOG_RETENTION_HOURS: 168
-      KAFKA_LOG_RETENTION_BYTES: 1073741824
-      KAFKA_LOG_SEGMENT_BYTES: 536870912
-      KAFKA_LOG_CLEANUP_POLICY: delete
-      KAFKA_LOG_CLEANER_ENABLE: "true"
     depends_on:
       - zookeeper
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "kafka-topics.sh --bootstrap-server localhost:9094 --list",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
     networks:
       - kafka-network
+
+  # --- MICROSERVICES (Updated to use INTERNAL Kafka ports) ---
 
   resume-service:
     build: ../microservices/resume-service
@@ -146,7 +95,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       PORT: 5010
-      KAFKA_BROKER: ${KAFKA_BROKER}
+      # IMPORTANT: Use the INTERNAL ports (2909x)
+      KAFKA_BROKER: kafka1:29092,kafka2:29093,kafka3:29094
       KAFKA_TOPIC: resume-screening
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -165,11 +115,6 @@ services:
       - kafka1
       - kafka2
       - kafka3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
     networks:
       - kafka-network
 
@@ -182,26 +127,21 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       PORT: 7010
-      # Kafka Integration
       USE_KAFKA: "true"
-      KAFKA_BROKER: ${KAFKA_BROKER}
-      KAFKA_BROKERS: ${KAFKA_BROKER}
+      # IMPORTANT: Use the INTERNAL ports (2909x)
+      KAFKA_BROKER: kafka1:29092,kafka2:29093,kafka3:29094
+      KAFKA_BROKERS: kafka1:29092,kafka2:29093,kafka3:29094
       KAFKA_TOPIC: "screening.analysis.requests"
       KAFKA_VIDEO_TOPIC: "response_analyze"
       KAFKA_CONSUMER_GROUP: "response-analysis-consumers"
-      # Scaling
       WORKER_COUNT: 4
-      # AI
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      # Legacy (keep for compatibility)
       GROUP_ID_VIDEO_ANALYZE: "response_analyze_group"
       BUCKET_NAME: "techevalhelloassistance"
       NUM_CONSUMERS: ${NUM_CONSUMERS}
-      # Database
       MONGODB_URI: ${MONGODB_URI}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
       CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
-      # Code execution (for programming analysis)
       SCREENING_SERVICE_URL: "http://host.docker.internal:8080"
     depends_on:
       kafka1:
@@ -213,11 +153,6 @@ services:
     networks:
       - kafka-network
     restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
     healthcheck:
       test:
         ["CMD", "curl", "-f", "http://localhost:7010/api/response/v2.5/health"]
@@ -235,7 +170,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       PORT: 6001
-      KAFKA_BROKER: ${KAFKA_BROKER}
+      # IMPORTANT: Use the INTERNAL ports (2909x)
+      KAFKA_BROKER: kafka1:29092,kafka2:29093,kafka3:29094
       KAFKA_TOPIC: screening-questions
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GROUP_ID_RESUME_SCREENING: "screening-questions-group"
@@ -246,11 +182,6 @@ services:
       - kafka1
       - kafka2
       - kafka3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
     networks:
       - kafka-network
 
