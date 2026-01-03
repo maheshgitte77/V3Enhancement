@@ -19,10 +19,9 @@ extensions.json
 # Environment files with secrets (keep these ignored)
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production
 docker/.env
+docker/.env.production.local
+
 
 # Service-specific secret files (if any exist)
 gcp-key.json
