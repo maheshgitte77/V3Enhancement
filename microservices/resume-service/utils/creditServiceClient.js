@@ -9,15 +9,8 @@ class CreditServiceClient {
    * Register Storage (STORAGE_INGEST)
    */
   async registerStorage(data) {
-    try {
-      const response = await axios.post(
-        `${this.baseUrl}/credits/transaction/storage-ingest`,
-        data
-      );
-      return response.data;
-    } catch (error) {
-      return this._handleError(error);
-    }
+    // Storage credit registration disabled as per requirements
+    return { success: true, message: "Storage credit registration disabled" };
   }
 
   /**

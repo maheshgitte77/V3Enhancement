@@ -109,7 +109,10 @@ const analyzeResumes = async (req, res) => {
       // 1. Get client's cooling period
       const client = await db
         .collection("clients")
-        .findOne({ _id: clientObjectId }, { projection: { coolingPeriod: 1, companyName: 1 } });
+        .findOne(
+          { _id: clientObjectId },
+          { projection: { coolingPeriod: 1, companyName: 1 } }
+        );
       const job = await db
         .collection("jobs")
         .findOne({ _id: jobObjectId }, { projection: { jobTitle: 1 } });
@@ -117,12 +120,11 @@ const analyzeResumes = async (req, res) => {
       const jobName = job?.jobTitle;
       const clientCoolingPeriod = client?.coolingPeriod;
       const clientName = client?.companyName;
-      const hasValidReferral =
-        !!(
-          referralDetails &&
-          referralDetails?.name?.trim() &&
-          referralDetails?.email?.trim()
-        );
+      const hasValidReferral = !!(
+        referralDetails &&
+        referralDetails?.name?.trim() &&
+        referralDetails?.email?.trim()
+      );
 
       const candidateType = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
@@ -204,26 +206,7 @@ const analyzeResumes = async (req, res) => {
           headers: { "Content-Type": file.mimetype },
         });
 
-        // --- Storage Credit Deduction ---
-        try {
-          await creditServiceClient.registerStorage({
-            client_id: clientId,
-            job_id: jobId,
-            file_type:
-              ext.toUpperCase() === "PDF" ? "RESUME_PDF" : "RESUME_DOCX",
-            size_bytes: file.size,
-            reference_id: fileId,
-            duration_months: 6,
-          });
-        } catch (storageError) {
-          console.warn(
-            "⚠️ [Controller] Storage Credit Deduction Failed (Non-blocking):",
-            storageError.message,
-            "\nError stack:",
-            storageError.stack
-          );
-        }
-        // ---------------------------------
+        // Storage credit deduction removed as per task requirements
 
         await produceMessage(
           {
@@ -457,11 +440,7 @@ const addToJobApplication = async (req, res) => {
       // Add journey stage "Added" for each job application
       for (const jobApp of jobApplications) {
         if (jobApp && jobApp._id) {
-          await addJobApplicationJourneyStage(
-            jobApp._id,
-            "Added",
-            addedBy
-          );
+          await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
 
           // --- Candidate Invitation Credit Deduction ---
           try {
