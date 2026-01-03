@@ -3,7 +3,7 @@ const { Kafka } = require("kafkajs");
 const cors = require("cors");
 const questionRoutes = require("./routes/questionsRoutes");
 const jobDescriptionRoutes = require("./routes/jobDescriptionRoutes");
-const creditServiceClient = require("./utils/creditServiceClient");
+const CreditServiceClient = require("./utils/creditServiceClient");
 require("dotenv").config();
 
 const app = express();
@@ -215,7 +215,7 @@ const ensureTopics = async () => {
 
               if (clientId && (inputTokens > 0 || outputTokens > 0)) {
                 try {
-                  await creditServiceClient.deductAiUsage(
+                  await CreditServiceClient.deductAiUsage(
                     clientId,
                     "gemini-2.0-flash", // Assuming default model across questions
                     `ai_questions_${key}`,

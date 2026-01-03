@@ -1,6 +1,6 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
-const creditServiceClient = require("../utils/creditServiceClient");
+const CreditServiceClient = require("../utils/creditServiceClient");
 require("dotenv").config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -28,7 +28,7 @@ const generateScreeningQuestion = async (req, res) => {
     // --- Credit Check ---
     try {
       if (clientId) {
-        const balanceData = await creditServiceClient.getBalance(clientId);
+        const balanceData = await CreditServiceClient.getBalance(clientId);
         // Assuming minimal cost is around 1-5 credits.
         // A safer check is to ensure they have > 0 or specific amount.
         // Balance might be { balance: 100, currency: 'CREDITS' }

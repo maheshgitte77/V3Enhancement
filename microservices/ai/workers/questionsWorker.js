@@ -2,7 +2,7 @@ const axios = require("axios");
 const { Kafka } = require("kafkajs");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
-const creditServiceClient = require("../utils/creditServiceClient");
+const CreditServiceClient = require("../utils/creditServiceClient");
 
 require("dotenv").config();
 
