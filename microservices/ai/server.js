@@ -34,6 +34,10 @@ const consumer = kafka.consumer({ groupId: "response-group" });
 const pendingRequests = new Map(); // Stores Express response objects
 const responseCache = new Map(); // Stores aggregated responses by requestId -> category -> questionType
 
+// Server-side tracking of used Programming logic categories per assessment
+const categoryTracker = require("./utils/categoryTracker");
+const { identifyCategoryFromTitle } = require("./utils/programmingCategories");
+
 const ensureTopics = async () => {
   const admin = kafka.admin();
   await admin.connect();
@@ -189,6 +193,44 @@ const ensureTopics = async () => {
               type: questionType,
               [questionType]: questionObj[questionType],
             });
+
+            // Track used logic categories for Programming questions (server-side)
+            if (questionType === "Programming" && questionObj.Programming && Array.isArray(questionObj.Programming)) {
+              const clientId = requestInfo.clientId;
+              if (clientId) {
+                // Extract logic categories from responseData if provided, otherwise identify from titles
+                let generatedCategories = responseData.logicCategories || [];
+
+                // If not in response, use robust category identification from titles
+                if (generatedCategories.length === 0) {
+                  const identifiedCategoriesSet = new Set();
+
+                  questionObj.Programming.forEach((q) => {
+                    if (q.questionTitle) {
+                      // Use robust category identification function
+                      const identifiedCategory = identifyCategoryFromTitle(q.questionTitle);
+                      if (identifiedCategory) {
+                        identifiedCategoriesSet.add(identifiedCategory);
+                      }
+                    }
+                  });
+
+                  generatedCategories = Array.from(identifiedCategoriesSet);
+                }
+
+                // Store tracked categories and refresh timestamp
+                if (generatedCategories.length > 0) {
+                  categoryTracker.addUsedCategories(clientId, categoryName, generatedCategories);
+                  categoryTracker.refreshTracking(clientId, categoryName); // Refresh timestamp
+                  console.log(
+                    `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(", ")}`
+                  );
+                } else {
+                  // Even if no categories identified, refresh tracking to extend expiration
+                  categoryTracker.refreshTracking(clientId, categoryName);
+                }
+              }
+            }
           }
 
           // Check if we've received all expected responses

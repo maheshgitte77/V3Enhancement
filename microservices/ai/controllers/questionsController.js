@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
-const CreditServiceClient = require("../utils/creditServiceClient");
+const creditServiceClient = require("../utils/creditServiceClient");
+const categoryTracker = require("../utils/categoryTracker");
 require("dotenv").config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -54,20 +55,86 @@ const generateScreeningQuestion = async (req, res) => {
       .randomBytes(4)
       .toString("hex")}`;
 
-    // Split each category's questions by type - each type gets its own message
+    // Group questions: Audio/Video/Subjective together for uniqueness, others separate
     const producerMessages = [];
     let messageIndex = 0;
+    let totalExpectedResponses = 0; // Count actual responses, not messages
 
     data.forEach((category) => {
       if (category.questions && Array.isArray(category.questions)) {
+        // Separate question types into groups
+        const audioVideoSubjective = [];
+        const otherTypes = [];
+
         category.questions.forEach((questionConfig) => {
-          // Use type-specific questionsArray from questionConfig if available, otherwise use global questionsArray
+          const type = questionConfig.type;
+          if (type === "Audio" || type === "Video" || type === "Subjective") {
+            audioVideoSubjective.push(questionConfig);
+          } else {
+            otherTypes.push(questionConfig);
+          }
+        });
+
+        // Group Audio/Video/Subjective together for combined generation
+        if (audioVideoSubjective.length > 0) {
+          // Collect all previously asked questions from these types for uniqueness
+          const combinedQuestionsArray = [];
+          audioVideoSubjective.forEach((qc) => {
+            const typeSpecificArray = qc.questionsArray || questionsArray || [];
+            combinedQuestionsArray.push(...typeSpecificArray);
+          });
+
+          producerMessages.push({
+            key: `req-${messageIndex++}`,
+            value: JSON.stringify({
+              requestId,
+              experience,
+              jobRole,
+              proposedSeniority,
+              JD,
+              category: {
+                category: category.category,
+                skills: category.skills || "unknown",
+              },
+              questionType: "AudioVideoSubjective", // Combined type identifier
+              questionConfigs: audioVideoSubjective, // Array of configs for all three types
+              tailorMade,
+              CandidateResumeData,
+              questionsArray: combinedQuestionsArray, // Combined questions array for uniqueness
+              clientId,
+            }),
+          });
+
+          // Count expected responses: 1 message but 3 separate responses (one per type)
+          totalExpectedResponses += audioVideoSubjective.length;
+        }
+
+        // Handle other types (MCQ, Programming) separately
+        otherTypes.forEach((questionConfig) => {
           const typeSpecificQuestionsArray =
             questionConfig.questionsArray || questionsArray || [];
           console.log(
             "typeSpecificQuestionsArray",
             typeSpecificQuestionsArray.length
           );
+
+          // Get server-side tracked used categories for Programming questions
+          let usedCategories = [];
+          if (questionConfig.type === "Programming" && clientId) {
+            usedCategories = categoryTracker.getAllUsedCategories(
+              clientId,
+              category.category
+            );
+            // Refresh tracking timestamp to extend expiration (auto-refreshes on get, but explicit for clarity)
+            if (usedCategories.length > 0) {
+              categoryTracker.refreshTracking(clientId, category.category);
+            }
+            console.log(
+              `📊 Server-side used categories for ${category.category}:`,
+              usedCategories.length > 0 ? usedCategories.join(", ") : "None"
+            );
+          }
+
           producerMessages.push({
             key: `req-${messageIndex++}`,
             value: JSON.stringify({
@@ -81,19 +148,20 @@ const generateScreeningQuestion = async (req, res) => {
                 skills: category.skills || "unknown",
               },
               questionType: questionConfig.type,
-              questionConfig: questionConfig, // Single question config (type, number, maxTime, etc.)
+              questionConfig: questionConfig, // Single question config
               tailorMade,
               CandidateResumeData,
-              questionsArray: typeSpecificQuestionsArray, // Use type-specific array
+              questionsArray: typeSpecificQuestionsArray,
+              usedCategories: usedCategories, // Server-side tracked categories (for Programming)
               clientId,
             }),
           });
+
+          // Count expected responses: 1 message = 1 response
+          totalExpectedResponses += 1;
         });
       }
     });
-
-    // Calculate total expected responses (one per question type per category)
-    const totalExpectedResponses = producerMessages.length;
 
     if (producerMessages.length === 0) {
       return res.status(400).json({ message: "No questions to generate" });
@@ -156,11 +224,11 @@ ${JSON.stringify(testCases, null, 2)}
 
 For each of the following languages, generate appropriate boilerplate code:
 ${languages
-  .map(
-    (lang) =>
-      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
-  )
-  .join("\n")}
+        .map(
+          (lang) =>
+            `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
+        )
+        .join("\n")}
 
 CRITICAL BOILERPLATE CODE REQUIREMENTS:
 1. DO NOT include any solution code, even if commented out
@@ -184,12 +252,10 @@ CRITICAL FORMATTING REQUIREMENTS:
 Return ONLY a valid JSON object in this exact format:
 {
   "boilerplateCode": {
-    "${
-      languages[0].languageName || languages[0].name
-    }": "generated code here with \\n for newlines",
-    "${
-      languages.length > 1 ? languages[1].languageName || languages[1].name : ""
-    }": "generated code here with \\n for newlines"
+    "${languages[0].languageName || languages[0].name
+      }": "generated code here with \\n for newlines",
+    "${languages.length > 1 ? languages[1].languageName || languages[1].name : ""
+      }": "generated code here with \\n for newlines"
   }
 }
 
