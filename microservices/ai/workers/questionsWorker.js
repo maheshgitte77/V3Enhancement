@@ -9,7 +9,6 @@ require("dotenv").config();
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
   broker.trim()
 );
-// console.log(`🔗 Connecting to Kafka Brokers:`, kafkaBrokers);
 
 const kafka = new Kafka({
   clientId: "questions-worker",
@@ -1101,39 +1100,6 @@ const createConsumer = async (id) => {
             `📊 Token usage for ${questionType} (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`
           );
         }
-
-        // --- Credit System Integration (Commented out to prevent double charging - handled by summary in server.js) ---
-        /*
-        try {
-          if (
-            clientId &&
-            (tokenUsage.promptTokens > 0 || tokenUsage.completionTokens > 0)
-          ) {
-            await creditServiceClient.deductAiUsage(
-              clientId,
-              "gemini-2.0-flash",
-              `ai_gen_${requestId}_${questionType}_${Date.now()}`,
-              tokenUsage.promptTokens,
-              tokenUsage.completionTokens,
-              {
-                requestId,
-                questionType,
-                type: "question_generation",
-                service_key: "AI_QUESTION_GENERATION",
-              }
-            );
-            console.log(
-              `💰 AI Credits deducted for ${questionType} (ClientId: ${clientId})`
-            );
-          }
-        } catch (creditError) {
-          console.error(
-            `❌ AI Credit deduction failed (Non-blocking):`,
-            creditError.message
-          );
-        }
-        */
-        // ---------------------------------
 
         // Process questions based on type
         if (aiResponse && aiResponse[questionType]) {

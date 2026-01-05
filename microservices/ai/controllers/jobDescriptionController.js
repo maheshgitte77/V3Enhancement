@@ -2,7 +2,7 @@ const model = require("../utils/googleGenerativeAI");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
 const { calculateProcessingCost } = require("../utils/costCalculator");
-const creditServiceClient = require("../utils/creditServiceClient");
+const CreditServiceClient = require("../utils/creditServiceClient");
 
 // Configure multer to handle file uploads
 const storage = multer.memoryStorage();
@@ -11,6 +11,7 @@ const upload = multer({ storage });
 const generateJobDescription = async (req, res) => {
   try {
     const jobDetails = req.body;
+    const channelId = jobDetails.channelId;
 
     // ✅ Create a structured prompt for the AI
     const prompt = `Generate a structured job description for a ${jobDetails.seniority.join(
@@ -51,7 +52,7 @@ const generateJobDescription = async (req, res) => {
     try {
       const clientId = req.body.clientId;
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        await creditServiceClient.deductAiUsage(
+        await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
           `jd_gen_${Date.now()}`,
@@ -61,7 +62,8 @@ const generateJobDescription = async (req, res) => {
             type: "jd_generation",
             jobTitle: jobDetails.jobTitle,
             service_key: "AI_JOB_DESCRIPTION_GENERATION",
-          }
+          },
+          channelId
         );
       }
     } catch (creditError) {
@@ -88,7 +90,9 @@ const generateJobDescription = async (req, res) => {
 const generateJobDescriptionForJobOverview = async (req, res) => {
   try {
     const jobDetails = req.body;
+    const channelId = jobDetails.channelId;
 
+    console.log("Channel ID:", channelId);
     // ✅ Create a structured prompt for AI with Typography
     const prompt = `
 Generate a professional job description for a ${jobDetails.seniority.join(
@@ -154,7 +158,7 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     try {
       const clientId = req.body.clientId;
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        await creditServiceClient.deductAiUsage(
+        await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
           `jd_short_${Date.now()}`,
@@ -164,7 +168,8 @@ Generate a professional job description for a ${jobDetails.seniority.join(
             type: "jd_overview_generation",
             jobTitle: jobDetails.jobTitle,
             service_key: "AI_JOB_DESCRIPTION_GENERATION",
-          }
+          },
+          channelId
         );
       }
     } catch (creditError) {
@@ -189,6 +194,7 @@ Generate a professional job description for a ${jobDetails.seniority.join(
 const generateSkillsFromJobDescription = async (req, res) => {
   try {
     const jobDetails = req.body;
+    const channelId = jobDetails.channelId;
 
     // ✅ Create a structured prompt for Gemini AI
     const prompt = `
@@ -230,7 +236,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
       const clientId = req.body.clientId;
       console.log(`🔍 JD Skills Debug: clientId="${clientId}"`);
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        await creditServiceClient.deductAiUsage(
+        await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
           `jd_skills_${Date.now()}`,
@@ -239,7 +245,8 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
           {
             type: "jd_skills_extraction",
             service_key: "AI_JOB_DESCRIPTION_GENERATION",
-          }
+          },
+          channelId
         );
       }
     } catch (creditError) {
@@ -324,8 +331,9 @@ const generateJobDescriptionFormFile = async (req, res) => {
         // --- Credit System Integration ---
         try {
           const clientId = req.body.clientId;
+          const channelId = req.body.channelId;
           if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-            await creditServiceClient.deductAiUsage(
+            await CreditServiceClient.deductAiUsage(
               clientId,
               "gemini-2.0-flash",
               `jd_file_${Date.now()}`,
@@ -335,7 +343,8 @@ const generateJobDescriptionFormFile = async (req, res) => {
                 type: "jd_generation_from_file",
                 fileName: req.file.originalname,
                 service_key: "AI_JOB_DESCRIPTION_GENERATION",
-              }
+              },
+              channelId
             );
           }
         } catch (creditError) {

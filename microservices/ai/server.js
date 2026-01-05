@@ -209,6 +209,8 @@ const ensureTopics = async () => {
 
               // --- Credit System Integration ---
               const clientId = requestInfo.clientId;
+              const channelId = requestInfo.channelId;
+              const jobId = requestInfo.jobId;
               const inputTokens = requestInfo.tokenUsage.total.promptTokens;
               const outputTokens =
                 requestInfo.tokenUsage.total.completionTokens;
@@ -226,8 +228,12 @@ const ensureTopics = async () => {
                       requestId: key,
                       categories: Object.keys(categoryCache).join(","),
                       service_key: "AI_QUESTION_GENERATION",
-                    }
+                    },
+                    channelId,
+                    jobId
                   );
+                  console.log(channelId, "channelId");
+                  console.log(jobId, "jobId");
                   console.log(
                     `💰 AI Credits deducted for Request ${key} (ClientId: ${clientId})`
                   );

@@ -17,6 +17,8 @@ const generateScreeningQuestion = async (req, res) => {
       CandidateResumeData,
       questionsArray,
       clientId,
+      channelId,
+      jobId,
     } = req.body;
 
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -86,6 +88,8 @@ const generateScreeningQuestion = async (req, res) => {
               CandidateResumeData,
               questionsArray: typeSpecificQuestionsArray, // Use type-specific array
               clientId,
+              channelId,
+              jobId,
             }),
           });
         });
@@ -112,6 +116,8 @@ const generateScreeningQuestion = async (req, res) => {
         skills: cat.skills || "unknown",
       })),
       clientId, // Store clientId for billing
+      channelId,
+      jobId,
     });
   } catch (error) {
     console.error("❌ Error in generateScreeningQuestion:", error);
@@ -121,8 +127,15 @@ const generateScreeningQuestion = async (req, res) => {
 
 const generateBoilerplateCode = async (req, res) => {
   try {
-    const { questionTitle, question, testCases, languages, clientId } =
-      req.body;
+    const {
+      questionTitle,
+      question,
+      testCases,
+      languages,
+      clientId,
+      channelId,
+      jobId,
+    } = req.body;
 
     if (
       !questionTitle ||
@@ -210,7 +223,7 @@ Ensure the JSON is valid and each language name matches exactly with the provide
       const outputTokens = usageMetadata.candidatesTokenCount || 0;
 
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        await creditServiceClient.deductAiUsage(
+        await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
           `ai_boilerplate_${Date.now()}`,
@@ -220,7 +233,9 @@ Ensure the JSON is valid and each language name matches exactly with the provide
             type: "boilerplate_generation",
             questionTitle,
             service_key: "AI_QUESTION_GENERATION",
-          }
+          },
+          channelId,
+          jobId
         );
         console.log(
           `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`
