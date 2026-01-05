@@ -866,49 +866,52 @@ ${logicCategoryInfo}
 - **Experience Level Tailoring** (${experience} years):
   * ${experience <= 3 ? 'Junior Level' : experience <= 7 ? 'Mid-Level' : 'Senior Level'} - Adjust scenario complexity accordingly
   * ${experience <= 3 ? 'Junior' : experience <= 7 ? 'Mid-level' : 'Senior'} ${jobRole} scenarios should reflect ${experience <= 3 ? 'learning and basic tasks' : experience <= 7 ? 'standard project work' : 'complex system design and optimization'}
-  * Use appropriate technical depth based on ${experience} years of experience
+  * Use appropriate technical depth based on ${experience} years of experience & Question MUST be solvable within ${maxTime} minutes by an average candidate.
 - Each question must include:
   * **WELL-FORMATTED problem statement** with clear sections and proper HTML formatting:
+    - **🚫 ABSOLUTE RULE - NO EXCEPTIONS**: NEVER write <br/><h3> - this creates double spacing. Always write <h3> directly after the previous section's closing tag (like </p><h3> or </ul><h3>)
+    - **FORBIDDEN PATTERN**: <p>...</p><br/><h3> ❌ WRONG - creates 2 line breaks
+    - **CORRECT PATTERN**: <p>...</p><h3> ✅ CORRECT - creates 1 line break (from h3's natural spacing)
     - Use <strong> or <b> tags for emphasis on important terms
     - Use <h3> or <h4> tags for section headings (Problem Description, Input Format, Output Format, Constraints, Examples)
     - Use <ul> and <li> tags for lists
     - Use <code> tags for inline code/variable names
     - Use <pre><code> tags for code blocks/examples
-    - Use <br/> for line breaks between paragraphs AND after important sentences for better readability
+    - Use <br/> ONLY within paragraphs for line breaks between sentences or between content elements (like between example input/output pairs)
+    - **CRITICAL**: The <h3> heading tags have built-in CSS spacing - adding <br/> before them creates DOUBLE spacing which looks wrong
     - Structure the problem statement as follows:
-      * <h3>Problem Description</h3>: Scenario-based explanation relevant to ${jobRole} role with ${experience} years experience (add <br/> after important sentences)
+      * <h3>Problem Description</h3>: Scenario-based explanation relevant to ${jobRole} role with ${experience} years experience (add <br/> after important sentences WITHIN the paragraph)
         - Start with a real-world scenario/context
         - Connect the problem to ${jobRole} work responsibilities
         - Use job-role appropriate terminology and context
         - Make it relatable to daily work situations
+        - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Input Format</h3>: Detailed input specification with examples
+        - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Output Format</h3>: Expected output specification
+        - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Constraints</h3>: Important limits and constraints (use <ul><li> for list)
+        - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Examples</h3>: 1-2 clear examples showing input/output pairs
         - **CRITICAL**: Always use <strong>Input:</strong> and <strong>Output:</strong> (bold/dark) for labels in examples
         - Format examples as: <p><strong>Input:</strong> description or value</p><p><strong>Output:</strong> description or value</p>
-        - Add <br/> between example input/output pairs
+        - Add <br/> between example input/output pairs (ONLY ONE <br/> per break) - but NOT before the next <h3> if there is one
     - Make it visually appealing and easy to scan quickly
     - Use bold text for key terms, variable names, and important numbers
-    - Add <br/> after important sentences to improve readability
     - Ensure proper spacing and readability
     - **CRITICAL**: In Examples section, always use <strong>Input:</strong> and <strong>Output:</strong> (bold/dark) for labels
-    - **FORMATTING EXAMPLE** (follow this structure with scenario-based context):
+    - **FORMATTING EXAMPLE** (follow this EXACT structure - NO <br/> tags before <h3> headings):
       <h3>Problem Description</h3>
       <p>As a ${jobRole}, you're working on a ${experience <= 3 ? 'data processing module' : experience <= 7 ? 'performance monitoring system' : 'analytics dashboard'} that receives an array of <strong>n</strong> ${experience <= 3 ? 'user activity' : experience <= 7 ? 'transaction' : 'performance metric'} values. You need to find the <code>maximum</code> value to ${experience <= 3 ? 'identify peak usage' : experience <= 7 ? 'determine system capacity' : 'optimize resource allocation'}.</p>
-      <br/>
       <h3>Input Format</h3>
       <p>The first line contains an integer <strong>n</strong> representing the size of the array.<br/>The second line contains <strong>n</strong> space-separated integers.</p>
-      <br/>
       <h3>Output Format</h3>
       <p>Print a single integer representing the <code>maximum</code> element in the array.</p>
-      <br/>
       <h3>Constraints</h3>
       <ul>
         <li>1 ≤ <strong>n</strong> ≤ 10<sup>5</sup></li>
         <li>-10<sup>9</sup> ≤ array elements ≤ 10<sup>9</sup></li>
       </ul>
-      <br/>
       <h3>Examples</h3>
       <p><strong>Input:</strong> A string of characters.</p>
       <p><strong>Output:</strong> A map where the key is the character and the value is its Huffman code (a string of 0s and 1s).</p>
@@ -916,6 +919,11 @@ ${logicCategoryInfo}
       <br/>
       <p><strong>Input:</strong> 5<br/>1 5 3 9 2</p>
       <p><strong>Output:</strong> 9</p>
+      **🚫 VALIDATION CHECK**: Before outputting, verify your HTML structure:
+      1. Search for pattern <br/><h3> - if found, REMOVE the <br/> tag (this is WRONG)
+      2. Ensure pattern is </p><h3> or </ul><h3> (this is CORRECT)
+      3. Only <br/> tags should appear WITHIN paragraphs or between example pairs, NEVER before <h3> headings
+      4. The correct pattern is: </p><h3>NextSection</h3> NOT </p><br/><h3>NextSection</h3>
   * EXACTLY ${testCasesCount} test cases
   * Each test case MUST have: input (actual value), output (EXACT expected value - no spaces/newlines), explanation, visible (boolean), weightage (number)
   * Test case weightages must sum to 100%
@@ -1006,11 +1014,11 @@ If titles are provided, you MUST:
   * Make it relatable to ${experience <= 3 ? 'junior' : experience <= 7 ? 'mid-level' : 'senior'} ${jobRole} work
   * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${experience <= 3 ? 'user data' : experience <= 7 ? 'transaction logs' : 'system performance metrics'} and need to identify the peak value..."
 
-**FINAL TIME CONSTRAINT REMINDER**:
-- maxTime = ${maxTime} minutes
-- Question MUST be completable within this time by an average candidate
-- If in doubt, choose a SIMPLER problem that fits the time limit
-- Better to have a simple, solvable problem than a complex, unsolvable one within the time limit
+**FINAL VALIDATION CHECKS** (MUST verify before outputting):
+1. **LINE BREAK CHECK**: Search your generated HTML for <br/><h3> pattern - if found, REMOVE the <br/> tag. The correct pattern is </p><h3> or </ul><h3>, NOT </p><br/><h3>
+2. **TIME CONSTRAINT**: maxTime = ${maxTime} minutes - Question MUST be completable within this time by an average candidate
+3. If in doubt, choose a SIMPLER problem that fits the time limit
+4. Better to have a simple, solvable problem than a complex, unsolvable one within the time limit
 `;
       break;
   }
