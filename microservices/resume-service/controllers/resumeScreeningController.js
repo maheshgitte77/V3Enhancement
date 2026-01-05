@@ -98,6 +98,7 @@ const analyzeResumes = async (req, res) => {
         hrSource,
         addedBy,
         clientId,
+        channelId,
       } = req.body;
       // Use existing mongoose connection for schemaless operations
       const db = mongoose.connection.db;
@@ -238,6 +239,7 @@ const analyzeResumes = async (req, res) => {
             clientCoolingPeriod,
             processedEmails: Array.from(processedEmails),
             clientObjectId,
+            channelId, // For credit tracking
           },
           "resume-screening",
           validFiles.indexOf(file)
@@ -348,7 +350,8 @@ const getRequestData = async (req, res) => {
 const addToJobApplication = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { jobId, changeStatus, emails, addedBy, clientId } = req.body;
+    const { jobId, changeStatus, emails, addedBy, clientId, channelId } =
+      req.body;
     const redis = req.redis;
 
     if (!jobId || !Array.isArray(emails) || emails.length === 0) {
@@ -442,22 +445,8 @@ const addToJobApplication = async (req, res) => {
         if (jobApp && jobApp._id) {
           await addJobApplicationJourneyStage(jobApp._id, "Added", addedBy);
 
-          // --- Candidate Invitation Credit Deduction ---
-          try {
-            await creditServiceClient.deductInviteCredits(
-              clientId,
-              "SCREENING_INVITE",
-              `invite_${requestId}_${jobApp.email}`,
-              1,
-              { jobId, email: jobApp.email }
-            );
-          } catch (error) {
-            console.warn(
-              `⚠️ Invite Credit Deduction Failed for ${jobApp.email}:`,
-              error.message
-            );
-          }
-          // --------------------------------------------
+          // Credit deduction is handled by user-communication service
+          // when it sends the actual invitation email (with proper channelId tracking)
         }
       }
     } catch (error) {
@@ -702,6 +691,7 @@ const addToJobApplication = async (req, res) => {
           jobId,
           expiryDate: ExpiredOn,
           candidateList,
+          channelId, // For credit tracking
         }
       );
     } catch (error) {

@@ -14,7 +14,9 @@ class CreditServiceClient {
     referenceId,
     inputTokens,
     outputTokens,
-    meta = {}
+    meta = {},
+    channelId,
+    jobId
   ) {
     try {
       if (!clientId) {
@@ -34,6 +36,8 @@ class CreditServiceClient {
             output_tokens: outputTokens,
             ...meta,
           },
+          channel_id: channelId,
+          job_id: jobId,
         }
       );
       return response.data;

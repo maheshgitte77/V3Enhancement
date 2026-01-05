@@ -471,6 +471,7 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
     clientObjectId,
     addedBy,
     clientId,
+    channelId,
   } = data;
   try {
     if (!files?.length) {
@@ -776,7 +777,9 @@ Return the output in the specified JSON format.
             `ai_${fileId}_${Date.now()}`,
             inputTokens,
             outputTokens,
-            { jobId, fileId, type: "RESUME_PARSE_DYNAMIC" }
+            { jobId, fileId, type: "RESUME_PARSE_DYNAMIC" },
+            channelId,
+            jobId
           );
         }
       } catch (creditError) {
