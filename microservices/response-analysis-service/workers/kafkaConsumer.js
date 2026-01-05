@@ -213,6 +213,8 @@ const handleAnalysisRequest = async (request) => {
     candidateScreeningId,
     questionId,
     skillName,
+    channelId,
+    jobId,
   } = request;
 
   let result;
@@ -277,6 +279,8 @@ const handleSummaryRequest = async (request) => {
     candidateScreeningId,
     screeningAssessmentId,
     releaseScoreImmediately,
+    channelId,
+    jobId,
   } = request;
 
   try {
@@ -288,6 +292,8 @@ const handleSummaryRequest = async (request) => {
       candidateScreeningId,
       screeningAssessmentId,
       v2_5Config: config,
+      channelId,
+      jobId,
     });
 
     // Handle immediate score release (Email + Kafka notification) if enabled

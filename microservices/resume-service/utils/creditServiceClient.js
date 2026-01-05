@@ -6,14 +6,6 @@ class CreditServiceClient {
   }
 
   /**
-   * Register Storage (STORAGE_INGEST)
-   */
-  async registerStorage(data) {
-    // Storage credit registration disabled as per requirements
-    return { success: true, message: "Storage credit registration disabled" };
-  }
-
-  /**
    * Deduct credits for unit-based usage (e.g. Invites, Parsing)
    */
   async deductInviteCredits(
@@ -34,7 +26,9 @@ class CreditServiceClient {
     itemKey,
     referenceId,
     units = 1,
-    meta = {}
+    meta = {},
+    channelId,
+    jobId
   ) {
     try {
       const response = await axios.post(
@@ -45,6 +39,8 @@ class CreditServiceClient {
           reference_id: referenceId,
           units: units,
           meta: meta,
+          channel_id: channelId,
+          job_id: jobId,
         }
       );
       return response.data;
@@ -62,7 +58,9 @@ class CreditServiceClient {
     referenceId,
     inputTokens,
     outputTokens,
-    meta = {}
+    meta = {},
+    channelId,
+    jobId
   ) {
     return this.deductAiCredits(
       clientId,
@@ -70,7 +68,9 @@ class CreditServiceClient {
       referenceId,
       inputTokens,
       outputTokens,
-      meta
+      meta,
+      channelId,
+      jobId
     );
   }
 
@@ -83,7 +83,9 @@ class CreditServiceClient {
     referenceId,
     inputTokens,
     outputTokens,
-    meta = {}
+    meta = {},
+    channelId,
+    jobId
   ) {
     try {
       const response = await axios.post(
@@ -98,6 +100,8 @@ class CreditServiceClient {
             output_tokens: outputTokens,
             ...meta,
           },
+          channel_id: channelId,
+          job_id: jobId,
         }
       );
       return response.data;

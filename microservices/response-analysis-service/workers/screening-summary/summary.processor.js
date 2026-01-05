@@ -731,6 +731,8 @@ const processScreeningSummary = async ({
   screeningAssessmentId,
   clientId,
   v2_5Config,
+  channelId,
+  jobId,
 }) => {
   try {
     // Use stored V2_5_CONFIG as fallback
@@ -1339,7 +1341,9 @@ const generateScreeningSummary = async (
         {
           candidateScreeningId: candidateScreeningId,
           type: "screening_summary",
-        }
+        },
+        channelId,
+        jobId
       );
       logger.info(`💰 AI Credits deducted for screening summary`, {
         clientId: clientId,

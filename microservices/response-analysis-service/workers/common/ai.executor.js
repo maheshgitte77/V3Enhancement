@@ -278,7 +278,9 @@ const executeAICall = async (
               candidateScreeningId: responseData.candidateScreeningId,
               stage: stage,
               type: "response_analysis",
-            }
+            },
+            responseData.channelId,
+            responseData.jobId
           );
           logger.info(`💰 AI Credits deducted for Stage ${stage}`, {
             clientId: responseData.clientId,

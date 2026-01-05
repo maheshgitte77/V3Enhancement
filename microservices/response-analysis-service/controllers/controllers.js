@@ -293,6 +293,8 @@ const analyzeMediaResponseV2_5 = async (req, res) => {
       hasCopyPasteAnalysis: req.body.hasCopyPasteAnalysis === "true",
       copyPasteAnalysis: parsedCopyPasteAnalysis,
       clientId: req.body.clientId,
+      channelId: req.body.channelId,
+      jobId: req.body.jobId,
     };
 
     logger.info("Starting multi-stage processing", {
@@ -509,6 +511,8 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
         ? parseInt(req.body.fullScreenExitCount)
         : 0,
       clientId: req.body.clientId,
+      channelId: req.body.channelId,
+      jobId: req.body.jobId,
     };
 
     logger.info("Starting multi-stage processing", {
@@ -573,6 +577,8 @@ const analyzeScreeningV2_5 = async (req, res) => {
     screeningAssessmentId,
     releaseScoreImmediately,
     clientId,
+    channelId,
+    jobId,
   } = req.query;
 
   try {
@@ -592,6 +598,8 @@ const analyzeScreeningV2_5 = async (req, res) => {
       screeningAssessmentId,
       clientId,
       v2_5Config: orchestrator.getConfig(),
+      channelId,
+      jobId,
     });
 
     // Handle immediate score release (Kafka + Email notification)
