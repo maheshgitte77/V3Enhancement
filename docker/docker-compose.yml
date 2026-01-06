@@ -135,9 +135,12 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
       CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
     depends_on:
-      - kafka1
-      - kafka2
-      - kafka3
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
     networks:
       - kafka-network
 
@@ -202,9 +205,12 @@ services:
       OPEN_AI_KEY: ${OPEN_AI_KEY}
       CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
     depends_on:
-      - kafka1
-      - kafka2
-      - kafka3
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
     networks:
       - kafka-network
 
