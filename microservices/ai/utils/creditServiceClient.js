@@ -36,7 +36,8 @@ class CreditServiceClient {
     outputTokens,
     meta = {},
     channelId,
-    jobId
+    jobId,
+    tempId
   ) {
     try {
       if (!clientId) {
@@ -61,6 +62,7 @@ class CreditServiceClient {
           },
           channel_id: channelId,
           job_id: jobId,
+          temp_id: tempId,
         }
       );
       console.log(`✅ Credit deduction SUCCESS: ${referenceId}`, response.data);

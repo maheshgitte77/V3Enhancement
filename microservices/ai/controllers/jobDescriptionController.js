@@ -63,7 +63,9 @@ const generateJobDescription = async (req, res) => {
             jobTitle: jobDetails.jobTitle,
             service_key: "AI_JOB_DESCRIPTION_GENERATION",
           },
-          channelId
+          channelId,
+          null, // No jobId yet
+          req.body.tempId || req.body.temp_id
         );
       }
     } catch (creditError) {
@@ -169,7 +171,9 @@ Generate a professional job description for a ${jobDetails.seniority.join(
             jobTitle: jobDetails.jobTitle,
             service_key: "AI_JOB_DESCRIPTION_GENERATION",
           },
-          channelId
+          channelId,
+          null, // No jobId yet
+          req.body.tempId || req.body.temp_id
         );
       }
     } catch (creditError) {
@@ -246,7 +250,9 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
             type: "jd_skills_extraction",
             service_key: "AI_JOB_DESCRIPTION_GENERATION",
           },
-          channelId
+          channelId,
+          null, // No jobId yet
+          req.body.tempId || req.body.temp_id
         );
       }
     } catch (creditError) {
@@ -344,7 +350,9 @@ const generateJobDescriptionFormFile = async (req, res) => {
                 fileName: req.file.originalname,
                 service_key: "AI_JOB_DESCRIPTION_GENERATION",
               },
-              channelId
+              channelId,
+              null, // No jobId yet
+              req.body.tempId || req.body.temp_id
             );
           }
         } catch (creditError) {
