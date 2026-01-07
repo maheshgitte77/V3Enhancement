@@ -1,6 +1,6 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
-const creditServiceClient = require("../utils/creditServiceClient");
+const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
 require("dotenv").config();
 
@@ -237,11 +237,11 @@ ${JSON.stringify(testCases, null, 2)}
 
 For each of the following languages, generate appropriate boilerplate code:
 ${languages
-        .map(
-          (lang) =>
-            `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
-        )
-        .join("\n")}
+  .map(
+    (lang) =>
+      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
+  )
+  .join("\n")}
 
 CRITICAL BOILERPLATE CODE REQUIREMENTS:
 1. DO NOT include any solution code, even if commented out
@@ -265,10 +265,12 @@ CRITICAL FORMATTING REQUIREMENTS:
 Return ONLY a valid JSON object in this exact format:
 {
   "boilerplateCode": {
-    "${languages[0].languageName || languages[0].name
-      }": "generated code here with \\n for newlines",
-    "${languages.length > 1 ? languages[1].languageName || languages[1].name : ""
-      }": "generated code here with \\n for newlines"
+    "${
+      languages[0].languageName || languages[0].name
+    }": "generated code here with \\n for newlines",
+    "${
+      languages.length > 1 ? languages[1].languageName || languages[1].name : ""
+    }": "generated code here with \\n for newlines"
   }
 }
 
