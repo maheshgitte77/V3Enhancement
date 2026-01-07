@@ -833,7 +833,8 @@ const generateScreeningSummaryPrompt = (
   aiResponses,
   questionData,
   recommendation,
-  integrityScore
+  integrityScore,
+  evidenceStrength = null
 ) => {
   let prompt = `
 You are an HR Analytics AI tasked with creating concise, decision-oriented candidate evaluation summaries. Analyze the screening data and provide clear, actionable insights for hiring decisions.
@@ -888,13 +889,100 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - **Candidate Fit Score**: ${candidateFitScore}% (Use this for fit category determination)
 - **Final Recommendation**: ${recommendation} (CRITICAL: Your fit summary MUST align with this recommendation)
 - **Integrity Score**: ${integrityScore}% (Lower scores indicate integrity concerns that may affect recommendation)
-- **Cheating Detected**: ${
-    screeningResult.isCheatingDetected ? "Yes" : "No"
-  } (If Yes, this significantly impacts recommendation)
 `;
+
+  // NEW: Generate evidence-based integrity context for AI
+  if (evidenceStrength) {
+    if (
+      evidenceStrength.evidenceLevel === "WEAK" &&
+      evidenceStrength.isMinorConcern
+    ) {
+      // Minor concern - AI should NOT emphasize this negatively
+      prompt += `
+
+**📝 INTEGRITY CONTEXT - MINOR OBSERVATION (LOW EVIDENCE):**
+- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${
+        evidenceStrength.totalQuestions
+      } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
+- Evidence Level: WEAK (isolated behavioral observation)
+- Definitive Cheating Flags: ${evidenceStrength.definitiveFlags} (none detected)
+- High Confidence Flags: ${evidenceStrength.highConfidenceFlags}
+
+**AI INSTRUCTION FOR SUMMARY:**
+- This is an isolated, low-confidence behavioral observation (e.g., reading pattern detected in 1-2 questions)
+- This could be due to candidate thinking deeply, looking at notes, or AI analysis error
+- DO NOT treat this as a red flag or integrity concern in the summary
+- If mentioning at all, phrase as: "Minor observation in Q${evidenceStrength.flaggedQuestionIndices.join(
+        ", Q"
+      )} may warrant brief clarification during interview"
+- Focus the summary on the candidate's STRENGTHS and technical performance
+- The recommendation "${recommendation}" should NOT be negatively impacted by this minor observation
+`;
+    } else if (evidenceStrength.evidenceLevel === "MODERATE") {
+      // Moderate concern - AI should note but not overemphasize
+      prompt += `
+
+**⚠️ INTEGRITY CONTEXT - MODERATE OBSERVATION:**
+- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${
+        evidenceStrength.totalQuestions
+      } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
+- Evidence Level: MODERATE (pattern detected but not definitive)
+- Definitive Cheating Flags: ${evidenceStrength.definitiveFlags}
+- High Confidence Flags: ${evidenceStrength.highConfidenceFlags}
+
+**AI INSTRUCTION FOR SUMMARY:**
+- Some integrity indicators were detected but evidence is not conclusive
+- Mention integrity observation factually: "Some behavioral patterns detected that may warrant discussion during interview"
+- Balance the summary with both strengths AND the integrity observation
+- Do not use harsh language like "cheating detected" or "failed integrity check"
+- Suggest verification during interview rather than outright rejection
+`;
+    } else if (evidenceStrength.evidenceLevel === "STRONG") {
+      // Strong concern - AI should clearly highlight integrity issues
+      const correlationInfo = evidenceStrength.hasCorrelatedCheatingPattern
+        ? `\n- Correlated Cheating Patterns: ${evidenceStrength.matchedCorrelations.join(
+            ", "
+          )} (Strong indicator of deliberate cheating)`
+        : "";
+
+      prompt += `
+
+**🚨 INTEGRITY CONTEXT - SIGNIFICANT CONCERN (STRONG EVIDENCE):**
+- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${
+        evidenceStrength.totalQuestions
+      } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
+- Evidence Level: STRONG (definitive indicators detected)
+- Definitive Cheating Flags: ${evidenceStrength.definitiveFlags}
+- High Confidence Flags: ${
+        evidenceStrength.highConfidenceFlags
+      }${correlationInfo}
+
+**AI INSTRUCTION FOR SUMMARY:**
+- Clear integrity concerns were detected with strong evidence
+- The summary MUST prominently mention integrity issues
+- Use professional but clear language: "Significant integrity concerns detected" or "Assessment integrity compromised"
+- Prioritize integrity concerns over technical performance in the summary
+- The recommendation "${recommendation}" reflects these serious concerns
+`;
+    }
+  }
 
   // Add all question data
   prompt += questionData;
+
+  // Add response format and CRITICAL alignment rules
+  let alignmentGuidance = "";
+  if (recommendation === "Not Recommended") {
+    alignmentGuidance = `- Recommendation is "Not Recommended" → Your summary MUST reflect concerns (integrity issues, skill gaps, or both)
+- The "Fit for Role Type" pointer MUST say something like "Not recommended for this role" or "Does not meet requirements"
+- DO NOT say "recommend for interview" or "good fit" when recommendation is "Not Recommended"`;
+  } else if (recommendation === "Recommended") {
+    alignmentGuidance = `- Recommendation is "Recommended" → Your summary can be positive but mention any areas for follow-up
+- The "Fit for Role Type" pointer should say "Recommend for interview" or similar`;
+  } else {
+    alignmentGuidance = `- Recommendation is "Strongly Recommended" → Your summary should emphasize strong performance
+- The "Fit for Role Type" pointer should say "Strongly recommend" or "Excellent candidate"`;
+  }
 
   prompt += `
 **Response JSON Format:**
@@ -914,15 +1002,19 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
   ]
 }
 
+**⚠️ CRITICAL ALIGNMENT RULES (MUST FOLLOW):**
+The Final Recommendation is: "${recommendation}"
+
+Your summary and fitScorePointers MUST align with this recommendation:
+${alignmentGuidance}
+
 **IMPORTANT GUIDELINES:**
 - Keep screeningSummary points concise and factual
 - Use fit score ranges to determine appropriate fitScorePointers category
-- **CRITICAL: The "Fit for Role Type" recommendation MUST match the Final Recommendation provided above**
-- If Final Recommendation is "Not Recommended", the fit summary should reflect this even if fit score seems good
 - Include actual skill names and performance indicators
 - Focus on decision-making value for HR
 - Maintain professional, objective tone
-- If cheating detected or integrity score is low, prioritize integrity concerns in summary
+- If recommendation is "Not Recommended" due to integrity, clearly state integrity concerns
 `;
 
   return prompt;

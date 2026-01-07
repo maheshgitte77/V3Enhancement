@@ -167,16 +167,199 @@ const calculateIntegrityScore = (screeningResult) => {
 };
 
 /**
- * Calculate recommendation based on fit score and integrity
+ * Get total question count from screening result
+ * @param {Object} screeningResult - Screening result object
+ * @returns {number} Total number of questions
+ */
+const getTotalQuestionCount = (screeningResult) => {
+  let totalQuestions = 0;
+
+  screeningResult.skills?.forEach((skill) => {
+    ["mcq", "video", "audio", "subjective", "programming"].forEach((type) => {
+      totalQuestions += skill[type]?.length || 0;
+    });
+  });
+
+  return totalQuestions;
+};
+/**
+ * Analyze cheating evidence strength across all AI responses
+ * Classifies evidence as STRONG, MODERATE, or WEAK based on:
+ * - Number of flagged questions
+ * - Severity of flags (HIGH/MEDIUM/LOW)
+ * - Cheating confidence scores
+ * - Flag types (Definitive vs Behavioral)
+ * - Correlated flag patterns (e.g., TAB_SWITCHING + QUESTION_COPYING = STRONG)
+ *
+ * @param {Array} aiResponses - Array of AI response analysis
+ * @param {number} totalQuestions - Total number of questions in screening
+ * @returns {Object} Evidence strength analysis
+ */
+const analyzeEvidenceStrength = (aiResponses, totalQuestions) => {
+  // DEFINITIVE FLAGS - Single occurrence is strong evidence of cheating
+  const DEFINITIVE_FLAGS = [
+    "DEVICE_DETECTED",
+    "MULTIPLE_PERSONS",
+    "MULTIPLE_VOICES",
+    "LIP_SYNC_MISMATCH",
+    "BACKGROUND_COACHING",
+    "EXTERNAL_COACHING",
+    "EXTERNAL_PROMPTS",
+    "EXTERNAL_INTERACTION",
+  ];
+
+  // BEHAVIORAL FLAGS - May be false positives, need corroboration
+  const BEHAVIORAL_FLAGS = [
+    "READING_FROM_EXTERNAL",
+    "SAME_SCREEN_READING",
+    "SUBTLE_READING",
+    "READING_DELIVERY",
+    "SCRIPTED_DELIVERY",
+    "READING_PATTERN_DETECTED",
+  ];
+
+  // CORRELATED FLAGS - Individual = MODERATE, Combined = STRONG
+  const CORRELATED_FLAGS = [
+    "TAB_SWITCHING",
+    "QUESTION_COPYING",
+    "EXCESSIVE_PASTE",
+  ];
+
+  // Correlation patterns that upgrade evidence to STRONG
+  const STRONG_CORRELATIONS = [
+    ["QUESTION_COPYING", "TAB_SWITCHING"], // Copied question + switched tabs = likely searching
+    ["TAB_SWITCHING", "EXCESSIVE_PASTE"], // Switched tabs + large paste = copied answer
+  ];
+
+  let flaggedQuestions = 0;
+  let highConfidenceFlags = 0;
+  let mediumConfidenceFlags = 0;
+  let lowConfidenceFlags = 0;
+  let definitiveFlags = 0;
+  let behavioralFlags = 0;
+  let correlatedFlags = 0;
+  const flaggedQuestionIndices = [];
+  const allDetectedFlagTypes = new Set(); // Track all flag types for correlation
+
+  aiResponses.forEach((response, index) => {
+    const flags = response.integrityAnalysis?.flags || [];
+    const cheatingConfidence = response.cheatingConfidence || 0;
+
+    if (flags.length > 0 || cheatingConfidence >= 50) {
+      flaggedQuestions++;
+      flaggedQuestionIndices.push(index + 1);
+
+      flags.forEach((flag) => {
+        // Track all detected flag types
+        if (flag.type) {
+          allDetectedFlagTypes.add(flag.type);
+        }
+
+        // Count by severity
+        if (flag.severity === "HIGH" || cheatingConfidence >= 80) {
+          highConfidenceFlags++;
+        } else if (flag.severity === "MEDIUM" || cheatingConfidence >= 50) {
+          mediumConfidenceFlags++;
+        } else {
+          lowConfidenceFlags++;
+        }
+
+        // Count by type category
+        if (DEFINITIVE_FLAGS.includes(flag.type)) {
+          definitiveFlags++;
+        } else if (BEHAVIORAL_FLAGS.includes(flag.type)) {
+          behavioralFlags++;
+        } else if (CORRELATED_FLAGS.includes(flag.type)) {
+          correlatedFlags++;
+        }
+      });
+    }
+  });
+
+  const flaggedPercentage =
+    totalQuestions > 0 ? (flaggedQuestions / totalQuestions) * 100 : 0;
+
+  // Check for correlated flag patterns
+  let hasCorrelatedCheatingPattern = false;
+  const matchedCorrelations = [];
+
+  STRONG_CORRELATIONS.forEach((pattern) => {
+    const hasAllFlags = pattern.every((flagType) =>
+      allDetectedFlagTypes.has(flagType)
+    );
+    if (hasAllFlags) {
+      hasCorrelatedCheatingPattern = true;
+      matchedCorrelations.push(pattern.join(" + "));
+    }
+  });
+
+  // Determine evidence level
+  let evidenceLevel;
+  if (
+    definitiveFlags >= 1 ||
+    highConfidenceFlags >= 3 ||
+    hasCorrelatedCheatingPattern ||
+    flaggedPercentage >= 50 || // CRITICAL: 50%+ questions flagged = STRONG
+    flaggedQuestions >= 3 // CRITICAL: 3+ flagged questions = STRONG
+  ) {
+    evidenceLevel = "STRONG";
+  } else if (highConfidenceFlags >= 1 && mediumConfidenceFlags >= 2) {
+    evidenceLevel = "MODERATE";
+  } else if (
+    correlatedFlags >= 1 // Single correlated flag (e.g., just TAB_SWITCHING) = MODERATE
+  ) {
+    evidenceLevel = "MODERATE";
+  } else if (
+    flaggedQuestions <= 2 &&
+    definitiveFlags === 0 &&
+    highConfidenceFlags === 0 &&
+    correlatedFlags === 0
+  ) {
+    evidenceLevel = "WEAK";
+  } else {
+    evidenceLevel = "MODERATE";
+  }
+
+  // Determine if this is a minor concern (should not affect recommendation)
+  const isMinorConcern =
+    flaggedQuestions <= 2 &&
+    definitiveFlags === 0 &&
+    highConfidenceFlags === 0 &&
+    correlatedFlags === 0 &&
+    !hasCorrelatedCheatingPattern &&
+    flaggedPercentage <= 25;
+
+  return {
+    flaggedQuestions,
+    totalQuestions,
+    flaggedPercentage,
+    highConfidenceFlags,
+    mediumConfidenceFlags,
+    lowConfidenceFlags,
+    definitiveFlags,
+    behavioralFlags,
+    correlatedFlags,
+    hasCorrelatedCheatingPattern,
+    matchedCorrelations,
+    evidenceLevel,
+    isMinorConcern,
+    flaggedQuestionIndices,
+  };
+};
+
+/**
+ * Calculate recommendation based on fit score, integrity, and evidence strength
  * @param {number} candidateFitScore - Candidate fit score
  * @param {number} integrityScore - Integrity score
  * @param {boolean} isCheatingDetected - Whether cheating was detected
+ * @param {Object} evidenceStrength - Evidence strength analysis from analyzeEvidenceStrength()
  * @returns {string} Recommendation level
  */
 const calculateRecommendation = (
   candidateFitScore,
   integrityScore,
-  isCheatingDetected
+  isCheatingDetected,
+  evidenceStrength = null
 ) => {
   // Base recommendation from fit score
   let baseRecommendation;
@@ -188,22 +371,49 @@ const calculateRecommendation = (
     baseRecommendation = "Not Recommended";
   }
 
-  // Apply integrity downgrades
-  if (integrityScore < 30 || isCheatingDetected === true) {
+  // NEW: Check if evidence is weak/isolated - don't penalize for minor concerns
+  if (
+    evidenceStrength?.isMinorConcern &&
+    evidenceStrength.evidenceLevel === "WEAK"
+  ) {
+    // Minor concern - retain base recommendation based on fit score
+    return baseRecommendation;
+  }
+
+  // STRONG evidence - ALWAYS reject, no exceptions
+  if (evidenceStrength?.evidenceLevel === "STRONG") {
     return "Not Recommended";
   }
 
-  if (integrityScore >= 30 && integrityScore < 50) {
-    return "Not Recommended";
-  }
-
-  if (integrityScore >= 50 && integrityScore < 70) {
-    if (baseRecommendation === "Strongly Recommended") {
-      return "Recommended";
-    } else if (baseRecommendation === "Recommended") {
+  // MODERATE evidence - be cautious but not aggressive
+  if (evidenceStrength?.evidenceLevel === "MODERATE") {
+    if (integrityScore < 40) {
       return "Not Recommended";
     }
-    return "Not Recommended";
+    if (integrityScore < 60 && baseRecommendation === "Strongly Recommended") {
+      return "Recommended";
+    }
+  }
+
+  // Fallback for null evidenceStrength (backward compatibility)
+  if (!evidenceStrength) {
+    // Apply legacy integrity downgrades
+    if (integrityScore < 30 || isCheatingDetected === true) {
+      return "Not Recommended";
+    }
+
+    if (integrityScore >= 30 && integrityScore < 50) {
+      return "Not Recommended";
+    }
+
+    if (integrityScore >= 50 && integrityScore < 70) {
+      if (baseRecommendation === "Strongly Recommended") {
+        return "Recommended";
+      } else if (baseRecommendation === "Recommended") {
+        return "Not Recommended";
+      }
+      return "Not Recommended";
+    }
   }
 
   return baseRecommendation;
@@ -735,9 +945,6 @@ const processScreeningSummary = async ({
   jobId,
 }) => {
   try {
-    // Use stored V2_5_CONFIG as fallback
-    const config = v2_5Config || v2_5ConfigGlobal;
-
     logger.info("V2.5: Starting screening analysis", {
       candidateScreeningId,
       screeningAssessmentId,
@@ -781,7 +988,8 @@ const processScreeningSummary = async ({
     }
 
     const cutOffScore = candidateScreening.screeningAssessmentId.cutoffScore;
-    if (!cutOffScore) {
+    // FIX: Use proper null/undefined check - 0 is a valid cutoff score
+    if (cutOffScore === undefined || cutOffScore === null) {
       throw new Error("Cut off score not found");
     }
 
@@ -797,11 +1005,36 @@ const processScreeningSummary = async ({
     // Determine pass/fail status
     const status = candidateFitScore >= cutOffScore ? "Passed" : "Failed";
 
-    // Update candidate screening status
-    await CandidateScreening.updateOne(
+    // Update candidate screening status with result validation
+    const statusUpdateResult = await CandidateScreening.updateOne(
       { _id: new mongoose.Types.ObjectId(candidateScreeningId) },
       { $set: { status } }
     );
+
+    // FIX: Log warning if status update didn't work as expected
+    if (statusUpdateResult.matchedCount === 0) {
+      logger.warn("V2.5: Status update failed - no document matched", {
+        candidateScreeningId,
+        attemptedStatus: status,
+        updateResult: statusUpdateResult,
+      });
+    } else if (statusUpdateResult.modifiedCount === 0) {
+      logger.info(
+        "V2.5: Status update - document matched but not modified (may already have same status)",
+        {
+          candidateScreeningId,
+          status,
+          updateResult: statusUpdateResult,
+        }
+      );
+    } else {
+      logger.info("V2.5: Candidate screening status updated successfully", {
+        candidateScreeningId,
+        status,
+        matchedCount: statusUpdateResult.matchedCount,
+        modifiedCount: statusUpdateResult.modifiedCount,
+      });
+    }
 
     // Fetch AI responses
     const aiResponses = await CandidateAnswerAiResponse.find({
@@ -810,23 +1043,36 @@ const processScreeningSummary = async ({
 
     // Calculate recommendation BEFORE generating AI prompt to ensure alignment
     const integrityScore = calculateIntegrityScore(screeningResult);
+
+    // NEW: Analyze evidence strength from AI responses
+    const totalQuestions = getTotalQuestionCount(screeningResult);
+    const evidenceStrength = analyzeEvidenceStrength(
+      aiResponses,
+      totalQuestions
+    );
+
+    // Calculate recommendation with evidence-based logic
     const recommendation = calculateRecommendation(
       candidateFitScore,
       integrityScore,
-      screeningResult.isCheatingDetected
+      screeningResult.isCheatingDetected,
+      evidenceStrength
     );
 
-    logger.info("V2.5: Recommendation calculated", {
+    logger.info("V2.5: Recommendation calculated with evidence analysis", {
       candidateScreeningId,
       candidateFitScore,
       integrityScore,
       recommendation,
+      evidenceLevel: evidenceStrength.evidenceLevel,
+      isMinorConcern: evidenceStrength.isMinorConcern,
+      flaggedQuestions: evidenceStrength.flaggedQuestions,
     });
 
     // Build question data for prompt
     const questionData = await buildQuestionData(screeningResult, aiResponses);
 
-    // Generate screening summary prompt (now with recommendation and integrity score)
+    // Generate screening summary prompt (now with recommendation, integrity score, and evidence strength)
     const promptGenerator = require("../common/prompt.generator");
     const prompt = promptGenerator.generateScreeningSummaryPrompt(
       candidateFitScore,
@@ -834,7 +1080,8 @@ const processScreeningSummary = async ({
       aiResponses,
       questionData,
       recommendation,
-      integrityScore
+      integrityScore,
+      evidenceStrength
     );
 
     // Get AI screening summary
@@ -1415,8 +1662,6 @@ const calculateAndUpdateRankings = async (
   candidateScreeningId,
   screeningAssessmentId
 ) => {
-  const mongoose = require("mongoose");
-
   // Calculate enhanced ranking scores for all candidates
   const allCandidateScreening = await CandidateScreening.find({
     screeningAssessmentId: screeningAssessmentId,
