@@ -51,11 +51,16 @@ const generateJobDescription = async (req, res) => {
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
+      const tempId = req.body.tempId || req.body.temp_id;
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
+        const referenceId = tempId
+          ? `${tempId}_jd_gen`
+          : `jd_gen_${Date.now()}`;
         await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
-          `jd_gen_${Date.now()}`,
+          referenceId,
           inputTokens,
           outputTokens,
           {
@@ -65,7 +70,7 @@ const generateJobDescription = async (req, res) => {
           },
           channelId,
           null, // No jobId yet
-          req.body.tempId || req.body.temp_id
+          tempId
         );
       }
     } catch (creditError) {
@@ -159,11 +164,16 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
+      const tempId = req.body.tempId || req.body.temp_id;
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
+        const referenceId = tempId
+          ? `${tempId}_jd_short`
+          : `jd_short_${Date.now()}`;
         await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
-          `jd_short_${Date.now()}`,
+          referenceId,
           inputTokens,
           outputTokens,
           {
@@ -173,7 +183,7 @@ Generate a professional job description for a ${jobDetails.seniority.join(
           },
           channelId,
           null, // No jobId yet
-          req.body.tempId || req.body.temp_id
+          tempId
         );
       }
     } catch (creditError) {
@@ -238,12 +248,19 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
-      console.log(`🔍 JD Skills Debug: clientId="${clientId}"`);
+      const tempId = req.body.tempId || req.body.temp_id;
+      console.log(
+        `🔍 JD Skills Debug: clientId="${clientId}", tempId="${tempId}"`
+      );
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+        // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
+        const referenceId = tempId
+          ? `${tempId}_jd_skills`
+          : `jd_skills_${Date.now()}`;
         await CreditServiceClient.deductAiUsage(
           clientId,
           "gemini-2.0-flash",
-          `jd_skills_${Date.now()}`,
+          referenceId,
           inputTokens,
           outputTokens,
           {
@@ -252,7 +269,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
           },
           channelId,
           null, // No jobId yet
-          req.body.tempId || req.body.temp_id
+          tempId
         );
       }
     } catch (creditError) {
@@ -338,11 +355,16 @@ const generateJobDescriptionFormFile = async (req, res) => {
         try {
           const clientId = req.body.clientId;
           const channelId = req.body.channelId;
+          const tempId = req.body.tempId || req.body.temp_id;
           if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+            // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
+            const referenceId = tempId
+              ? `${tempId}_jd_file`
+              : `jd_file_${Date.now()}`;
             await CreditServiceClient.deductAiUsage(
               clientId,
               "gemini-2.0-flash",
-              `jd_file_${Date.now()}`,
+              referenceId,
               inputTokens,
               outputTokens,
               {
@@ -352,7 +374,7 @@ const generateJobDescriptionFormFile = async (req, res) => {
               },
               channelId,
               null, // No jobId yet
-              req.body.tempId || req.body.temp_id
+              tempId
             );
           }
         } catch (creditError) {
