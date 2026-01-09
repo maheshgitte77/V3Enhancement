@@ -1,4 +1,4 @@
-  /**
+/**
  * Programming Processor
  *
  * Handles AI code quality analysis for programming questions.
@@ -246,6 +246,12 @@ const processProgrammingResponse = async (responseData) => {
         processingVersion: "V3-Programming",
         logicalCorrectnessScore: aiAnalysis.logicalCorrectness?.score,
         codeQualityScore: aiAnalysis.codeQuality?.score,
+        // Include stages structure for credit deduction compatibility
+        stages: {
+          stage1: {
+            tokenUsage,
+          },
+        },
       },
     };
   } catch (error) {

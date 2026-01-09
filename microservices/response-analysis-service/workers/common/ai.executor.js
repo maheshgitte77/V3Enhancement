@@ -11,7 +11,6 @@ const {
   generateSubjectiveScoringPrompt,
   generateProgrammingAnalysisPrompt,
 } = require("./prompt.generator");
-const creditServiceClient = require("../../utils/creditServiceClient");
 
 // Will be injected from parent module
 let logger = console;
@@ -259,41 +258,6 @@ const executeAICall = async (
         tokenUsage,
         questionId: responseData?.questionId,
       });
-
-      // --- Credit System Integration ---
-      try {
-        if (
-          responseData?.clientId &&
-          (tokenUsage.inputTokens > 0 || tokenUsage.outputTokens > 0)
-        ) {
-          const modelId = V2_CONFIG.ai.model || "gemini-2.0-flash";
-          await creditServiceClient.deductAiUsage(
-            responseData.clientId,
-            modelId,
-            `analysis_${responseData.questionId}_${stage}_${Date.now()}`,
-            tokenUsage.inputTokens,
-            tokenUsage.outputTokens,
-            {
-              questionId: responseData.questionId,
-              candidateScreeningId: responseData.candidateScreeningId,
-              stage: stage,
-              type: "response_analysis",
-            },
-            responseData.channelId,
-            responseData.jobId
-          );
-          logger.info(`💰 AI Credits deducted for Stage ${stage}`, {
-            clientId: responseData.clientId,
-            questionId: responseData.questionId,
-          });
-        }
-      } catch (creditError) {
-        logger.error(`❌ AI Credit deduction failed (Non-blocking):`, {
-          error: creditError.message,
-          questionId: responseData?.questionId,
-        });
-      }
-      // ---------------------------------
 
       break;
     } catch (error) {

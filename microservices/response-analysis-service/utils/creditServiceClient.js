@@ -1,47 +1,58 @@
 const axios = require("axios");
 
+/**
+ * Credit Service API Client
+ * Simplified version using static methods for consistency across services
+ */
 class CreditServiceClient {
-  constructor() {
-    this.baseUrl = process.env.CREDIT_SERVICE_URL;
+  /**
+   * Get wallet balance for a client
+   */
+  static async getBalance(clientId) {
+    try {
+      if (!clientId) return null;
+      const baseUrl = process.env.CREDIT_SERVICE_URL;
+      const response = await axios.get(
+        `${baseUrl}/credits/wallet/${clientId}/balance`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `❌ Failed to fetch balance for client ${clientId}:`,
+        error.message
+      );
+      return null;
+    }
+  }
+
+  static filterReqBody(reqBody) {
+    //remove undefined and null values from reqBody
+    Object.keys(reqBody).forEach((key) => {
+      if (reqBody[key] === undefined || reqBody[key] === null) {
+        delete reqBody[key];
+      }
+    });
+    return reqBody;
   }
 
   /**
    * Deduct credits for AI usage (Token-based)
    */
-  async deductAiUsage(
-    clientId,
-    modelId,
-    referenceId,
-    inputTokens,
-    outputTokens,
-    meta = {},
-    channelId,
-    jobId
-  ) {
+  static async deductAiUsage(reqBody) {
     try {
-      if (!clientId) {
-        console.warn("❌ Missing clientId for credit deduction");
-        return null;
-      }
+      const baseUrl = process.env.CREDIT_SERVICE_URL;
 
       const response = await axios.post(
-        `${this.baseUrl}/credits/transaction/ai-usage`,
-        {
-          client_id: clientId,
-          service_key: "AI_RESPONSE_ANALYSIS",
-          reference_id: referenceId,
-          usage_data: {
-            model_id: modelId,
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            ...meta,
-          },
-          channel_id: channelId,
-          job_id: jobId,
-        }
+        `${baseUrl}/credits/transaction/ai-usage`,
+        { ...CreditServiceClient.filterReqBody(reqBody) }
       );
+      console.log(`✅ Credit deduction SUCCESS:`, response.data);
       return response.data;
     } catch (error) {
+      console.error(
+        `❌ Credit deduction FAILED: `,
+        error.response?.data || error.message
+      );
       if (error.response) {
         const status = error.response.status;
         const data = error.response.data;
@@ -66,4 +77,4 @@ class CreditServiceClient {
   }
 }
 
-module.exports = new CreditServiceClient();
+module.exports = CreditServiceClient;

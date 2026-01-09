@@ -16,6 +16,7 @@ const audioProcessor = require("./audio-question/audio.processor");
 const subjectiveProcessor = require("./subjective-question/subjective.processor");
 const programmingProcessor = require("./programming-question/programming.processor");
 const summaryProcessor = require("./screening-summary/summary.processor");
+const creditServiceClient = require("../utils/creditServiceClient");
 
 /**
  * V2.5 Configuration
@@ -177,6 +178,70 @@ let logger;
 let config;
 
 /**
+ * Service key mapping for credit deduction
+ */
+const SERVICE_KEY_MAP = {
+  video: "AI_VIDEO_ANALYSIS",
+  audio: "AI_AUDIO_ANALYSIS",
+  subjective: "AI_SUBJECTIVE_ANALYSIS",
+  programming: "AI_PROGRAMMING_ANALYSIS",
+};
+
+/**
+ * Deduct credits for question processing (non-blocking)
+ * @param {Object} responseData - Original response data with clientId
+ * @param {Object} result - Processing result with token metadata
+ * @param {string} questionType - Type of question (video/audio/subjective/programming)
+ */
+const deductCreditsForQuestion = async (responseData, result, questionType) => {
+  // Skip if no clientId
+  console.log("deductCreditsForQuestion", responseData);
+  if (!responseData?.clientId) return;
+
+  // Extract token usage from result metadata
+  const stages = result.metadata?.stages || {};
+  const stage1Tokens = stages.stage1?.tokenUsage || {};
+  const stage2Tokens = stages.stage2?.tokenUsage || {};
+
+  const totalInputTokens =
+    (stage1Tokens.inputTokens || 0) + (stage2Tokens.inputTokens || 0);
+  const totalOutputTokens =
+    (stage1Tokens.outputTokens || 0) + (stage2Tokens.outputTokens || 0);
+
+  // Skip if no tokens used
+  if (totalInputTokens === 0 && totalOutputTokens === 0) return;
+
+  try {
+    await creditServiceClient.deductAiUsage({
+      clientId: responseData.clientId,
+      channelId: responseData.channelId,
+      jobId: responseData.jobId,
+      screeningAssessmentId: responseData.screeningAssessmentId,
+      modelId: config?.ai?.model || "gemini-2.0-flash",
+      referenceId: `${questionType}_analysis_${Date.now()}`,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+      serviceKey: SERVICE_KEY_MAP[questionType],
+      meta: {
+        candidateScreeningId: responseData.candidateScreeningId,
+        questionId: responseData.questionId,
+        type: questionType,
+      },
+    });
+    logger.info(`💰 AI Credits deducted for ${questionType} question`, {
+      clientId: responseData.clientId,
+      questionId: responseData.questionId,
+      totalTokens: totalInputTokens + totalOutputTokens,
+    });
+  } catch (error) {
+    logger.error(`❌ AI Credit deduction failed (Non-blocking):`, {
+      error: error.message,
+      questionId: responseData?.questionId,
+    });
+  }
+};
+
+/**
  * Initialize V2.5 processor with all dependencies
  * @param {Object} dependencies - All required dependencies
  * @param {Object} dependencies.logger - Logger instance
@@ -322,6 +387,9 @@ const processTypeWiseResponse = async (responseData) => {
       totalCost: result.processingCost?.totalCost,
       success: result.success,
     });
+
+    // Deduct credits for the processed question (non-blocking)
+    await deductCreditsForQuestion(responseData, result, normalizedType);
 
     return result;
   } catch (error) {

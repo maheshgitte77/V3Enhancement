@@ -1,6 +1,6 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
-const creditServiceClient = require("../utils/creditServiceClient");
+const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
 require("dotenv").config();
 
@@ -20,6 +20,7 @@ const generateScreeningQuestion = async (req, res) => {
       clientId,
       channelId,
       jobId,
+      tempId,
     } = req.body;
 
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -27,30 +28,6 @@ const generateScreeningQuestion = async (req, res) => {
         .status(400)
         .json({ message: "Missing or invalid data in request" });
     }
-
-    // --- Credit Check ---
-    try {
-      if (clientId) {
-        const balanceData = await CreditServiceClient.getBalance(clientId);
-        // Assuming minimal cost is around 1-5 credits.
-        // A safer check is to ensure they have > 0 or specific amount.
-        // Balance might be { balance: 100, currency: 'CREDITS' }
-        const balance = balanceData?.balance || 0;
-        if (balance <= 5) {
-          // Threshold: 5 credits
-          return res.status(402).json({
-            message: "Insufficient credits. Please top up your wallet.",
-            code: "INSUFFICIENT_FUNDS",
-          });
-        }
-      }
-    } catch (err) {
-      console.warn(
-        "⚠️ Credit check failed, proceeding with caution:",
-        err.message
-      );
-    }
-    // --------------------
 
     // Generate unique request ID using crypto
     const requestId = `req-${Date.now()}-${crypto
@@ -104,6 +81,9 @@ const generateScreeningQuestion = async (req, res) => {
               CandidateResumeData,
               questionsArray: combinedQuestionsArray, // Combined questions array for uniqueness
               clientId,
+              channelId,
+              jobId,
+              tempId,
             }),
           });
 
@@ -158,6 +138,7 @@ const generateScreeningQuestion = async (req, res) => {
               clientId,
               channelId,
               jobId,
+              tempId,
             }),
           });
 
@@ -176,6 +157,8 @@ const generateScreeningQuestion = async (req, res) => {
       messages: producerMessages,
     });
 
+    console.log("Question Generation Temp Id", tempId);
+
     req.pendingRequests.set(requestId, {
       res,
       expectedResponses: totalExpectedResponses,
@@ -183,9 +166,6 @@ const generateScreeningQuestion = async (req, res) => {
         category: cat.category,
         skills: cat.skills || "unknown",
       })),
-      clientId, // Store clientId for billing
-      channelId,
-      jobId,
     });
   } catch (error) {
     console.error("❌ Error in generateScreeningQuestion:", error);
@@ -203,6 +183,7 @@ const generateBoilerplateCode = async (req, res) => {
       clientId,
       channelId,
       jobId,
+      tempId,
     } = req.body;
 
     if (
@@ -237,11 +218,11 @@ ${JSON.stringify(testCases, null, 2)}
 
 For each of the following languages, generate appropriate boilerplate code:
 ${languages
-        .map(
-          (lang) =>
-            `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
-        )
-        .join("\n")}
+  .map(
+    (lang) =>
+      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
+  )
+  .join("\n")}
 
 CRITICAL BOILERPLATE CODE REQUIREMENTS:
 1. DO NOT include any solution code, even if commented out
@@ -265,10 +246,12 @@ CRITICAL FORMATTING REQUIREMENTS:
 Return ONLY a valid JSON object in this exact format:
 {
   "boilerplateCode": {
-    "${languages[0].languageName || languages[0].name
-      }": "generated code here with \\n for newlines",
-    "${languages.length > 1 ? languages[1].languageName || languages[1].name : ""
-      }": "generated code here with \\n for newlines"
+    "${
+      languages[0].languageName || languages[0].name
+    }": "generated code here with \\n for newlines",
+    "${
+      languages.length > 1 ? languages[1].languageName || languages[1].name : ""
+    }": "generated code here with \\n for newlines"
   }
 }
 
@@ -289,20 +272,20 @@ Ensure the JSON is valid and each language name matches exactly with the provide
       const outputTokens = usageMetadata.candidatesTokenCount || 0;
 
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        await CreditServiceClient.deductAiUsage(
+        await CreditServiceClient.deductAiUsage({
           clientId,
-          "gemini-2.0-flash",
-          `ai_boilerplate_${Date.now()}`,
+          modelId: "gemini-2.0-flash",
+          referenceId: `ai_code_gen_${Date.now()}`,
           inputTokens,
           outputTokens,
-          {
-            type: "boilerplate_generation",
-            questionTitle,
-            service_key: "AI_QUESTION_GENERATION",
+          meta: {
+            type: "ai_code_generation",
+            serviceKey: "AI_CODE_GENERATION",
           },
           channelId,
-          jobId
-        );
+          jobId,
+          tempId,
+        });
         console.log(
           `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`
         );

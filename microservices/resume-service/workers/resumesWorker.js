@@ -771,16 +771,17 @@ Return the output in the specified JSON format.
       // --- Credit System Integration (Token-Based) ---
       try {
         if (inputTokens > 0 || outputTokens > 0) {
-          const aiCreditResult = await creditServiceClient.deductAiCredits(
-            clientObjectId.toString(),
-            "gemini-2.0-flash",
-            `ai_${fileId}_${Date.now()}`,
+          await creditServiceClient.deductAiUsage({
+            clientId,
+            modelId: "gemini-2.0-flash",
+            referenceId: `ai_resume_analysis_${fileId}_${Date.now()}`,
+            serviceKey: "AI_RESUME_ANALYSIS",
             inputTokens,
             outputTokens,
-            { jobId, fileId, type: "RESUME_PARSE_DYNAMIC" },
+            meta: { jobId, fileId },
             channelId,
-            jobId
-          );
+            jobId,
+          });
         }
       } catch (creditError) {
         console.error(

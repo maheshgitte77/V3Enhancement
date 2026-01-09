@@ -25,51 +25,33 @@ class CreditServiceClient {
     }
   }
 
+  static filterReqBody(reqBody) {
+    //remove undefined and null values from reqBody
+    Object.keys(reqBody).forEach((key) => {
+      if (reqBody[key] === undefined || reqBody[key] === null) {
+        delete reqBody[key];
+      }
+    });
+    return reqBody;
+  }
+
   /**
    * Deduct credits for AI usage (Token-based)
    */
-  static async deductAiUsage(
-    clientId,
-    modelId,
-    referenceId,
-    inputTokens,
-    outputTokens,
-    meta = {},
-    channelId,
-    jobId,
-    tempId
-  ) {
+  static async deductAiUsage(reqBody) {
     try {
-      if (!clientId) {
-        console.warn("❌ Missing clientId for credit deduction");
-        return null;
-      }
-
       const baseUrl = process.env.CREDIT_SERVICE_URL;
-      const sKey = meta.service_key || "AI_JOB_DESCRIPTION_GENERATION";
+      const sKey = reqBody.meta.serviceKey;
 
       const response = await axios.post(
         `${baseUrl}/credits/transaction/ai-usage`,
-        {
-          client_id: clientId,
-          service_key: sKey,
-          reference_id: referenceId,
-          usage_data: {
-            model_id: modelId,
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            ...meta,
-          },
-          channel_id: channelId,
-          job_id: jobId,
-          temp_id: tempId,
-        }
+        { ...CreditServiceClient.filterReqBody(reqBody), serviceKey: sKey }
       );
-      console.log(`✅ Credit deduction SUCCESS: ${referenceId}`, response.data);
+      console.log(`✅ Credit deduction SUCCESS:`, response.data);
       return response.data;
     } catch (error) {
       console.error(
-        `❌ Credit deduction FAILED: ${referenceId}`,
+        `❌ Credit deduction FAILED: `,
         error.response?.data || error.message
       );
       if (error.response) {

@@ -14,6 +14,7 @@ const Candidate =
   mongoose.models.Candidate || mongoose.model("Candidate", CandidateSchema);
 const CandidateJourney = require("../model/CandidateJourney");
 const creditServiceClient = require("../utils/creditServiceClient");
+const { validateCredits } = require("../middleware/CreditCheck.Middleware");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -100,6 +101,11 @@ const analyzeResumes = async (req, res) => {
         clientId,
         channelId,
       } = req.body;
+
+      //Check credits - returns false if insufficient (response already sent)
+      const hasCredits = await validateCredits(req, res);
+      if (!hasCredits) return;
+
       // Use existing mongoose connection for schemaless operations
       const db = mongoose.connection.db;
       const clientObjectId = new ObjectId(clientId);
@@ -130,27 +136,6 @@ const analyzeResumes = async (req, res) => {
       const candidateType = hasValidReferral ? "Referral" : "Uploaded";
       const requestId = `req-${Date.now()}`;
       const isLive = live ? live : false;
-
-      // Note: Credit deduction is now handled dynamically in the resumesWorker
-      // based on actual token usage from Gemini 2.0 Flash.
-
-      // Pre-check balance to ensure user has any credits at all
-      try {
-        const wallet = await creditServiceClient.getBalance(clientId);
-        if (parseFloat(wallet.balance) <= 0) {
-          return res.status(402).json({
-            error:
-              "Insufficient credits to process resumes. Please top up your wallet.",
-          });
-        }
-      } catch (error) {
-        console.warn(
-          "⚠ [Controller] Credit Balance Check Failed (Continuing):",
-          error.message,
-          "\nError stack:",
-          error.stack
-        );
-      }
 
       const primarySkillList = new Set(
         primarySkills?.split(",").map((s) => s.trim())
