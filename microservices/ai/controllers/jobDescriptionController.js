@@ -51,27 +51,26 @@ const generateJobDescription = async (req, res) => {
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
-      const tempId = req.body.tempId || req.body.temp_id;
+      const tempId = req.body.tempId;
+
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
-        const referenceId = tempId
-          ? `${tempId}_jd_gen`
-          : `jd_gen_${Date.now()}`;
-        await CreditServiceClient.deductAiUsage(
+        const referenceId = `jd_gen_${Date.now()}`;
+        await CreditServiceClient.deductAiUsage({
           clientId,
-          "gemini-2.0-flash",
+          modelId: "gemini-2.0-flash",
           referenceId,
           inputTokens,
           outputTokens,
-          {
+          meta: {
             type: "jd_generation",
             jobTitle: jobDetails.jobTitle,
-            service_key: "AI_JOB_DESCRIPTION_GENERATION",
+            serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
           },
           channelId,
-          null, // No jobId yet
-          tempId
-        );
+          jobId: null,
+          tempId,
+        });
       }
     } catch (creditError) {
       console.error(
@@ -167,24 +166,22 @@ Generate a professional job description for a ${jobDetails.seniority.join(
       const tempId = req.body.tempId || req.body.temp_id;
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
-        const referenceId = tempId
-          ? `${tempId}_jd_short`
-          : `jd_short_${Date.now()}`;
-        await CreditServiceClient.deductAiUsage(
+        const referenceId = `jd_short_${Date.now()}`;
+        await CreditServiceClient.deductAiUsage({
           clientId,
-          "gemini-2.0-flash",
+          modelId: "gemini-2.0-flash",
           referenceId,
           inputTokens,
           outputTokens,
-          {
+          meta: {
             type: "jd_overview_generation",
             jobTitle: jobDetails.jobTitle,
-            service_key: "AI_JOB_DESCRIPTION_GENERATION",
+            serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
           },
           channelId,
-          null, // No jobId yet
-          tempId
-        );
+          jobId: null,
+          tempId,
+        });
       }
     } catch (creditError) {
       console.error(
@@ -254,23 +251,21 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
       );
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
-        const referenceId = tempId
-          ? `${tempId}_jd_skills`
-          : `jd_skills_${Date.now()}`;
-        await CreditServiceClient.deductAiUsage(
+        const referenceId = `jd_skills_${Date.now()}`;
+        await CreditServiceClient.deductAiUsage({
           clientId,
-          "gemini-2.0-flash",
+          modelId: "gemini-2.0-flash",
           referenceId,
           inputTokens,
           outputTokens,
-          {
+          meta: {
             type: "jd_skills_extraction",
-            service_key: "AI_JOB_DESCRIPTION_GENERATION",
+            serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
           },
           channelId,
-          null, // No jobId yet
-          tempId
-        );
+          jobId: null,
+          tempId,
+        });
       }
     } catch (creditError) {
       console.error(
@@ -358,24 +353,21 @@ const generateJobDescriptionFormFile = async (req, res) => {
           const tempId = req.body.tempId || req.body.temp_id;
           if (clientId && (inputTokens > 0 || outputTokens > 0)) {
             // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
-            const referenceId = tempId
-              ? `${tempId}_jd_file`
-              : `jd_file_${Date.now()}`;
-            await CreditServiceClient.deductAiUsage(
+            const referenceId = `jd_file_${Date.now()}`;
+            await CreditServiceClient.deductAiUsage({
               clientId,
-              "gemini-2.0-flash",
+              modelId: "gemini-2.0-flash",
               referenceId,
               inputTokens,
               outputTokens,
-              {
+              meta: {
                 type: "jd_generation_from_file",
                 fileName: req.file.originalname,
-                service_key: "AI_JOB_DESCRIPTION_GENERATION",
+                serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
               },
               channelId,
-              null, // No jobId yet
-              tempId
-            );
+              tempId,
+            });
           }
         } catch (creditError) {
           console.error(

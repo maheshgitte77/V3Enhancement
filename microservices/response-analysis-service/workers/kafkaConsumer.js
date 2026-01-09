@@ -61,6 +61,17 @@ let programmingProcessor = null;
 let summaryProcessor = null;
 let logger = console;
 
+// Credit service for deducting AI usage
+const creditServiceClient = require("../utils/creditServiceClient");
+
+// Service key mapping for credit deduction
+const SERVICE_KEY_MAP = {
+  video: "AI_VIDEO_ANALYSIS",
+  audio: "AI_AUDIO_ANALYSIS",
+  subjective: "AI_SUBJECTIVE_ANALYSIS",
+  programming: "AI_PROGRAMMING_ANALYSIS",
+};
+
 /**
  * Initialize Kafka consumer with processors
  */
@@ -213,8 +224,6 @@ const handleAnalysisRequest = async (request) => {
     candidateScreeningId,
     questionId,
     skillName,
-    channelId,
-    jobId,
   } = request;
 
   let result;
@@ -249,6 +258,53 @@ const handleAnalysisRequest = async (request) => {
         throw new Error(`Unknown job type: ${jobType}`);
     }
 
+    // Deduct credits for the processed question (non-blocking)
+    const questionType = request.type || jobType.replace("-analysis", "");
+    console.log(request, "Request");
+
+    try {
+      if (request.clientId) {
+        const stages = result.metadata?.stages || {};
+        const stage1Tokens = stages.stage1?.tokenUsage || {};
+        const stage2Tokens = stages.stage2?.tokenUsage || {};
+
+        const totalInputTokens =
+          (stage1Tokens.inputTokens || 0) + (stage2Tokens.inputTokens || 0);
+        const totalOutputTokens =
+          (stage1Tokens.outputTokens || 0) + (stage2Tokens.outputTokens || 0);
+
+        if (totalInputTokens > 0 || totalOutputTokens > 0) {
+          await creditServiceClient.deductAiUsage({
+            clientId: request.clientId,
+            channelId: request.channelId,
+            jobId: request.jobId,
+            screeningAssessmentId: request.screeningAssessmentId,
+            modelId: "gemini-2.0-flash",
+            referenceId: `${questionType}_analysis_${Date.now()}`,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            serviceKey: SERVICE_KEY_MAP[questionType],
+            // serviceKey: "AI_SUBJECTIVE_ANALYSIS",
+            meta: {
+              candidateScreeningId,
+              questionId,
+              type: questionType,
+            },
+          });
+          logger.info(`💰 AI Credits deducted for ${questionType} question`, {
+            clientId: request.clientId,
+            questionId,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          });
+        }
+      }
+    } catch (creditError) {
+      logger.error(`❌ AI Credit deduction failed (Non-blocking):`, {
+        error: creditError.message,
+        questionId,
+      });
+    }
+
     // Publish success result
     await publishResult({
       correlationId,
@@ -258,7 +314,7 @@ const handleAnalysisRequest = async (request) => {
       candidateScreeningId,
       questionId,
       skillName,
-      type: request.type || jobType.replace("-analysis", ""),
+      type: questionType,
       analysisId: result.questionAiResponse?._id?.toString(),
       processingDuration: Date.now() - startTime,
       processingCost: result.processingCost,

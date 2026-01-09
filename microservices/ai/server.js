@@ -4,6 +4,10 @@ const cors = require("cors");
 const questionRoutes = require("./routes/questionsRoutes");
 const jobDescriptionRoutes = require("./routes/jobDescriptionRoutes");
 const CreditServiceClient = require("./utils/creditServiceClient");
+const {
+  requireCredits,
+  checkCredits,
+} = require("./middleware/CreditCheck.Middleware");
 require("dotenv").config();
 
 const app = express();
@@ -195,7 +199,11 @@ const ensureTopics = async () => {
             });
 
             // Track used logic categories for Programming questions (server-side)
-            if (questionType === "Programming" && questionObj.Programming && Array.isArray(questionObj.Programming)) {
+            if (
+              questionType === "Programming" &&
+              questionObj.Programming &&
+              Array.isArray(questionObj.Programming)
+            ) {
               const clientId = requestInfo.clientId;
               if (clientId) {
                 // Extract logic categories from responseData if provided, otherwise identify from titles
@@ -208,7 +216,9 @@ const ensureTopics = async () => {
                   questionObj.Programming.forEach((q) => {
                     if (q.questionTitle) {
                       // Use robust category identification function
-                      const identifiedCategory = identifyCategoryFromTitle(q.questionTitle);
+                      const identifiedCategory = identifyCategoryFromTitle(
+                        q.questionTitle
+                      );
                       if (identifiedCategory) {
                         identifiedCategoriesSet.add(identifiedCategory);
                       }
@@ -220,10 +230,16 @@ const ensureTopics = async () => {
 
                 // Store tracked categories and refresh timestamp
                 if (generatedCategories.length > 0) {
-                  categoryTracker.addUsedCategories(clientId, categoryName, generatedCategories);
+                  categoryTracker.addUsedCategories(
+                    clientId,
+                    categoryName,
+                    generatedCategories
+                  );
                   categoryTracker.refreshTracking(clientId, categoryName); // Refresh timestamp
                   console.log(
-                    `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(", ")}`
+                    `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(
+                      ", "
+                    )}`
                   );
                 } else {
                   // Even if no categories identified, refresh tracking to extend expiration
@@ -344,7 +360,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/questions", questionRoutes);
-app.use("/api/jobDescription", jobDescriptionRoutes);
+app.use("/api/questions", requireCredits, questionRoutes);
+app.use("/api/jobDescription", requireCredits, jobDescriptionRoutes);
 
 module.exports = app;

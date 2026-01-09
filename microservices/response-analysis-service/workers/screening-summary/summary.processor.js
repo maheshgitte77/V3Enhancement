@@ -1092,7 +1092,8 @@ const processScreeningSummary = async ({
         screeningResult,
         v2_5Config,
         clientId,
-        candidateScreeningId
+        candidateScreeningId,
+        screeningAssessmentId
       );
 
     // Collect languages used
@@ -1505,7 +1506,8 @@ const generateScreeningSummary = async (
   screeningResult,
   v2_5Config,
   clientId,
-  candidateScreeningId
+  candidateScreeningId,
+  screeningAssessmentId
 ) => {
   let screeningSummaryTokens = 0;
   let screeningSummaryInputTokens = 0;
@@ -1579,19 +1581,21 @@ const generateScreeningSummary = async (
       (screeningSummaryInputTokens > 0 || screeningSummaryOutputTokens > 0)
     ) {
       const modelId = v2_5Config.ai.model || "gemini-2.0-flash";
-      await creditServiceClient.deductAiUsage(
+      await creditServiceClient.deductAiUsage({
         clientId,
         modelId,
-        `summary_${candidateScreeningId}_${Date.now()}`,
-        screeningSummaryInputTokens,
-        screeningSummaryOutputTokens,
-        {
+        referenceId: `screening_summary_${candidateScreeningId}_${Date.now()}`,
+        inputTokens: screeningSummaryInputTokens,
+        outputTokens: screeningSummaryOutputTokens,
+        serviceKey: "AI_SUMMARY_GENERATION",
+        meta: {
           candidateScreeningId: candidateScreeningId,
           type: "screening_summary",
         },
         channelId,
-        jobId
-      );
+        jobId,
+        screeningAssessmentId,
+      });
       logger.info(`💰 AI Credits deducted for screening summary`, {
         clientId: clientId,
         candidateScreeningId: candidateScreeningId,
