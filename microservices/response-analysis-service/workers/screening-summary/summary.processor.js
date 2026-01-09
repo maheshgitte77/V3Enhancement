@@ -1801,7 +1801,7 @@ const handleImmediateScoreRelease = async (data) => {
     }
 
     const response = await axios.post(
-      `${process.env.NOTIFICATION_SERVICE_URL}/emailNotification/screening/send-result-to-candidate`,
+      `${process.env.NOTIFICATION_SERVICE_URL}/communication/screening/send-result-to-candidate`,
       {
         screeningResultId: screeningResult._id.toString(),
       }
