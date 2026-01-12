@@ -1028,8 +1028,9 @@ ${logicCategoryInfo}
         - Make it relatable to daily work situations
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Input Format</h3>: Detailed input specification with examples
-        - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
-      * <h3>Output Format</h3>: Expected output specification
+        - **DO NOT add <br/> after this section's closing tag - Output Format follows immediately**
+      * <h3 style="margin-top: 0;">Output Format</h3>: Expected output specification
+        - **CRITICAL**: Output Format MUST use inline style style="margin-top: 0;" to remove top margin and group it with Input Format
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Constraints</h3>: Important limits and constraints (use <ul><li> for list)
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
@@ -1061,20 +1062,20 @@ ${logicCategoryInfo}
         }.</p>
       <h3>Input Format</h3>
       <p>The first line contains an integer <strong>n</strong> representing the size of the array.<br/>The second line contains <strong>n</strong> space-separated integers.</p>
-      <h3>Output Format</h3>
+      <h3 style="margin-top: 0;">Output Format</h3>
       <p>Print a single integer representing the <code>maximum</code> element in the array.</p>
       <h3>Constraints</h3>
-      <ul>
+      <ul style="margin-top: 0;">
         <li>1 ≤ <strong>n</strong> ≤ 10<sup>5</sup></li>
         <li>-10<sup>9</sup> ≤ array elements ≤ 10<sup>9</sup></li>
       </ul>
       <h3>Examples</h3>
       <p><strong>Input:</strong> A string of characters.</p>
-      <p><strong>Output:</strong> A map where the key is the character and the value is its Huffman code (a string of 0s and 1s).</p>
+      <p style=\"margin-top: 0;\"><strong>Output:</strong> A map where the key is the character and the value is its Huffman code (a string of 0s and 1s).</p>
       <p>For simplicity, you don't need to handle ties in frequency and can simply pick the order that the algorithm naturally produces.</p>
       <br/>
       <p><strong>Input:</strong> 5<br/>1 5 3 9 2</p>
-      <p><strong>Output:</strong> 9</p>
+      <p style=\"margin-top: 0;\"><strong>Output:</strong> 9</p>
       **🚫 VALIDATION CHECK**: Before outputting, verify your HTML structure:
       1. Search for pattern <br/><h3> - if found, REMOVE the <br/> tag (this is WRONG)
       2. Ensure pattern is </p><h3> or </ul><h3> (this is CORRECT)
@@ -1300,7 +1301,7 @@ Return JSON in this format:
                 : `Coding problem title`;
             return `{
       "questionTitle": "${title}",
-      "question": "<h3>Problem Description</h3><p>Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><br/><h3>Input Format</h3><p>Input specification with examples. Use <ul><li> for lists.</li></ul></p><br/><h3>Output Format</h3><p>Output specification here.</p><br/><h3>Constraints</h3><ul><li>Constraint 1</li><li>Constraint 2</li></ul><br/><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p><strong>Output:</strong> example output description</p><br/><p><strong>Input:</strong> 5<br/>1 2 3 4 5</p><p><strong>Output:</strong> 15</p>",
+      "question": "<h3>Problem Description</h3><p style=\"margin-top: 0;\">Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><h3>Input Format</h3><p style=\"margin-top: 0;\">Input specification with examples. Use <ul><li> for lists.</li></ul></p><h3 style=\"margin-top: 0;\">Output Format</h3><p style=\"margin-top: 0;\">Output specification here.</p><h3>Constraints</h3><ul style=\"margin-top: 0;\"><li>Constraint 1</li><li>Constraint 2</li></ul><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p style=\"margin-top: 0;\"><strong>Output:</strong> example output description</p><br/><p><strong>Input:</strong> 5<br/>1 2 3 4 5</p><p style=\"margin-top: 0;\"><strong>Output:</strong> 15</p>",
       "maxTime": ${maxTime},
       "testCases": [
         ${testCasesConfigForTemplate
