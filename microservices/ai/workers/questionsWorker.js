@@ -2239,6 +2239,30 @@ const createConsumer = async (id) => {
                       }
                     );
 
+                    // STEP 1.5: Remove orphaned [SNIPPET_START] markers without [SNIPPET_END]
+                    // This handles cases where AI generates incomplete snippet markers like:
+                    // "[SNIPPET_START:java] // comment" without [SNIPPET_END]
+                    // Match [SNIPPET_START:lang] followed by content until next marker or end
+                    processedQuestion = processedQuestion.replace(
+                      /\[SNIPPET_START:(\w+)\]([^\[]*?)(?=\[SNIPPET_START:|\[SNIPPET_END\]|$)/gi,
+                      (match, lang, content) => {
+                        // Only process if there's actual content (not just whitespace)
+                        const trimmedContent = content ? content.trim() : "";
+                        if (trimmedContent) {
+                          // Convert orphaned marker to markdown code block
+                          const cleanedCode = content
+                            .replace(/<br\s*\/?>/gi, "\n")
+                            .replace(/\r\n/g, "\n")
+                            .replace(/\r/g, "\n")
+                            .trim();
+                          const language = (lang || "plaintext").toLowerCase();
+                          return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                        }
+                        // If no meaningful content, just remove the marker
+                        return "";
+                      }
+                    );
+
                     // STEP 2: Fix already-fenced code blocks
                     processedQuestion = processedQuestion.replace(
                       /```(\w+)?\s*([\s\S]*?)```/g,
@@ -2256,45 +2280,69 @@ const createConsumer = async (id) => {
                     question.question = processedQuestion;
                   }
 
-                  // STEP 3: Clean up options - convert [SNIPPET_START] markers to markdown format
+                  // STEP 3: Clean up options - remove all backticks and convert to plain text
                   if (question.options && typeof question.options === "object") {
                     Object.keys(question.options).forEach((key) => {
                       if (typeof question.options[key] === "string") {
                         let optionText = question.options[key];
 
-                        // Convert [SNIPPET_START:lang]...[/SNIPPET_END] markers to markdown code fences
+                        // STEP 3.1: Convert [SNIPPET_START:lang]...[/SNIPPET_END] markers to plain text (no backticks)
                         optionText = optionText.replace(
                           /\[SNIPPET_START:([^\]]+)\]([\s\S]*?)\[SNIPPET_END\]/gi,
                           (match, lang, codeContent) => {
-                            const language = (lang || "plaintext").toLowerCase();
                             const cleanedCode = codeContent
-                              .replace(/<br\s*\/?>/gi, "\n")
-                              .replace(/\r\n/g, "\n")
-                              .replace(/\r/g, "\n")
+                              .replace(/<br\s*\/?>/gi, " ")
+                              .replace(/\r\n/g, " ")
+                              .replace(/\r/g, " ")
+                              .replace(/\n/g, " ")
                               .trim();
-                            // Convert to markdown code fence format
-                            return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                            // Return plain text without backticks
+                            return cleanedCode;
                           }
                         );
 
-                        // Normalize existing markdown code fences (ensure proper formatting)
+                        // STEP 3.2: Remove orphaned [SNIPPET_START] markers in options (without [SNIPPET_END])
+                        optionText = optionText.replace(
+                          /\[SNIPPET_START:(\w+)\]([^\[]*?)(?=\[SNIPPET_START:|\[SNIPPET_END\]|$)/gi,
+                          (match, lang, content) => {
+                            if (content && content.trim()) {
+                              const cleanedCode = content
+                                .replace(/<br\s*\/?>/gi, " ")
+                                .replace(/\r\n/g, " ")
+                                .replace(/\r/g, " ")
+                                .replace(/\n/g, " ")
+                                .trim();
+                              // Return plain text without backticks
+                              return cleanedCode;
+                            }
+                            return "";
+                          }
+                        );
+
+                        // STEP 3.3: Remove markdown code fences (extract code content, remove backticks)
                         optionText = optionText.replace(
                           /```(\w+)?\s*([\s\S]*?)```/g,
                           (match, lang, codeContent) => {
-                            const language = lang || "plaintext";
                             const cleanedCode = codeContent
-                              .replace(/<br\s*\/?>/gi, "\n")
-                              .replace(/\r\n/g, "\n")
-                              .replace(/\r/g, "\n")
+                              .replace(/<br\s*\/?>/gi, " ")
+                              .replace(/\r\n/g, " ")
+                              .replace(/\r/g, " ")
+                              .replace(/\n/g, " ")
                               .trim();
-                            return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                            // Return plain text without backticks
+                            return cleanedCode;
                           }
                         );
 
-                        // Clean up any HTML tags that might be in options (but preserve markdown)
+                        // STEP 3.4: Remove any remaining backticks (single or triple)
+                        optionText = optionText.replace(/```/g, ""); // Remove triple backticks
+                        optionText = optionText.replace(/`/g, ""); // Remove single backticks
+
+                        // STEP 3.5: Clean up any HTML tags
                         optionText = optionText.replace(/<br\s*\/?>/gi, " ");
                         optionText = optionText.replace(/&nbsp;/g, " ");
 
+                        // CRITICAL: All backticks removed - options are plain text only
                         question.options[key] = optionText.trim();
                       }
                     });
