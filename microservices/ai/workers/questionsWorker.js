@@ -1351,6 +1351,7 @@ Return JSON in this format:
       const withCode = Math.ceil(number / 2);
       const general = number - withCode;
       const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
+      const singleCorrectCount = number - multipleCorrectCount; // Remaining 80% single correct
 
       prompt += `{
   "skillName": "${skillName}",
