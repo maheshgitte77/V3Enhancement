@@ -2226,6 +2226,7 @@ const createConsumer = async (id) => {
                     let processedQuestion = question.question;
 
                     // STEP 1: Convert [SNIPPET_START:lang]...[SNIPPET_END] markers to ```lang\n...\n```
+                    // PRESERVE MARKDOWN - Frontend (QuestionPreview, SunTextEditor) supports markdown rendering
                     processedQuestion = processedQuestion.replace(
                       /\[SNIPPET_START:(\w+)\]([\s\S]*?)\[SNIPPET_END\]/gi,
                       (match, lang, code) => {
@@ -2263,7 +2264,8 @@ const createConsumer = async (id) => {
                       }
                     );
 
-                    // STEP 2: Fix already-fenced code blocks
+                    // STEP 2: Normalize already-fenced code blocks
+                    // PRESERVE MARKDOWN - Frontend supports markdown rendering
                     processedQuestion = processedQuestion.replace(
                       /```(\w+)?\s*([\s\S]*?)```/g,
                       (match, lang, code) => {
@@ -2280,69 +2282,87 @@ const createConsumer = async (id) => {
                     question.question = processedQuestion;
                   }
 
-                  // STEP 3: Clean up options - remove all backticks and convert to plain text
+                  // STEP 3: Clean up options - convert [SNIPPET_START] markers to markdown format
                   if (question.options && typeof question.options === "object") {
                     Object.keys(question.options).forEach((key) => {
                       if (typeof question.options[key] === "string") {
                         let optionText = question.options[key];
 
-                        // STEP 3.1: Convert [SNIPPET_START:lang]...[/SNIPPET_END] markers to plain text (no backticks)
+                        // STEP 3.1: Convert [SNIPPET_START:lang]...[/SNIPPET_END] markers to markdown code fences
+                        // PRESERVE MARKDOWN - Frontend supports markdown rendering
                         optionText = optionText.replace(
                           /\[SNIPPET_START:([^\]]+)\]([\s\S]*?)\[SNIPPET_END\]/gi,
                           (match, lang, codeContent) => {
+                            const language = (lang || "plaintext").toLowerCase();
                             const cleanedCode = codeContent
-                              .replace(/<br\s*\/?>/gi, " ")
-                              .replace(/\r\n/g, " ")
-                              .replace(/\r/g, " ")
-                              .replace(/\n/g, " ")
+                              .replace(/<br\s*\/?>/gi, "\n")
+                              .replace(/\r\n/g, "\n")
+                              .replace(/\r/g, "\n")
                               .trim();
-                            // Return plain text without backticks
-                            return cleanedCode;
+                            // Convert to markdown code fence - PRESERVE BACKTICKS for frontend markdown rendering
+                            return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
                           }
                         );
 
                         // STEP 3.2: Remove orphaned [SNIPPET_START] markers in options (without [SNIPPET_END])
+                        // Convert to markdown code blocks
                         optionText = optionText.replace(
                           /\[SNIPPET_START:(\w+)\]([^\[]*?)(?=\[SNIPPET_START:|\[SNIPPET_END\]|$)/gi,
                           (match, lang, content) => {
                             if (content && content.trim()) {
                               const cleanedCode = content
-                                .replace(/<br\s*\/?>/gi, " ")
-                                .replace(/\r\n/g, " ")
-                                .replace(/\r/g, " ")
-                                .replace(/\n/g, " ")
+                                .replace(/<br\s*\/?>/gi, "\n")
+                                .replace(/\r\n/g, "\n")
+                                .replace(/\r/g, "\n")
                                 .trim();
-                              // Return plain text without backticks
-                              return cleanedCode;
+                              const language = (lang || "plaintext").toLowerCase();
+                              // Convert to markdown code fence - PRESERVE BACKTICKS
+                              return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
                             }
                             return "";
                           }
                         );
 
-                        // STEP 3.3: Remove markdown code fences (extract code content, remove backticks)
+                        // STEP 3.3: Normalize existing markdown code fences (ensure proper formatting)
+                        // PRESERVE ALL BACKTICKS - Frontend SunTextEditor supports markdown
                         optionText = optionText.replace(
                           /```(\w+)?\s*([\s\S]*?)```/g,
                           (match, lang, codeContent) => {
+                            const language = lang || "plaintext";
                             const cleanedCode = codeContent
-                              .replace(/<br\s*\/?>/gi, " ")
-                              .replace(/\r\n/g, " ")
-                              .replace(/\r/g, " ")
-                              .replace(/\n/g, " ")
+                              .replace(/<br\s*\/?>/gi, "\n")
+                              .replace(/\r\n/g, "\n")
+                              .replace(/\r/g, "\n")
                               .trim();
-                            // Return plain text without backticks
-                            return cleanedCode;
+                            // PRESERVE BACKTICKS - Frontend will render markdown
+                            return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
                           }
                         );
 
-                        // STEP 3.4: Remove any remaining backticks (single or triple)
-                        optionText = optionText.replace(/```/g, ""); // Remove triple backticks
-                        optionText = optionText.replace(/`/g, ""); // Remove single backticks
+                        // STEP 3.4: Clean up HTML tags outside of code blocks
+                        // Only replace <br/> that are NOT inside markdown code fences
+                        // This preserves newlines within code blocks
+                        const codeBlockPattern = /```[\s\S]*?```/g;
+                        const codeBlocks = [];
+                        let blockIndex = 0;
 
-                        // STEP 3.5: Clean up any HTML tags
+                        // Extract code blocks temporarily
+                        optionText = optionText.replace(codeBlockPattern, (match) => {
+                          codeBlocks.push(match);
+                          return `__CODE_BLOCK_${blockIndex++}__`;
+                        });
+
+                        // Clean HTML tags outside code blocks
                         optionText = optionText.replace(/<br\s*\/?>/gi, " ");
                         optionText = optionText.replace(/&nbsp;/g, " ");
 
-                        // CRITICAL: All backticks removed - options are plain text only
+                        // Restore code blocks
+                        codeBlocks.forEach((block, idx) => {
+                          optionText = optionText.replace(`__CODE_BLOCK_${idx}__`, block);
+                        });
+
+                        // CRITICAL: Preserve all markdown formatting including backticks
+                        // Frontend components (QuestionPreview, QuestionDrawer, SunTextEditor) support markdown rendering
                         question.options[key] = optionText.trim();
                       }
                     });
