@@ -927,8 +927,18 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   // Type-specific instructions
   switch (questionType) {
     case "MCQ":
+      const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
+      const singleCorrectCount = number - multipleCorrectCount;
+
       prompt += `\n**MCQ Question Requirements**:
 - Generate EXACTLY ${number} MCQ questions total
+- **MULTIPLE CORRECT ANSWER REQUIREMENT**: 
+  * EXACTLY ${multipleCorrectCount} questions (20% of total) must have MULTIPLE correct answers
+  * These questions must have "isMultipleCorrect": true
+  * For multiple correct questions, provide correctAnswer as array with 2-4 options: ["A", "B"] or ["A", "C", "D"] etc.
+  * EXACTLY ${singleCorrectCount} questions must have SINGLE correct answer
+  * These questions must have "isMultipleCorrect": false
+  * For single correct questions, provide correctAnswer as array with exactly 1 option: ["A"]
 - **CRITICAL DECISION**: Analyze the skillType "${skillType}" and skillName "${skillName}" to determine if this is a programming-related skill
 - **IF programming-related skill** (e.g., programming languages, frameworks, technologies that involve code):
   * Apply 50%-50% distribution: exactly ${Math.ceil(
@@ -947,7 +957,6 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   * Generate all ${number} questions as general/conceptual (NO code snippets)
   * Use <br/> for line breaks in question text
 - Options must be key-value pairs: {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"}
-- Provide correctAnswer as array: ["A"]
 - **IMPORTANT**: Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code snippets in QUESTION TEXT. For options, use markdown code formatting.
 - **✅ CORRECT FORMATTING FOR OPTIONS**: 
   * If an option contains code, use markdown code formatting: \`\`\`language\ncode here\n\`\`\` (for multi-line) or \`code here\` (for inline)
@@ -1341,6 +1350,7 @@ Return JSON in this format:
     case "MCQ":
       const withCode = Math.ceil(number / 2);
       const general = number - withCode;
+      const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
 
       prompt += `{
   "skillName": "${skillName}",
@@ -1350,12 +1360,16 @@ Return JSON in this format:
     ${Array(number)
           .fill(0)
           .map((_, idx) => {
+            const isMultipleCorrect = idx < multipleCorrectCount;
+            const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
+
             if (idx < withCode) {
               return `{
       "questionTitle": "Brief summary with code snippet",
       "question": "Question text with [SNIPPET_START:detectedLanguage]code\\nhere[SNIPPET_END]. Use <br/> for line breaks in question text. Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers - NO markdown fences.",
       "options": {"A": "Option with code: format as markdown code block with triple backticks and language", "B": "Plain text option", "C": "Option with inline code: use single backticks around code", "D": "Another plain text option"},
-      "correctAnswer": ["A"],
+      "correctAnswer": ${correctAnswerExample},
+      "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
             } else {
@@ -1363,7 +1377,8 @@ Return JSON in this format:
       "questionTitle": "Brief summary",
       "question": "General question text with NO code snippets. Use <br/> for line breaks.",
       "options": {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"},
-      "correctAnswer": ["A"],
+      "correctAnswer": ${correctAnswerExample},
+      "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
             }
@@ -1372,6 +1387,9 @@ Return JSON in this format:
   ]
 }
 **CRITICAL INSTRUCTIONS**:
+- **MULTIPLE CORRECT ANSWER DISTRIBUTION**: Generate EXACTLY ${multipleCorrectCount} questions with "isMultipleCorrect": true (20% of total) and EXACTLY ${singleCorrectCount} questions with "isMultipleCorrect": false
+- For questions with "isMultipleCorrect": true, provide correctAnswer with 2-4 options (e.g., ["A", "B"] or ["A", "C", "D"])
+- For questions with "isMultipleCorrect": false, provide correctAnswer with exactly 1 option (e.g., ["A"])
 - Analyze skillType "${skillType}" and skillName "${skillName}" to determine if this is programming-related
 - IF programming-related: Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers in QUESTION TEXT ONLY and exactly ${general} general questions (NO code)
 - IF NOT programming-related: Generate all ${number} questions as general (NO code snippets)
@@ -2280,6 +2298,29 @@ const createConsumer = async (id) => {
                       }
                     });
                   }
+
+                  // STEP 4: Ensure isMultipleCorrect field is set correctly
+                  // If not present, determine based on correctAnswer array length
+                  if (question.isMultipleCorrect === undefined || question.isMultipleCorrect === null) {
+                    const correctAnswerCount = Array.isArray(question.correctAnswer) ? question.correctAnswer.length : 0;
+                    question.isMultipleCorrect = correctAnswerCount > 1;
+                  }
+
+                  // Validate correctAnswer matches isMultipleCorrect
+                  const correctAnswerCount = Array.isArray(question.correctAnswer) ? question.correctAnswer.length : 0;
+                  if (question.isMultipleCorrect && correctAnswerCount < 2) {
+                    console.warn(
+                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=true but only ${correctAnswerCount} correct answer(s). Expected 2-4.`
+                    );
+                  } else if (!question.isMultipleCorrect && correctAnswerCount !== 1) {
+                    console.warn(
+                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=false but ${correctAnswerCount} correct answer(s). Expected exactly 1.`
+                    );
+                    // Auto-fix: take first answer if multiple provided
+                    if (correctAnswerCount > 1) {
+                      question.correctAnswer = [question.correctAnswer[0]];
+                    }
+                  }
                 } catch (mcqError) {
                   console.error(
                     `❌ Error processing MCQ question in Consumer ${id}:`,
@@ -2287,6 +2328,52 @@ const createConsumer = async (id) => {
                   );
                 }
               });
+
+              // STEP 5: Ensure 20% distribution of multiple correct questions
+              const totalQuestions = aiResponse.MCQ.length;
+              const expectedMultipleCorrect = Math.max(1, Math.round(totalQuestions * 0.2));
+              const actualMultipleCorrect = aiResponse.MCQ.filter(q => q.isMultipleCorrect === true).length;
+
+              if (actualMultipleCorrect !== expectedMultipleCorrect) {
+                console.warn(
+                  `⚠️ MCQ multiple correct distribution: Expected ${expectedMultipleCorrect} (20%), got ${actualMultipleCorrect}. Adjusting...`
+                );
+
+                // Sort questions by current isMultipleCorrect status
+                const multipleCorrectQuestions = aiResponse.MCQ.filter(q => q.isMultipleCorrect === true);
+                const singleCorrectQuestions = aiResponse.MCQ.filter(q => !q.isMultipleCorrect);
+
+                // Adjust to meet 20% requirement
+                if (actualMultipleCorrect < expectedMultipleCorrect) {
+                  // Need more multiple correct - convert some single correct to multiple correct
+                  const needed = expectedMultipleCorrect - actualMultipleCorrect;
+                  for (let i = 0; i < Math.min(needed, singleCorrectQuestions.length); i++) {
+                    const q = singleCorrectQuestions[i];
+                    q.isMultipleCorrect = true;
+                    // If only one correct answer, add another valid option (if available)
+                    if (q.correctAnswer && q.correctAnswer.length === 1 && q.options) {
+                      const correctKey = q.correctAnswer[0];
+                      const optionKeys = Object.keys(q.options);
+                      const otherOptions = optionKeys.filter(key => key !== correctKey);
+                      if (otherOptions.length > 0) {
+                        // Add one more correct answer (randomly or first available)
+                        q.correctAnswer.push(otherOptions[0]);
+                      }
+                    }
+                  }
+                } else if (actualMultipleCorrect > expectedMultipleCorrect) {
+                  // Need fewer multiple correct - convert some to single correct
+                  const excess = actualMultipleCorrect - expectedMultipleCorrect;
+                  for (let i = 0; i < Math.min(excess, multipleCorrectQuestions.length); i++) {
+                    const q = multipleCorrectQuestions[i];
+                    q.isMultipleCorrect = false;
+                    // Keep only first correct answer
+                    if (q.correctAnswer && q.correctAnswer.length > 1) {
+                      q.correctAnswer = [q.correctAnswer[0]];
+                    }
+                  }
+                }
+              }
             }
 
             // Process Programming questions: validate test cases and boilerplate code
