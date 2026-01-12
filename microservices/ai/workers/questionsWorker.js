@@ -836,7 +836,12 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 - Options must be key-value pairs: {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"}
 - Provide correctAnswer as array: ["A"]
 - **IMPORTANT**: Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code snippets. not for options. Do NOT use markdown code fences (\`\`\`)
-- **CRITICAL**: DO NOT use SNIPPET_START / SNIPPET_END for: Answer options (MCQ options, choices) in any case. Options and titles must always be plain text only.
+- **🚫 ABSOLUTE RULE - NO EXCEPTIONS**: 
+  * DO NOT use [SNIPPET_START] / [SNIPPET_END] markers in MCQ options/choices AT ALL
+  * DO NOT use markdown code fences (\`\`\`) in MCQ options/choices AT ALL
+  * Options must be PLAIN TEXT ONLY - if an option contains code, write it as plain text without any markers
+  * Example: If option is code like "driver.switchTo().frame()", write it as: "driver.switchTo().frame()" (plain text, no markers)
+  * Options and titles must always be plain text only - NO code snippet markers, NO markdown fences
 `;
       break;
 
@@ -1214,7 +1219,7 @@ Return JSON in this format:
               return `{
       "questionTitle": "Brief summary with code snippet",
       "question": "Question text with [SNIPPET_START:detectedLanguage]code\\nhere[SNIPPET_END]. Use <br/> for line breaks in question text. Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers - NO markdown fences.",
-      "options": {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"},
+      "options": {"A": "Plain text option (NO code markers)", "B": "Plain text option (NO code markers)", "C": "Plain text option (NO code markers)", "D": "Plain text option (NO code markers)"},
       "correctAnswer": ["A"],
       "maxTime": ${maxTime}
     }`;
@@ -1233,9 +1238,11 @@ Return JSON in this format:
 }
 **CRITICAL INSTRUCTIONS**:
 - Analyze skillType "${skillType}" and skillName "${skillName}" to determine if this is programming-related
-- IF programming-related: Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers and exactly ${general} general questions (NO code)
+- IF programming-related: Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers in QUESTION TEXT ONLY and exactly ${general} general questions (NO code)
 - IF NOT programming-related: Generate all ${number} questions as general (NO code snippets)
-- Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code - NO markdown fences (\`\`\`)
+- Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code in QUESTION TEXT - NO markdown fences (\`\`\`)
+- **🚫 ABSOLUTE RULE**: NEVER use [SNIPPET_START] or [SNIPPET_END] in MCQ options/choices - options must be plain text only
+- If an option contains code, write it as plain text without any markers (e.g., "driver.switchTo().frame()" not "[SNIPPET_START:java]driver.switchTo().frame()[SNIPPET_END]")
 - Verify your distribution matches the decision you made about whether this is a programming skill`;
       break;
 
@@ -2091,6 +2098,38 @@ const createConsumer = async (id) => {
                     );
 
                     question.question = processedQuestion;
+                  }
+
+                  // STEP 3: Clean up options - remove any [SNIPPET_START] markers that might have been incorrectly included
+                  if (question.options && typeof question.options === "object") {
+                    Object.keys(question.options).forEach((key) => {
+                      if (typeof question.options[key] === "string") {
+                        let optionText = question.options[key];
+
+                        // Remove [SNIPPET_START:lang]...[/SNIPPET_END] markers but keep the code content
+                        optionText = optionText.replace(
+                          /\[SNIPPET_START:[^\]]+\]([\s\S]*?)\[SNIPPET_END\]/gi,
+                          (match, codeContent) => {
+                            // Extract just the code content, remove markers
+                            return codeContent.trim();
+                          }
+                        );
+
+                        // Also remove any markdown code fences that might be in options
+                        optionText = optionText.replace(
+                          /```[\w]*\s*([\s\S]*?)```/g,
+                          (match, codeContent) => {
+                            return codeContent.trim();
+                          }
+                        );
+
+                        // Clean up any HTML tags that might be in options
+                        optionText = optionText.replace(/<br\s*\/?>/gi, " ");
+                        optionText = optionText.replace(/&nbsp;/g, " ");
+
+                        question.options[key] = optionText.trim();
+                      }
+                    });
                   }
                 } catch (mcqError) {
                   console.error(
