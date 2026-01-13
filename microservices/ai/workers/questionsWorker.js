@@ -55,8 +55,7 @@ const retryGeminiCall = async (
         // Exponential backoff: 1s, 2s, 4s, etc.
         const delayMs = baseDelayMs * Math.pow(2, attempt);
         console.log(
-          `⏳ Rate limit hit (Consumer ${consumerId}), retrying in ${delayMs}ms (attempt ${
-            attempt + 1
+          `⏳ Rate limit hit (Consumer ${consumerId}), retrying in ${delayMs}ms (attempt ${attempt + 1
           }/${maxRetries})...`
         );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -319,11 +318,12 @@ const generateProgrammingTitlesPrompt = (
   const skillName = category.category;
   const skillType = category.skills || "unknown";
   const number = questionConfig.number;
+  const maxTime = questionConfig.maxTime || 30; // Default to 30 if not provided
 
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
   let usedCategories =
     Array.isArray(usedCategoriesFromServer) &&
-    usedCategoriesFromServer.length > 0
+      usedCategoriesFromServer.length > 0
       ? usedCategoriesFromServer
       : [];
   const usedCategoryIndices = new Set();
@@ -414,13 +414,54 @@ const generateProgrammingTitlesPrompt = (
 skillName: "${skillName}"
 skillType: "${skillType}"
 number: ${number}
+maxTime: ${maxTime} minutes
+- Candidate Experience Level: ${experience} years
+- Job Role: ${jobRole}
+- Job Seniority Level: ${proposedSeniority}
+- Job Description: ${JD}
+
+### 🔴 CRITICAL & IMPORTANT RULES (MUST FOLLOW STRICTLY):
+
+1. **Time Constraint Enforcement**
+   - Each question MUST be answerable **completely and correctly** within **${maxTime} minutes**.
+   - Do NOT generate questions that require excessive theory, multi-stage reasoning, or long explanations beyond the given time.
+
+2. **Experience-Based Difficulty**
+   - Difficulty MUST strictly match the candidate’s experience (${experience} years), job role, and seniority.
+   - Avoid questions that are:
+     - Too basic for senior candidates
+     - Too complex or system-level for junior/mid candidates
+
+3. **Programming Questions (MANDATORY TIME FEASIBILITY)**
+   - The candidate with **${experience} years of experience** MUST be able to:
+     - Understand the problem
+     - Design the logic
+     - Write working code
+     - Handle edge cases
+   - **ALL within ${maxTime} minutes**
+   - Do NOT include:
+     - Large system design
+     - Multi-file architecture
+     - Advanced algorithms unless explicitly justified by role & experience
+
+4. **Resume & JD Alignment**
+   - Prefer technologies, frameworks, patterns, and scenarios that appear in:
+     - Job Description
+     - Candidate Resume Data if available
+   - Avoid unrelated or unfamiliar tech.
+
+5. **Practical & Assessment-Ready**
+   - Questions should resemble **real Assessment questions**, not academic exams.
+   - Focus on decision-making, reasoning, and practical application.
+
+Ensure all generated questions strictly follow the above constraints.
 
 CRITICAL UNIQUENESS REQUIREMENTS - ASSESSMENT-WIDE:
 - This is part of an ONGOING ASSESSMENT - previous questions have already been generated
 - Each title must represent a DIFFERENT logic category/type from the following ${totalCategories} categories:
 ${PROGRAMMING_LOGIC_CATEGORIES.map(
-  (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`
-).join("\n")}
+    (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`
+  ).join("\n")}
 
 - DISTRIBUTE titles across DIFFERENT logic categories to ensure maximum variety
 - Each title must use a UNIQUE logic approach/implementation type
@@ -452,30 +493,26 @@ Each title must:
 
 PREVIOUSLY USED CATEGORIES (${usedCount}):
 ${usedCategories
-  .slice(0, 20)
-  .map((cat) => `- ${cat}`)
-  .join("\n")}${
-        usedCategories.length > 20
-          ? `\n... and ${usedCategories.length - 20} more`
-          : ""
-      }
+          .slice(0, 20)
+          .map((cat) => `- ${cat}`)
+          .join("\n")}${usedCategories.length > 20
+            ? `\n... and ${usedCategories.length - 20} more`
+            : ""
+        }
 
-UNUSED CATEGORIES (${
-        unusedCategories.length
-      } remaining - prioritize these first):
-${
-  unusedCategories.length > 0
-    ? unusedCategories
-        .slice(0, Math.min(number, unusedCategories.length))
-        .map((cat) => `- ${cat.name}`)
-        .join("\n")
-    : "None - all categories have been used"
-}
+UNUSED CATEGORIES (${unusedCategories.length
+        } remaining - prioritize these first):
+${unusedCategories.length > 0
+          ? unusedCategories
+            .slice(0, Math.min(number, unusedCategories.length))
+            .map((cat) => `- ${cat.name}`)
+            .join("\n")
+          : "None - all categories have been used"
+        }
 
 STRATEGY:
-1. First, use any remaining unused categories (${
-        unusedCategories.length
-      } available)
+1. First, use any remaining unused categories (${unusedCategories.length
+        } available)
 2. If more questions needed, reuse categories but with COMPLETELY DIFFERENT problem variations
 3. Ensure each question has unique logic, constraints, and problem statement
 `;
@@ -504,28 +541,16 @@ PRIORITY: Use categories NOT in the above list. Only use previously used categor
     prompt += `
 📋 RECOMMENDED UNUSED CATEGORIES (prioritize these):
 ${unusedCategories
-  .slice(0, Math.min(number, unusedCategories.length))
-  .map((cat) => `- ${cat.name}`)
-  .join("\n")}
+        .slice(0, Math.min(number, unusedCategories.length))
+        .map((cat) => `- ${cat.name}`)
+        .join("\n")}
 `;
   }
 
   if (tailorMade === "true") {
     prompt += `
 Tailor titles to the candidate context:
-- Candidate Experience: ${experience} years
-- Job Role: ${jobRole}
-- Proposed Seniority: ${proposedSeniority}
 - Candidate Resume Data: ${JSON.stringify(CandidateResumeData)}
-- JD: ${JD}
-`;
-  } else {
-    prompt += `
-Job Context:
-- Job Role: ${jobRole}
-- Experience Required: ${experience} years
-- Proposed Seniority: ${proposedSeniority}
-- JD: ${JD}
 `;
   }
 
@@ -555,25 +580,22 @@ CRITICAL JSON RULES:
 - No trailing commas
 - Titles array MUST contain exactly ${number} items
 - logicCategories array MUST contain exactly ${number} items, matching each title to its logic category
-- Each title MUST map to a DIFFERENT logic category from the ${totalCategories} available${
-    isCategoryExhausted
+- Each title MUST map to a DIFFERENT logic category from the ${totalCategories} available${isCategoryExhausted
       ? " (category rotation allowed - ensure unique problem variations)"
       : ""
-  }
-- ${
-    isCategoryExhausted
+    }
+- ${isCategoryExhausted
       ? "You may reuse categories, but each must have a COMPLETELY DIFFERENT problem statement and logic approach"
       : usedCategories.length > 0
-      ? "If possible, avoid these previously used categories: " +
+        ? "If possible, avoid these previously used categories: " +
         usedCategories.join(", ")
-      : "Use any categories"
-  }
+        : "Use any categories"
+    }
 - Ensure titles cover different logic categories for maximum uniqueness across the entire assessment
-- ${
-    isCategoryExhausted
+- ${isCategoryExhausted
       ? "CRITICAL: Even if reusing a category, the problem must be UNIQUE - different constraints, different approach, different scenario"
       : ""
-  }
+    }
 `;
 
   return prompt;
@@ -607,9 +629,51 @@ const generateCombinedAudioVideoSubjectivePrompt = (
 
   const totalNumber = audioNumber + videoNumber + subjectiveNumber;
 
-  let prompt = `Generate ${totalNumber} unique interview questions for the following skill:
+  // Calculate scenario-based questions (25-30% of total)
+  const scenarioBasedCount = Math.max(1, Math.round(totalNumber * 0.27)); // ~27% (middle of 25-30%)
+  const regularCount = totalNumber - scenarioBasedCount;
+
+  // Get maxTime values for each type
+  const audioMaxTime = audioConfig ? audioConfig.maxTime : 0;
+  const videoMaxTime = videoConfig ? videoConfig.maxTime : 0;
+  const subjectiveMaxTime = subjectiveConfig ? subjectiveConfig.maxTime : 0;
+
+  let prompt = `You are a ${jobRole} interviewer evaluating a candidate with approximately ${experience} years of hands-on experience.
+
+Generate ${totalNumber} unique interview questions for the following skill:
 skillName: "${skillName}"
 skillType: "${skillType}"
+- Candidate Experience Level: ${experience} years
+- Job Role: ${jobRole}
+- Job Seniority Level: ${proposedSeniority}
+- Job Description: ${JD}
+
+### 🔴 CRITICAL & IMPORTANT RULES (MUST FOLLOW STRICTLY):
+
+1. **Time Constraint Enforcement**
+   - Each question MUST be answerable **completely and correctly** within its specified maxTime minutes.
+   ${audioNumber > 0 ? `- Audio questions: ${audioMaxTime} minutes each` : ''}
+   ${videoNumber > 0 ? `- Video questions: ${videoMaxTime} minutes each` : ''}
+   ${subjectiveNumber > 0 ? `- Subjective questions: ${subjectiveMaxTime} minutes each` : ''}
+   - Do NOT generate questions that require excessive theory, multi-stage reasoning, or long explanations beyond the given time.
+
+2. **Experience-Based Difficulty**
+   - Difficulty MUST strictly match the candidate's experience (${experience} years), job role, and seniority.
+   - Avoid questions that are:
+     - Too basic for senior candidates
+     - Too complex or system-level for junior/mid candidates
+
+3. **Resume & JD Alignment**
+   - Prefer technologies, frameworks, patterns, and scenarios that appear in:
+     - Job Description
+     - Candidate Resume Data if available
+   - Avoid unrelated or unfamiliar tech.
+
+4. **Practical & Assessment-Ready**
+   - Questions should resemble **real Assessment questions**, not academic exams.
+   - Focus on decision-making, reasoning, and practical application.
+
+Ensure all generated questions strictly follow the above constraints.
 
 CRITICAL UNIQUENESS REQUIREMENT:
 - Generate ALL questions (Audio, Video, and Subjective) in a SINGLE request
@@ -618,41 +682,31 @@ CRITICAL UNIQUENESS REQUIREMENT:
 - Audio, Video, and Subjective questions must cover DIFFERENT aspects/topics
 - Even if titles are different, the core meaning and expected answers must be unique
 
+SCENARIO-BASED QUESTION REQUIREMENT (${scenarioBasedCount} out of ${totalNumber} questions - 25-30%):
+- Generate EXACTLY ${scenarioBasedCount} scenario-based, real-world questions
+- Distribute scenario-based questions across Audio, Video, and Subjective types proportionally
+
 Question Distribution:
-${
-  audioNumber > 0
-    ? `- Audio: ${audioNumber} question(s) (maxTime: ${audioConfig.maxTime} minutes)`
-    : ""
-}
-${
-  videoNumber > 0
-    ? `- Video: ${videoNumber} question(s) (maxTime: ${videoConfig.maxTime} minutes)`
-    : ""
-}
-${
-  subjectiveNumber > 0
-    ? `- Subjective: ${subjectiveNumber} question(s) (maxTime: ${subjectiveConfig.maxTime} minutes)`
-    : ""
-}
+${audioNumber > 0
+      ? `- Audio: ${audioNumber} question(s) (maxTime: ${audioConfig.maxTime} minutes)`
+      : ""
+    }
+${videoNumber > 0
+      ? `- Video: ${videoNumber} question(s) (maxTime: ${videoConfig.maxTime} minutes)`
+      : ""
+    }
+${subjectiveNumber > 0
+      ? `- Subjective: ${subjectiveNumber} question(s) (maxTime: ${subjectiveConfig.maxTime} minutes)`
+      : ""
+    }
 
 `;
 
   if (tailorMade === "true") {
     prompt += `Additional Context:
-- Candidate Experience: ${experience} years
-- Job Role: ${jobRole}
-- Proposed Seniority: ${proposedSeniority}
 - Candidate Resume Data: ${JSON.stringify(CandidateResumeData)}
-- JD: ${JD}
 
 Ensure questions are tailored to the candidate's specific skills, projects, and experience level.
-`;
-  } else {
-    prompt += `Job Context:
-- Job Role: ${jobRole}
-- Experience Required: ${experience} years
-- Proposed Seniority: ${proposedSeniority}
-- JD: ${JD}
 `;
   }
 
@@ -664,28 +718,75 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   }
 
   prompt += `
+**SCENARIO-BASED QUESTION GUIDELINES** (Apply to ${scenarioBasedCount} questions):
+- Generate realistic, scenario-based interview questions that reflect day-to-day tasks performed by a ${experience}-year ${jobRole}
+- Questions must be based on commonly asked ${skillName} interview topics
+- Focus on implementation-level experience, not strategy or planning
+- The candidate should talk about how they implemented, debugged, fixed, or executed ${skillName} tasks, not how they designed overall processes
+- Avoid topics like test strategy ownership, framework architecture decisions, or team-wide planning
+- Ask questions that verify actual hands-on exposure (writing scripts, fixing failures, handling waits, locators, data, and execution issues)
+- Each scenario-based question should:
+  * Start with a realistic work situation: "Imagine you're working on..." or "You're tasked with..." or "During your work, you encounter..."
+  * Present a specific problem or challenge related to ${skillName}
+  * Ask how the candidate would handle it based on their ${experience} years of experience
+  * Feel like a real interviewer conversation
+  * Be answerable within the specified maxTime for its question type
+  * Focus on practical, hands-on experience rather than theoretical knowledge
+
+**SCENARIO-BASED QUESTION EXAMPLES** (for reference - create similar but unique questions):
+- "Imagine you're working on a test automation project and your test scripts are failing intermittently. How would you debug and fix this issue?"
+- "You're tasked with automating a web application that has dynamic elements. How would you handle element identification and wait strategies?"
+- "During your work, you encounter a situation where test data needs to be managed across multiple test environments. How would you approach this?"
+- "You're working on a project where test execution is taking too long. What steps would you take to optimize and improve performance?"
+
+**REGULAR QUESTION GUIDELINES** (Apply to remaining ${regularCount} questions):
+- Can focus on concepts, definitions, best practices, or general knowledge
+- Should still be practical and relevant to ${skillName}
+- Should verify understanding of ${skillName} fundamentals
+- Should be answerable within the specified maxTime for its question type
+`;
+
+  // Calculate scenario-based questions per type (proportional distribution)
+  let audioScenarioCount = audioNumber > 0 ? Math.max(0, Math.round(scenarioBasedCount * (audioNumber / totalNumber))) : 0;
+  let videoScenarioCount = videoNumber > 0 ? Math.max(0, Math.round(scenarioBasedCount * (videoNumber / totalNumber))) : 0;
+  let subjectiveScenarioCount = subjectiveNumber > 0 ? Math.max(0, Math.round(scenarioBasedCount * (subjectiveNumber / totalNumber))) : 0;
+
+  // Ensure at least one scenario-based question if total > 0 and distribute remaining count
+  let remainingScenarioCount = scenarioBasedCount - (audioScenarioCount + videoScenarioCount + subjectiveScenarioCount);
+  if (remainingScenarioCount > 0 && audioNumber > 0) {
+    audioScenarioCount = audioScenarioCount + remainingScenarioCount;
+  } else if (remainingScenarioCount > 0 && videoNumber > 0) {
+    videoScenarioCount = videoScenarioCount + remainingScenarioCount;
+  } else if (remainingScenarioCount > 0 && subjectiveNumber > 0) {
+    subjectiveScenarioCount = subjectiveScenarioCount + remainingScenarioCount;
+  }
+
+  prompt += `
 **Audio Question Requirements** (if ${audioNumber} > 0):
 - Generate EXACTLY ${audioNumber} Audio questions
+- ${audioScenarioCount > 0 ? `Include EXACTLY ${audioScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : 'Include scenario-based questions as part of the 25-30% requirement'}
 - Must require ONLY verbal answers via voice
 - Do NOT ask for demonstrations, code execution, or visual aids
-- Focus on verbal explanations, concepts, or experiences
 - Use <br/> for line breaks in question text
+- Each question should be answerable in ${audioConfig ? audioConfig.maxTime : 0} minutes via audio and feel like a real interviewer conversation
 - Ensure these questions are COMPLETELY DIFFERENT from Video and Subjective questions
 
 **Video Question Requirements** (if ${videoNumber} > 0):
 - Generate EXACTLY ${videoNumber} Video questions
+- ${videoScenarioCount > 0 ? `Include EXACTLY ${videoScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : 'Include scenario-based questions as part of the 25-30% requirement'}
 - Must require ONLY verbal answers
 - Do NOT ask for demonstrations, screen presentations, live demos, or visual aids
-- Focus on explanations, concepts, or experiences
 - Use <br/> for line breaks in question text
+- Each question should be answerable in ${videoConfig ? videoConfig.maxTime : 0} minutes via video and feel like a real interviewer conversation
 - Ensure these questions are COMPLETELY DIFFERENT from Audio and Subjective questions
 
 **Subjective Question Requirements** (if ${subjectiveNumber} > 0):
 - Generate EXACTLY ${subjectiveNumber} Subjective questions
+- ${subjectiveScenarioCount > 0 ? `Include EXACTLY ${subjectiveScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : 'Include scenario-based questions as part of the 25-30% requirement'}
 - Designed for text input in a text area
-- Focus on written responses requiring explanations, analysis, or descriptions
 - Do NOT require code execution, demos, or presentations
 - Use <br/> for line breaks in question text
+- Each question should be answerable in ${subjectiveConfig ? subjectiveConfig.maxTime : 0} minutes via written response
 - Ensure these questions are COMPLETELY DIFFERENT from Audio and Video questions
 
 **CRITICAL JSON OUTPUT REQUIREMENTS**:
@@ -699,8 +800,7 @@ Return JSON in this format:
 {
   "skillName": "${skillName}",
   "skillType": "${skillType}",
-  "Audio": ${
-    audioNumber > 0
+  "Audio": ${audioNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -709,9 +809,8 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-  },
-  "Video": ${
-    videoNumber > 0
+    },
+  "Video": ${videoNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -720,9 +819,8 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-  },
-  "Subjective": ${
-    subjectiveNumber > 0
+    },
+  "Subjective": ${subjectiveNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -731,7 +829,7 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-  }
+    }
 }
 
 VERIFY UNIQUENESS: Before returning, ensure that:
@@ -768,26 +866,54 @@ skillName: "${skillName}"
 skillType: "${skillType}"
 number: ${number}
 maxTime: ${maxTime} minutes
+- Candidate Experience Level: ${experience} years
+- Job Role: ${jobRole}
+- Job Seniority Level: ${proposedSeniority}
+- Job Description: ${JD}
 
+### 🔴 CRITICAL & IMPORTANT RULES (MUST FOLLOW STRICTLY):
+
+1. **Time Constraint Enforcement**
+   - Each question MUST be answerable **completely and correctly** within **${maxTime} minutes**.
+   - Do NOT generate questions that require excessive theory, multi-stage reasoning, or long explanations beyond the given time.
+
+2. **Experience-Based Difficulty**
+   - Difficulty MUST strictly match the candidate's experience (${experience} years), job role, and seniority.
+   - Avoid questions that are:
+     - Too basic for senior candidates
+     - Too complex or system-level for junior/mid candidates
+${questionType === "Programming" ? `
+3. **Programming Questions (MANDATORY TIME FEASIBILITY)**
+   - The candidate with **${experience} years of experience** MUST be able to:
+     - Understand the problem
+     - Design the logic
+     - Write working code
+     - Handle edge cases
+   - **ALL within ${maxTime} minutes**
+   - Do NOT include:
+     - Large system design
+     - Multi-file architecture
+     - Advanced algorithms unless explicitly justified by role & experience
+
+4. **Resume & JD Alignment**` : `
+3. **Resume & JD Alignment**`}
+   - Prefer technologies, frameworks, patterns, and scenarios that appear in:
+     - Job Description
+     - Candidate Resume Data if available
+   - Avoid unrelated or unfamiliar tech.
+
+${questionType === "Programming" ? `5. **Practical & Assessment-Ready**` : `4. **Practical & Assessment-Ready**`}
+   - Questions should resemble **real Assessment questions**, not academic exams.
+   - Focus on decision-making, reasoning, and practical application.
+
+Ensure all generated questions strictly follow the above constraints.
 `;
 
   // Add tailor-made context if applicable
   if (tailorMade === "true") {
     prompt += `Additional Context:
-- Candidate Experience: ${experience} years
-- Job Role: ${jobRole}
-- Proposed Seniority: ${proposedSeniority}
 - Candidate Resume Data: ${JSON.stringify(CandidateResumeData)}
-- JD: ${JD}
-
 Ensure questions are tailored to the candidate's specific skills, projects, and experience level.
-`;
-  } else {
-    prompt += `Job Context:
-- Job Role: ${jobRole}
-- Experience Required: ${experience} years
-- Proposed Seniority: ${proposedSeniority}
-- JD: ${JD}
 `;
   }
 
@@ -801,59 +927,94 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   // Type-specific instructions
   switch (questionType) {
     case "MCQ":
+      const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
+      const singleCorrectCount = number - multipleCorrectCount;
+
       prompt += `\n**MCQ Question Requirements**:
 - Generate EXACTLY ${number} MCQ questions total
+- **MULTIPLE CORRECT ANSWER REQUIREMENT**: 
+  * EXACTLY ${multipleCorrectCount} questions (20% of total) must have MULTIPLE correct answers
+  * These questions must have "isMultipleCorrect": true
+  * For multiple correct questions, provide correctAnswer as array with 2-4 options: ["A", "B"] or ["A", "C", "D"] etc.
+  * EXACTLY ${singleCorrectCount} questions must have SINGLE correct answer
+  * These questions must have "isMultipleCorrect": false
+  * For single correct questions, provide correctAnswer as array with exactly 1 option: ["A"]
 - **CRITICAL DECISION**: Analyze the skillType "${skillType}" and skillName "${skillName}" to determine if this is a programming-related skill
 - **IF programming-related skill** (e.g., programming languages, frameworks, technologies that involve code):
   * Apply 50%-50% distribution: exactly ${Math.ceil(
-    number / 2
-  )} questions WITH code snippets AND exactly ${
-        number - Math.ceil(number / 2)
-      } general/conceptual questions (NO code snippets)
+        number / 2
+      )} questions WITH code snippets AND exactly ${number - Math.ceil(number / 2)
+        } general/conceptual questions (NO code snippets)
   * For questions with code snippets, use markers: [SNIPPET_START:languageIdentifier]code content[SNIPPET_END]
   * Detect the programming language from skillType and use lowercase identifier (e.g., "Java" → "java", "Python" → "python", "JavaScript" → "javascript", "C++" → "cpp", "Node.js" → "javascript")
   * Inside snippet markers, use \\n for newlines (NOT <br/>)
   * Use <br/> for line breaks in question text surrounding code snippets
   * **VERIFY**: Count your questions - exactly ${Math.ceil(
-    number / 2
-  )} should have [SNIPPET_START] markers, exactly ${
-        number - Math.ceil(number / 2)
-      } should NOT have any code snippets
+          number / 2
+        )} should have [SNIPPET_START] markers, exactly ${number - Math.ceil(number / 2)
+        } should NOT have any code snippets
 - **IF NOT programming-related skill** (e.g., soft skills, domain knowledge, tools without code):
   * Generate all ${number} questions as general/conceptual (NO code snippets)
   * Use <br/> for line breaks in question text
 - Options must be key-value pairs: {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"}
-- Provide correctAnswer as array: ["A"]
-- **IMPORTANT**: Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code snippets. Do NOT use markdown code fences (\`\`\`)
+- **IMPORTANT**: Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code snippets in QUESTION TEXT. For options, use markdown code formatting.
+- **✅ CORRECT FORMATTING FOR OPTIONS**: 
+  * If an option contains code, use markdown code formatting: \`\`\`language\ncode here\n\`\`\` (for multi-line) or \`code here\` (for inline)
+  * Example: "The correct method is \`\`\`java\ndriver.switchTo().frame(\"iframeName\");\n\`\`\`"
+  * Or for inline: "Use \`element.getAttribute(\"value\")\` to get the value"
+  * Use proper markdown formatting to display code nicely
+- **🚫 ABSOLUTE RULE - NO EXCEPTIONS**: 
+  * DO NOT use [SNIPPET_START] / [SNIPPET_END] markers in MCQ options/choices AT ALL
+  * Options with code should use markdown code fences (\`\`\`lang\ncode\n\`\`\`) or inline code (\`code\`)
+  * Options without code should be plain text
+  * Question titles must always be plain text only - NO code snippet markers, NO markdown fences
 `;
       break;
 
     case "Audio":
+      const audioScenarioNum = Math.max(1, Math.round(number * 0.27)); // 25-30% scenario-based
       prompt += `\n**Audio Question Requirements**:
 - Generate EXACTLY ${number} Audio questions
+- Include approximately ${audioScenarioNum} scenario-based, real-world questions (25-30% of total)
+- Scenario-based questions should present realistic work situations: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
+- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole}, focusing on implementation-level experience
+- Regular questions can focus on concepts, definitions, or general knowledge
 - Must require ONLY verbal answers via voice
 - Do NOT ask for demonstrations, code execution, or visual aids
-- Focus on verbal explanations, concepts, or experiences
+- Focus on verbal explanations, concepts, experiences, or scenario-based problem-solving
+- Each question should be answerable in ${maxTime} minutes via audio and feel like a real interviewer conversation
 - Use <br/> for line breaks in question text
 `;
       break;
 
     case "Video":
+      const videoScenarioNum = Math.max(1, Math.round(number * 0.27)); // 25-30% scenario-based
       prompt += `\n**Video Question Requirements**:
 - Generate EXACTLY ${number} Video questions
+- Include approximately ${videoScenarioNum} scenario-based, real-world questions (25-30% of total)
+- Scenario-based questions should present realistic work situations: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
+- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole}, focusing on implementation-level experience
+- Regular questions can focus on concepts, definitions, or general knowledge
 - Must require ONLY verbal answers
 - Do NOT ask for demonstrations, screen presentations, live demos, or visual aids
-- Focus on explanations, concepts, or experiences
+- Focus on explanations, concepts, experiences, or scenario-based problem-solving
+- Each question should be answerable in ${maxTime} minutes via video and feel like a real interviewer conversation
 - Use <br/> for line breaks in question text
 `;
       break;
 
     case "Subjective":
+      const subjectiveScenarioNum = Math.max(1, Math.round(number * 0.27)); // 25-30% scenario-based
       prompt += `\n**Subjective Question Requirements**:
 - Generate EXACTLY ${number} Subjective questions
+- Include approximately ${subjectiveScenarioNum} scenario-based, real-world questions (25-30% of total)
+- Scenario-based questions should present realistic work situations: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
+- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole}, focusing on implementation-level experience
+- Regular questions can focus on concepts, definitions, or general knowledge
 - Designed for text input in a text area
-- Focus on written responses requiring explanations, analysis, or descriptions
+- Focus on written responses requiring explanations, analysis, descriptions, or scenario-based problem-solving
 - Do NOT require code execution, demos, or presentations
+- Each question should be answerable in ${maxTime} minutes via written response
 - Use <br/> for line breaks in question text
 `;
       break;
@@ -927,8 +1088,8 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
           logicCategoryInfo += `
 Available logic categories (${totalCategories} total):
 ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 20)
-  .map((cat, idx) => `${idx + 1}. ${cat.name}`)
-  .join("\n")}
+              .map((cat, idx) => `${idx + 1}. ${cat.name}`)
+              .join("\n")}
 ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 `;
         }
@@ -944,8 +1105,8 @@ ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 
 Available logic categories (${totalCategories} total):
 ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 25)
-  .map((cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`)
-  .join("\n")}
+            .map((cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`)
+            .join("\n")}
 ${totalCategories > 25 ? `... and ${totalCategories - 25} more categories` : ""}
 `;
       }
@@ -959,49 +1120,42 @@ ${logicCategoryInfo}
   * Create scenarios that a ${jobRole} professional would encounter in their daily work
   * Examples of scenario-based formatting:
     - Instead of: "Find the maximum element in an array"
-    - Use: "As a ${jobRole}, you're analyzing ${
-        experience <= 3
+    - Use: "As a ${jobRole}, you're analyzing ${experience <= 3
           ? "user activity logs"
           : experience <= 7
-          ? "performance metrics data"
-          : "system analytics"
-      } and need to find the peak ${
-        experience <= 3
+            ? "performance metrics data"
+            : "system analytics"
+        } and need to find the peak ${experience <= 3
           ? "usage"
           : experience <= 7
-          ? "performance"
-          : "efficiency"
-      } value..."
+            ? "performance"
+            : "efficiency"
+        } value..."
     - Instead of: "Count vowels in a string"
-    - Use: "You're building a ${
-      jobRole === "Backend Developer"
-        ? "API endpoint"
-        : jobRole === "Frontend Developer"
-        ? "form validation"
-        : "data processing"
-    } feature that needs to ${
-        experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
-      } text input..."
+    - Use: "You're building a ${jobRole === "Backend Developer"
+          ? "API endpoint"
+          : jobRole === "Frontend Developer"
+            ? "form validation"
+            : "data processing"
+        } feature that needs to ${experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
+        } text input..."
   * Make scenarios realistic and relatable to ${jobRole} responsibilities
   * Use domain-specific terminology when appropriate (but keep it understandable)
   * Connect the problem to actual work situations a ${jobRole} would face
 - **Experience Level Tailoring** (${experience} years):
-  * ${
-    experience <= 3
-      ? "Junior Level"
-      : experience <= 7
-      ? "Mid-Level"
-      : "Senior Level"
-  } - Adjust scenario complexity accordingly
-  * ${
-    experience <= 3 ? "Junior" : experience <= 7 ? "Mid-level" : "Senior"
-  } ${jobRole} scenarios should reflect ${
-        experience <= 3
+  * ${experience <= 3
+          ? "Junior Level"
+          : experience <= 7
+            ? "Mid-Level"
+            : "Senior Level"
+        } - Adjust scenario complexity accordingly
+  * ${experience <= 3 ? "Junior" : experience <= 7 ? "Mid-level" : "Senior"
+        } ${jobRole} scenarios should reflect ${experience <= 3
           ? "learning and basic tasks"
           : experience <= 7
-          ? "standard project work"
-          : "complex system design and optimization"
-      }
+            ? "standard project work"
+            : "complex system design and optimization"
+        }
   * Use appropriate technical depth based on ${experience} years of experience & Question MUST be solvable within ${maxTime} minutes by an average candidate.
 - Each question must include:
   * **WELL-FORMATTED problem statement** with clear sections and proper HTML formatting:
@@ -1038,25 +1192,22 @@ ${logicCategoryInfo}
     - **CRITICAL**: In Examples section, always use <strong>Input:</strong> and <strong>Output:</strong> (bold/dark) for labels
     - **FORMATTING EXAMPLE** (follow this EXACT structure - NO <br/> tags before <h3> headings):
       <h3>Problem Description</h3>
-      <p>As a ${jobRole}, you're working on a ${
-        experience <= 3
+      <p>As a ${jobRole}, you're working on a ${experience <= 3
           ? "data processing module"
           : experience <= 7
-          ? "performance monitoring system"
-          : "analytics dashboard"
-      } that receives an array of <strong>n</strong> ${
-        experience <= 3
+            ? "performance monitoring system"
+            : "analytics dashboard"
+        } that receives an array of <strong>n</strong> ${experience <= 3
           ? "user activity"
           : experience <= 7
-          ? "transaction"
-          : "performance metric"
-      } values. You need to find the <code>maximum</code> value to ${
-        experience <= 3
+            ? "transaction"
+            : "performance metric"
+        } values. You need to find the <code>maximum</code> value to ${experience <= 3
           ? "identify peak usage"
           : experience <= 7
-          ? "determine system capacity"
-          : "optimize resource allocation"
-      }.</p>
+            ? "determine system capacity"
+            : "optimize resource allocation"
+        }.</p>
       <h3>Input Format</h3>
       <p>The first line contains an integer <strong>n</strong> representing the size of the array.<br/>The second line contains <strong>n</strong> space-separated integers.</p>
       <h3>Output Format</h3>
@@ -1087,8 +1238,7 @@ ${logicCategoryInfo}
   * Solvable using ONLY standard library functions (NO third-party libraries)
 - **CRITICAL TIME CONSTRAINT - STRICTLY ENFORCED**: maxTime = ${maxTime} minutes
   * **MANDATORY**: Question MUST be solvable within ${maxTime} minutes by an average candidate
-  * **Time-based complexity guidelines** (STRICTLY follow for ${maxTime} minutes):${
-        maxTime <= 10
+  * **Time-based complexity guidelines** (STRICTLY follow for ${maxTime} minutes):${maxTime <= 10
           ? `
     - **${maxTime} minutes (5-10 minute range)**:
       * VERY SIMPLE problems only
@@ -1099,7 +1249,7 @@ ${logicCategoryInfo}
       * Solution should be 10-30 lines of code
       * Examples: Find maximum in array, Count vowels, Sum of digits, Check palindrome`
           : maxTime <= 20
-          ? `
+            ? `
     - **${maxTime} minutes (11-20 minute range)**:
       * SIMPLE to EASY problems
       * Single or double loops acceptable
@@ -1107,8 +1257,8 @@ ${logicCategoryInfo}
       * One data structure (array, string, or simple map)
       * Solution should be 20-50 lines of code
       * Examples: Remove duplicates, Rotate array, Two sum (brute force), Frequency count`
-          : maxTime <= 30
-          ? `
+            : maxTime <= 30
+              ? `
     - **${maxTime} minutes (21-30 minute range)**:
       * EASY to MEDIUM problems
       * Can use nested loops or optimized single pass
@@ -1116,30 +1266,29 @@ ${logicCategoryInfo}
       * One or two data structures
       * Solution should be 30-70 lines of code
       * Examples: Valid parentheses, Merge sorted arrays, Find missing number`
-          : maxTime <= 45
-          ? `
+              : maxTime <= 45
+                ? `
     - **${maxTime} minutes (31-45 minute range)**:
       * MEDIUM problems
       * Can use standard algorithms (sorting, hashing, two pointers)
       * Multiple data structures acceptable
       * Solution should be 40-100 lines of code
       * Examples: Group anagrams, Longest substring, Array manipulation`
-          : `
+                : `
     - **${maxTime} minutes (46+ minute range)**:
       * MEDIUM to HARD problems
       * Complex algorithms acceptable
       * Multiple data structures and optimizations
       * Solution can be 50-150 lines of code
       * Examples: Dynamic programming basics, Graph traversal basics, Advanced array problems`
-      }
+        }
   * **VERIFICATION**: Before generating, estimate if an average candidate can:
     1. Understand the problem: 1-2 minutes
     2. Plan the solution: 1-2 minutes
     3. Write the code: remaining time
     4. Test and debug: 1-2 minutes buffer
-  * **For ${maxTime} minutes, ensure the problem can be solved in ${
-        maxTime - 2
-      } minutes of actual coding time**
+  * **For ${maxTime} minutes, ensure the problem can be solved in ${maxTime - 2
+        } minutes of actual coding time**
 - Difficulty based on experience (${experience} years) - BUT TIME CONSTRAINT TAKES PRIORITY:
   * 0-3 years: Easy (basic loops, conditionals, simple data structures) - adjust for time limit
   * 3-7 years: Medium (algorithms, data structures, problem-solving) - adjust for time limit
@@ -1168,16 +1317,14 @@ If titles are provided, you MUST:
 - **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
   * Create a real-world context where a ${jobRole} would encounter this problem
   * Use job-role appropriate terminology and domain context
-  * Make it relatable to ${
-    experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
-  } ${jobRole} work
-  * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${
-        experience <= 3
+  * Make it relatable to ${experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
+        } ${jobRole} work
+  * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${experience <= 3
           ? "user data"
           : experience <= 7
-          ? "transaction logs"
-          : "system performance metrics"
-      } and need to identify the peak value..."
+            ? "transaction logs"
+            : "system performance metrics"
+        } and need to identify the peak value..."
 
 **FINAL VALIDATION CHECKS** (MUST verify before outputting):
 1. **LINE BREAK CHECK**: Search your generated HTML for <br/><h3> pattern - if found, REMOVE the <br/> tag. The correct pattern is </p><h3> or </ul><h3>, NOT </p><br/><h3>
@@ -1203,6 +1350,8 @@ Return JSON in this format:
     case "MCQ":
       const withCode = Math.ceil(number / 2);
       const general = number - withCode;
+      const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
+      const singleCorrectCount = number - multipleCorrectCount; // Remaining 80% single correct
 
       prompt += `{
   "skillName": "${skillName}",
@@ -1210,34 +1359,46 @@ Return JSON in this format:
   "type": "MCQ",
   "MCQ": [
     ${Array(number)
-      .fill(0)
-      .map((_, idx) => {
-        if (idx < withCode) {
-          return `{
+          .fill(0)
+          .map((_, idx) => {
+            const isMultipleCorrect = idx < multipleCorrectCount;
+            const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
+
+            if (idx < withCode) {
+              return `{
       "questionTitle": "Brief summary with code snippet",
       "question": "Question text with [SNIPPET_START:detectedLanguage]code\\nhere[SNIPPET_END]. Use <br/> for line breaks in question text. Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers - NO markdown fences.",
-      "options": {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"},
-      "correctAnswer": ["A"],
+      "options": {"A": "Option with code: format as markdown code block with triple backticks and language", "B": "Plain text option", "C": "Option with inline code: use single backticks around code", "D": "Another plain text option"},
+      "correctAnswer": ${correctAnswerExample},
+      "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
-        } else {
-          return `{
+            } else {
+              return `{
       "questionTitle": "Brief summary",
       "question": "General question text with NO code snippets. Use <br/> for line breaks.",
       "options": {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"},
-      "correctAnswer": ["A"],
+      "correctAnswer": ${correctAnswerExample},
+      "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
-        }
-      })
-      .join(",")}
+            }
+          })
+          .join(",")}
   ]
 }
 **CRITICAL INSTRUCTIONS**:
+- **MULTIPLE CORRECT ANSWER DISTRIBUTION**: Generate EXACTLY ${multipleCorrectCount} questions with "isMultipleCorrect": true (20% of total) and EXACTLY ${singleCorrectCount} questions with "isMultipleCorrect": false
+- For questions with "isMultipleCorrect": true, provide correctAnswer with 2-4 options (e.g., ["A", "B"] or ["A", "C", "D"])
+- For questions with "isMultipleCorrect": false, provide correctAnswer with exactly 1 option (e.g., ["A"])
 - Analyze skillType "${skillType}" and skillName "${skillName}" to determine if this is programming-related
-- IF programming-related: Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers and exactly ${general} general questions (NO code)
+- IF programming-related: Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers in QUESTION TEXT ONLY and exactly ${general} general questions (NO code)
 - IF NOT programming-related: Generate all ${number} questions as general (NO code snippets)
-- Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code - NO markdown fences (\`\`\`)
+- Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code in QUESTION TEXT - NO markdown fences (\`\`\`)
+- **✅ FOR OPTIONS WITH CODE**: Use markdown code formatting - \`\`\`language\ncode\n\`\`\` (for multi-line) or \`code\` (for inline)
+- **🚫 ABSOLUTE RULE**: NEVER use [SNIPPET_START] or [SNIPPET_END] in MCQ options/choices
+- If an option contains code, use markdown: \`\`\`java\ndriver.switchTo().frame("iframeName");\n\`\`\` or \`element.getAttribute("value")\` for inline
+- Options without code should be plain text
 - Verify your distribution matches the decision you made about whether this is a programming skill`;
       break;
 
@@ -1250,15 +1411,15 @@ Return JSON in this format:
   "type": "${questionType}",
   "${questionType}": [
     ${Array(number)
-      .fill(0)
-      .map(
-        (_, idx) => `{
+          .fill(0)
+          .map(
+            (_, idx) => `{
       "questionTitle": "Brief summary",
       "question": "Question text. Use <br/> for line breaks.",
       "maxTime": ${maxTime}
     }`
-      )
-      .join(",")}
+          )
+          .join(",")}
   ]
 }`;
       break;
@@ -1294,64 +1455,62 @@ Return JSON in this format:
   "type": "Programming",
   "Programming": [
     ${Array(programmingCount)
-      .fill(0)
-      .map((_, idx) => {
-        const title =
-          Array.isArray(titles) && titles[idx]
-            ? String(titles[idx]).replace(/"/g, '\\"')
-            : `Coding problem title`;
-        return `{
+          .fill(0)
+          .map((_, idx) => {
+            const title =
+              Array.isArray(titles) && titles[idx]
+                ? String(titles[idx]).replace(/"/g, '\\"')
+                : `Coding problem title`;
+            return `{
       "questionTitle": "${title}",
       "question": "<h3>Problem Description</h3><p>Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><br/><h3>Input Format</h3><p>Input specification with examples. Use <ul><li> for lists.</li></ul></p><br/><h3>Output Format</h3><p>Output specification here.</p><br/><h3>Constraints</h3><ul><li>Constraint 1</li><li>Constraint 2</li></ul><br/><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p><strong>Output:</strong> example output description</p><br/><p><strong>Input:</strong> 5<br/>1 2 3 4 5</p><p><strong>Output:</strong> 15</p>",
       "maxTime": ${maxTime},
       "testCases": [
         ${testCasesConfigForTemplate
-          .map(
-            (tc, tcIdx) => `{
+                .map(
+                  (tc, tcIdx) => `{
           "input": "Actual test input value ${tcIdx + 1}",
           "output": "EXACT expected output value ${tcIdx + 1}",
           "explanation": "Why this output is correct",
           "visible": ${tc.visible !== undefined ? tc.visible : tcIdx < 2},
-          "weightage": ${
-            tc.weightage !== undefined
-              ? tc.weightage
-              : Math.floor(100 / testCasesConfigForTemplate.length)
-          }
+          "weightage": ${tc.weightage !== undefined
+                      ? tc.weightage
+                      : Math.floor(100 / testCasesConfigForTemplate.length)
+                    }
         }`
-          )
-          .join(",")}
+                )
+                .join(",")}
       ],
       "supportedLanguages": ${JSON.stringify(
-        supportedLanguagesInfoForTemplate.map((lang) => ({
-          languageId: lang.languageId,
-          languageName: lang.languageName,
-          language: lang.languageName.split(" (")[0],
-          version: lang.languageName.includes("(")
-            ? lang.languageName.split("(")[1].replace(")", "")
-            : "",
-        }))
-      )},
+                  supportedLanguagesInfoForTemplate.map((lang) => ({
+                    languageId: lang.languageId,
+                    languageName: lang.languageName,
+                    language: lang.languageName.split(" (")[0],
+                    version: lang.languageName.includes("(")
+                      ? lang.languageName.split("(")[1].replace(")", "")
+                      : "",
+                  }))
+                )},
       "supportedLanguageNames": ${JSON.stringify(
-        supportedLanguageNamesForTemplate
-      )},
+                  supportedLanguageNamesForTemplate
+                )},
       "supportedLanguageIds": ${JSON.stringify(
-        supportedLanguageIdsForTemplate
-      )},
+                  supportedLanguageIdsForTemplate
+                )},
       "boilerplateCode": {
-        ${
-          supportedLanguageNamesForTemplate.length > 0
-            ? supportedLanguageNamesForTemplate
-                .map(
-                  (langName) =>
-                    `"${langName}": "CRITICAL: Generate ONLY boilerplate code with \\\\n for newlines. Include: imports/headers, input reading code (Scanner/readline/input()), basic structure (main function/class), TODO comment (e.g., '// TODO: Implement the solution here')"`
-                )
-                .join(",")
-            : ""
-        }
+        ${supportedLanguageNamesForTemplate.length > 0
+                ? supportedLanguageNamesForTemplate
+                  .map(
+                    (langName) =>
+                      `"${langName}": "CRITICAL: Generate ONLY boilerplate code with \\\\n for newlines. Include: imports/headers, input reading code (Scanner/readline/input()), basic structure (main function/class), TODO comment (e.g., '// TODO: Implement the solution here')"`
+                  )
+                  .join(",")
+                : ""
+              }
       }
     }`;
-      })
-      .join(",")}
+          })
+          .join(",")}
   ]
 }`;
       break;
@@ -1773,8 +1932,7 @@ const createConsumer = async (id) => {
               geminiError
             );
             throw new Error(
-              `Gemini API error (titles): ${
-                geminiError.message || "Unknown error"
+              `Gemini API error (titles): ${geminiError.message || "Unknown error"
               }`
             );
           }
@@ -1896,8 +2054,7 @@ const createConsumer = async (id) => {
                   geminiError
                 );
                 throw new Error(
-                  `Gemini API error (Programming batch ${batchIndex}): ${
-                    geminiError.message || "Unknown error"
+                  `Gemini API error (Programming batch ${batchIndex}): ${geminiError.message || "Unknown error"
                   }`
                 );
               }
@@ -2004,8 +2161,6 @@ const createConsumer = async (id) => {
             questionsArray
           );
 
-          console.log("Prompt:", prompt);
-
           let result, response, candidate;
           try {
             result = await retryGeminiCall(
@@ -2071,6 +2226,7 @@ const createConsumer = async (id) => {
                     let processedQuestion = question.question;
 
                     // STEP 1: Convert [SNIPPET_START:lang]...[SNIPPET_END] markers to ```lang\n...\n```
+                    // PRESERVE MARKDOWN - Frontend (QuestionPreview, SunTextEditor) supports markdown rendering
                     processedQuestion = processedQuestion.replace(
                       /\[SNIPPET_START:(\w+)\]([\s\S]*?)\[SNIPPET_END\]/gi,
                       (match, lang, code) => {
@@ -2084,7 +2240,32 @@ const createConsumer = async (id) => {
                       }
                     );
 
-                    // STEP 2: Fix already-fenced code blocks
+                    // STEP 1.5: Remove orphaned [SNIPPET_START] markers without [SNIPPET_END]
+                    // This handles cases where AI generates incomplete snippet markers like:
+                    // "[SNIPPET_START:java] // comment" without [SNIPPET_END]
+                    // Match [SNIPPET_START:lang] followed by content until next marker or end
+                    processedQuestion = processedQuestion.replace(
+                      /\[SNIPPET_START:(\w+)\]([^\[]*?)(?=\[SNIPPET_START:|\[SNIPPET_END\]|$)/gi,
+                      (match, lang, content) => {
+                        // Only process if there's actual content (not just whitespace)
+                        const trimmedContent = content ? content.trim() : "";
+                        if (trimmedContent) {
+                          // Convert orphaned marker to markdown code block
+                          const cleanedCode = content
+                            .replace(/<br\s*\/?>/gi, "\n")
+                            .replace(/\r\n/g, "\n")
+                            .replace(/\r/g, "\n")
+                            .trim();
+                          const language = (lang || "plaintext").toLowerCase();
+                          return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                        }
+                        // If no meaningful content, just remove the marker
+                        return "";
+                      }
+                    );
+
+                    // STEP 2: Normalize already-fenced code blocks
+                    // PRESERVE MARKDOWN - Frontend supports markdown rendering
                     processedQuestion = processedQuestion.replace(
                       /```(\w+)?\s*([\s\S]*?)```/g,
                       (match, lang, code) => {
@@ -2100,6 +2281,115 @@ const createConsumer = async (id) => {
 
                     question.question = processedQuestion;
                   }
+
+                  // STEP 3: Clean up options - convert [SNIPPET_START] markers to markdown format
+                  if (question.options && typeof question.options === "object") {
+                    Object.keys(question.options).forEach((key) => {
+                      if (typeof question.options[key] === "string") {
+                        let optionText = question.options[key];
+
+                        // STEP 3.1: Convert [SNIPPET_START:lang]...[/SNIPPET_END] markers to markdown code fences
+                        // PRESERVE MARKDOWN - Frontend supports markdown rendering
+                        optionText = optionText.replace(
+                          /\[SNIPPET_START:([^\]]+)\]([\s\S]*?)\[SNIPPET_END\]/gi,
+                          (match, lang, codeContent) => {
+                            const language = (lang || "plaintext").toLowerCase();
+                            const cleanedCode = codeContent
+                              .replace(/<br\s*\/?>/gi, "\n")
+                              .replace(/\r\n/g, "\n")
+                              .replace(/\r/g, "\n")
+                              .trim();
+                            // Convert to markdown code fence - PRESERVE BACKTICKS for frontend markdown rendering
+                            return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                          }
+                        );
+
+                        // STEP 3.2: Remove orphaned [SNIPPET_START] markers in options (without [SNIPPET_END])
+                        // Convert to markdown code blocks
+                        optionText = optionText.replace(
+                          /\[SNIPPET_START:(\w+)\]([^\[]*?)(?=\[SNIPPET_START:|\[SNIPPET_END\]|$)/gi,
+                          (match, lang, content) => {
+                            if (content && content.trim()) {
+                              const cleanedCode = content
+                                .replace(/<br\s*\/?>/gi, "\n")
+                                .replace(/\r\n/g, "\n")
+                                .replace(/\r/g, "\n")
+                                .trim();
+                              const language = (lang || "plaintext").toLowerCase();
+                              // Convert to markdown code fence - PRESERVE BACKTICKS
+                              return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                            }
+                            return "";
+                          }
+                        );
+
+                        // STEP 3.3: Normalize existing markdown code fences (ensure proper formatting)
+                        // PRESERVE ALL BACKTICKS - Frontend SunTextEditor supports markdown
+                        optionText = optionText.replace(
+                          /```(\w+)?\s*([\s\S]*?)```/g,
+                          (match, lang, codeContent) => {
+                            const language = lang || "plaintext";
+                            const cleanedCode = codeContent
+                              .replace(/<br\s*\/?>/gi, "\n")
+                              .replace(/\r\n/g, "\n")
+                              .replace(/\r/g, "\n")
+                              .trim();
+                            // PRESERVE BACKTICKS - Frontend will render markdown
+                            return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
+                          }
+                        );
+
+                        // STEP 3.4: Clean up HTML tags outside of code blocks
+                        // Only replace <br/> that are NOT inside markdown code fences
+                        // This preserves newlines within code blocks
+                        const codeBlockPattern = /```[\s\S]*?```/g;
+                        const codeBlocks = [];
+                        let blockIndex = 0;
+
+                        // Extract code blocks temporarily
+                        optionText = optionText.replace(codeBlockPattern, (match) => {
+                          codeBlocks.push(match);
+                          return `__CODE_BLOCK_${blockIndex++}__`;
+                        });
+
+                        // Clean HTML tags outside code blocks
+                        optionText = optionText.replace(/<br\s*\/?>/gi, " ");
+                        optionText = optionText.replace(/&nbsp;/g, " ");
+
+                        // Restore code blocks
+                        codeBlocks.forEach((block, idx) => {
+                          optionText = optionText.replace(`__CODE_BLOCK_${idx}__`, block);
+                        });
+
+                        // CRITICAL: Preserve all markdown formatting including backticks
+                        // Frontend components (QuestionPreview, QuestionDrawer, SunTextEditor) support markdown rendering
+                        question.options[key] = optionText.trim();
+                      }
+                    });
+                  }
+
+                  // STEP 4: Ensure isMultipleCorrect field is set correctly
+                  // If not present, determine based on correctAnswer array length
+                  if (question.isMultipleCorrect === undefined || question.isMultipleCorrect === null) {
+                    const correctAnswerCount = Array.isArray(question.correctAnswer) ? question.correctAnswer.length : 0;
+                    question.isMultipleCorrect = correctAnswerCount > 1;
+                  }
+
+                  // Validate correctAnswer matches isMultipleCorrect
+                  const correctAnswerCount = Array.isArray(question.correctAnswer) ? question.correctAnswer.length : 0;
+                  if (question.isMultipleCorrect && correctAnswerCount < 2) {
+                    console.warn(
+                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=true but only ${correctAnswerCount} correct answer(s). Expected 2-4.`
+                    );
+                  } else if (!question.isMultipleCorrect && correctAnswerCount !== 1) {
+                    console.warn(
+                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=false but ${correctAnswerCount} correct answer(s). Expected exactly 1.`
+                    );
+                    // Auto-fix: take first answer if multiple provided
+                    if (correctAnswerCount > 1) {
+                      question.correctAnswer = [question.correctAnswer[0]];
+                    }
+                  }
                 } catch (mcqError) {
                   console.error(
                     `❌ Error processing MCQ question in Consumer ${id}:`,
@@ -2107,6 +2397,52 @@ const createConsumer = async (id) => {
                   );
                 }
               });
+
+              // STEP 5: Ensure 20% distribution of multiple correct questions
+              const totalQuestions = aiResponse.MCQ.length;
+              const expectedMultipleCorrect = Math.max(1, Math.round(totalQuestions * 0.2));
+              const actualMultipleCorrect = aiResponse.MCQ.filter(q => q.isMultipleCorrect === true).length;
+
+              if (actualMultipleCorrect !== expectedMultipleCorrect) {
+                console.warn(
+                  `⚠️ MCQ multiple correct distribution: Expected ${expectedMultipleCorrect} (20%), got ${actualMultipleCorrect}. Adjusting...`
+                );
+
+                // Sort questions by current isMultipleCorrect status
+                const multipleCorrectQuestions = aiResponse.MCQ.filter(q => q.isMultipleCorrect === true);
+                const singleCorrectQuestions = aiResponse.MCQ.filter(q => !q.isMultipleCorrect);
+
+                // Adjust to meet 20% requirement
+                if (actualMultipleCorrect < expectedMultipleCorrect) {
+                  // Need more multiple correct - convert some single correct to multiple correct
+                  const needed = expectedMultipleCorrect - actualMultipleCorrect;
+                  for (let i = 0; i < Math.min(needed, singleCorrectQuestions.length); i++) {
+                    const q = singleCorrectQuestions[i];
+                    q.isMultipleCorrect = true;
+                    // If only one correct answer, add another valid option (if available)
+                    if (q.correctAnswer && q.correctAnswer.length === 1 && q.options) {
+                      const correctKey = q.correctAnswer[0];
+                      const optionKeys = Object.keys(q.options);
+                      const otherOptions = optionKeys.filter(key => key !== correctKey);
+                      if (otherOptions.length > 0) {
+                        // Add one more correct answer (randomly or first available)
+                        q.correctAnswer.push(otherOptions[0]);
+                      }
+                    }
+                  }
+                } else if (actualMultipleCorrect > expectedMultipleCorrect) {
+                  // Need fewer multiple correct - convert some to single correct
+                  const excess = actualMultipleCorrect - expectedMultipleCorrect;
+                  for (let i = 0; i < Math.min(excess, multipleCorrectQuestions.length); i++) {
+                    const q = multipleCorrectQuestions[i];
+                    q.isMultipleCorrect = false;
+                    // Keep only first correct answer
+                    if (q.correctAnswer && q.correctAnswer.length > 1) {
+                      q.correctAnswer = [q.correctAnswer[0]];
+                    }
+                  }
+                }
+              }
             }
 
             // Process Programming questions: validate test cases and boilerplate code
@@ -2119,20 +2455,16 @@ const createConsumer = async (id) => {
                       // Ensure input and output are present
                       if (!tc.input || tc.input.trim() === "") {
                         console.warn(
-                          `⚠️ Test case ${
-                            index + 1
-                          } missing input for question: ${
-                            question.questionTitle
+                          `⚠️ Test case ${index + 1
+                          } missing input for question: ${question.questionTitle
                           }`
                         );
                         tc.input = "1"; // Default fallback
                       }
                       if (!tc.output || tc.output.trim() === "") {
                         console.warn(
-                          `⚠️ Test case ${
-                            index + 1
-                          } missing output for question: ${
-                            question.questionTitle
+                          `⚠️ Test case ${index + 1
+                          } missing output for question: ${question.questionTitle
                           }`
                         );
                         tc.output = "0"; // Default fallback
