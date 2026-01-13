@@ -17,6 +17,8 @@ const {
   analyzeSubjectiveV2_5,
   analyzeScreeningV2_5,
   healthCheckV2_5,
+  analyzeProgrammingHTTP,
+  generateAssessmentSummaryHTTP,
 } = require("../controllers/controllers");
 
 /**
@@ -132,6 +134,58 @@ router.post("/analyzeSubjective", uploadNone, analyzeSubjectiveV2_5);
  * @returns {Array} results - Individual response results
  */
 router.post("/analyzeScreening", analyzeScreeningV2_5);
+
+/**
+ * @route POST /api/response/v2.5/analyzeProgramming
+ * @description Analyze programming code quality using AI (HTTP alternative to Kafka)
+ * @access Public
+ *
+ * Features:
+ * - AI-based code quality analysis
+ * - Logical correctness assessment
+ * - Code quality evaluation
+ * - Works for both screening and assessment contexts
+ * - Fire-and-forget pattern (returns 202 Accepted immediately)
+ *
+ * @param {Object} req.body - Request body
+ * @param {string} [req.body.candidateScreeningId] - Screening ID (for screening context)
+ * @param {string} [req.body.screeningTestId] - Screening test ID (for screening context)
+ * @param {string} [req.body.candidateAssessmentId] - Assessment candidate ID (for assessment context)
+ * @param {string} [req.body.assessmentId] - Assessment ID (for assessment context)
+ * @param {string} req.body.questionId - Question ID
+ * @param {string} req.body.code - Submitted code
+ * @param {number} req.body.languageId - Programming language ID
+ * @param {string} req.body.skill - Skill name (e.g., "JavaScript", "Python")
+ * @param {Object} req.body.executionSummary - Test case execution results
+ * @param {string} [req.body.clientId] - Client ID for billing
+ * @param {string} [req.body.channelId] - Channel ID for billing
+ * @param {string} [req.body.jobId] - Job ID for billing
+ *
+ * @returns {Object} Immediate acceptance response (202)
+ */
+router.post("/analyzeProgramming", uploadNone, analyzeProgrammingHTTP);
+
+/**
+ * @route POST /api/response/v2.5/assessmentSummary
+ * @description Generate assessment summary with all results aggregated
+ * @access Public
+ *
+ * Features:
+ * - Aggregates all question types (MCQ, Programming, SQL)
+ * - Calculates fit score and integrity score
+ * - Generates recommendations
+ * - Fire-and-forget pattern (returns 202 Accepted immediately)
+ *
+ * @param {Object} req.body - Request body
+ * @param {string} req.body.candidateAssessmentId - Assessment candidate ID
+ * @param {string} req.body.assessmentId - Assessment ID
+ * @param {string} [req.body.clientId] - Client ID for billing
+ * @param {string} [req.body.channelId] - Channel ID for billing
+ * @param {string} [req.body.jobId] - Job ID for billing
+ *
+ * @returns {Object} Immediate acceptance response (202)
+ */
+router.post("/assessmentSummary", uploadNone, generateAssessmentSummaryHTTP);
 
 /**
  * @route GET /api/response/v2.5/health

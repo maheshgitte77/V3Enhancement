@@ -750,27 +750,45 @@ const saveToDatabase = async (
 };
 
 /**
- * Save programming analysis to screeningprogramminganalyses collection
- * (Same structure as old screening-service)
+ * Save programming analysis to appropriate collection based on context
+ * - Screening: screeningprogramminganalyses
+ * - Assessment: assessmentprogramminganalyses
  */
 const saveProgrammingAnalysis = async ({
   candidateScreeningId,
   screeningTestId,
+  candidateAssessmentId,
+  assessmentId,
   questionId,
   skill,
   analysis,
   tokenUsage,
   processingCost,
+  contextType,
 }) => {
   const mongoose = require("mongoose");
   const { ObjectId } = mongoose.Types;
 
+  // Detect context if not explicitly provided
+  const isAssessment = contextType === "assessment" || !!candidateAssessmentId;
+  const collectionName = isAssessment
+    ? "assessmentprogramminganalyses"
+    : "screeningprogramminganalyses";
+
   // Use native MongoDB for this collection
   const db = mongoose.connection.db;
 
+  // Build document based on context
   const doc = {
-    candidateScreeningId: candidateScreeningId,
-    screeningTestId: new ObjectId(screeningTestId),
+    ...(isAssessment
+      ? {
+          candidateAssessmentId: new ObjectId(candidateAssessmentId),
+          assessmentId: new ObjectId(assessmentId),
+        }
+      : {
+          candidateScreeningId: candidateScreeningId,
+          screeningTestId: new ObjectId(screeningTestId),
+        }),
     questionId: new ObjectId(questionId),
     skill,
     ...analysis, // logicalCorrectness, codeQuality, overallAssessment
@@ -787,12 +805,12 @@ const saveProgrammingAnalysis = async ({
     updatedAt: new Date(),
   };
 
-  const result = await db
-    .collection("screeningprogramminganalyses")
-    .insertOne(doc);
+  const result = await db.collection(collectionName).insertOne(doc);
 
-  logger.info("Programming analysis saved to database", {
+  logger.info(`Programming analysis saved to ${collectionName}`, {
     candidateScreeningId,
+    candidateAssessmentId,
+    contextType: isAssessment ? "assessment" : "screening",
     questionId,
     analysisId: result.insertedId,
   });
@@ -801,68 +819,128 @@ const saveProgrammingAnalysis = async ({
 };
 
 /**
- * Update programming question with analysisId
+ * Update programming question with analysisId (context-aware)
+ * - Screening: candidatescreeningresults collection
+ * - Assessment: candidateassessmentresults collection
  */
 const updateProgrammingQuestionAnalysis = async ({
   candidateScreeningId,
+  candidateAssessmentId,
   skill,
   questionId,
   analysisId,
   processingCost,
+  contextType,
 }) => {
   const mongoose = require("mongoose");
   const { ObjectId } = mongoose.Types;
   const db = mongoose.connection.db;
 
-  // Convert candidateScreeningId to ObjectId if it's a string
-  const candidateScreeningObjectId =
-    typeof candidateScreeningId === "string"
-      ? new ObjectId(candidateScreeningId)
-      : candidateScreeningId;
+  // Detect context if not explicitly provided
+  const isAssessment = contextType === "assessment" || !!candidateAssessmentId;
+  const collectionName = isAssessment
+    ? "candidateassessmentresults"
+    : "candidatescreeningresults";
+  const idField = isAssessment
+    ? "candidateAssessmentId"
+    : "candidateScreeningId";
+  const idValue = isAssessment ? candidateAssessmentId : candidateScreeningId;
+
+  // Convert ID to ObjectId if it's a string
+  const idObjectId =
+    typeof idValue === "string" ? new ObjectId(idValue) : idValue;
 
   // Fetch current document
-  const doc = await db.collection("candidatescreeningresults").findOne({
-    candidateScreeningId: candidateScreeningObjectId,
+  const doc = await db.collection(collectionName).findOne({
+    [idField]: idObjectId,
   });
 
   if (!doc) {
-    logger.error(
-      "Candidate screening result not found for programming update",
-      {
-        candidateScreeningId,
-        candidateScreeningIdType: typeof candidateScreeningId,
-      }
-    );
+    logger.error(`${collectionName} not found for programming update`, {
+      [idField]: idValue,
+      idType: typeof idValue,
+      contextType: isAssessment ? "assessment" : "screening",
+    });
     return;
   }
 
   // Update the specific question
-  const updatedSkills = doc.skills.map((skillItem) => {
-    if (skillItem.skill === skill && skillItem.programming) {
-      skillItem.programming = skillItem.programming.map((question) => {
-        if (question._id.toString() === questionId.toString()) {
-          question.programmingAnalysisId = analysisId;
-          question.programmingAnalysisTimestamp = new Date();
-          question.processingCost = processingCost;
+  // For assessments, structure is: skills[].programmingQuestions.{easy/medium/hard}Questions[]
+  // For screenings, structure is: skills[].programming[]
+  const updatedSkills =
+    doc.testQuestions?.skills?.map((skillItem) => {
+      if (isAssessment) {
+        // Assessment structure
+        if (skillItem.skill?.name === skill && skillItem.programmingQuestions) {
+          ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
+            (difficulty) => {
+              if (skillItem.programmingQuestions[difficulty]) {
+                skillItem.programmingQuestions[difficulty] =
+                  skillItem.programmingQuestions[difficulty].map((question) => {
+                    if (question._id?.toString() === questionId.toString()) {
+                      question.aiAnalysis = {
+                        analysisId,
+                        timestamp: new Date(),
+                      };
+                      question.aiAnalysisTimestamp = new Date();
+                      question.processingCost = processingCost;
+                    }
+                    return question;
+                  });
+              }
+            }
+          );
         }
-        return question;
-      });
-    }
-    return skillItem;
-  });
+      } else {
+        // Screening structure
+        if (skillItem.skill === skill && skillItem.programming) {
+          skillItem.programming = skillItem.programming.map((question) => {
+            if (question._id?.toString() === questionId.toString()) {
+              question.programmingAnalysisId = analysisId;
+              question.programmingAnalysisTimestamp = new Date();
+              question.processingCost = processingCost;
+            }
+            return question;
+          });
+        }
+      }
+      return skillItem;
+    }) ||
+    doc.skills?.map((skillItem) => {
+      // Fallback for older schema structure
+      if (skillItem.skill === skill && skillItem.programming) {
+        skillItem.programming = skillItem.programming.map((question) => {
+          if (question._id?.toString() === questionId.toString()) {
+            question.programmingAnalysisId = analysisId;
+            question.programmingAnalysisTimestamp = new Date();
+            question.processingCost = processingCost;
+          }
+          return question;
+        });
+      }
+      return skillItem;
+    });
 
+  // Update document
+  const updateField = doc.testQuestions?.skills
+    ? "testQuestions.skills"
+    : "skills";
   await db
-    .collection("candidatescreeningresults")
+    .collection(collectionName)
     .updateOne(
-      { candidateScreeningId: candidateScreeningObjectId },
-      { $set: { skills: updatedSkills } }
+      { [idField]: idObjectId },
+      { $set: { [updateField]: updatedSkills } }
     );
 
-  logger.info("Programming question updated with analysisId", {
-    candidateScreeningId,
-    questionId,
-    analysisId,
-  });
+  logger.info(
+    `Programming question updated with analysisId in ${collectionName}`,
+    {
+      [idField]: idValue,
+      contextType: isAssessment ? "assessment" : "screening",
+      questionId,
+      analysisId,
+    }
+  );
 };
 
 module.exports = {

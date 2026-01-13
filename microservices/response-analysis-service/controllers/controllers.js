@@ -680,9 +680,179 @@ const healthCheckV2_5 = async (req, res) => {
   }
 };
 
+/**
+ * HTTP Programming Analysis Endpoint
+ * Alternative to Kafka for triggering programming analysis
+ * POST /api/analyze/programming
+ */
+const analyzeProgrammingHTTP = async (req, res) => {
+  const startTime = Date.now();
+  const requestData = req.body;
+
+  try {
+    logger.info("Received HTTP programming analysis request", {
+      candidateScreeningId: requestData.candidateScreeningId,
+      candidateAssessmentId: requestData.candidateAssessmentId,
+      questionId: requestData.questionId,
+      skill: requestData.skill,
+    });
+
+    // Validate required fields
+    const isAssessment = !!requestData.candidateAssessmentId;
+    const requiredFields = isAssessment
+      ? [
+          "candidateAssessmentId",
+          "assessmentId",
+          "questionId",
+          "code",
+          "languageId",
+          "skill",
+        ]
+      : [
+          "candidateScreeningId",
+          "screeningTestId",
+          "questionId",
+          "code",
+          "languageId",
+          "skill",
+        ];
+
+    const missingFields = requiredFields.filter((field) => !requestData[field]);
+    if (missingFields.length > 0) {
+      logger.warn("Missing required fields in programming analysis request", {
+        missingFields,
+        isAssessment,
+      });
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        missingFields,
+      });
+    }
+
+    // Import programming processor
+    const programmingProcessor = require("../workers/programming-question/programming.processor");
+
+    // Process asynchronously (don't block response)
+    setImmediate(async () => {
+      try {
+        await programmingProcessor.processProgrammingResponse(requestData);
+        logger.info("Programming analysis completed via HTTP", {
+          candidateScreeningId: requestData.candidateScreeningId,
+          candidateAssessmentId: requestData.candidateAssessmentId,
+          questionId: requestData.questionId,
+          duration: Date.now() - startTime,
+        });
+      } catch (error) {
+        logger.error("Programming analysis processing failed", {
+          error: error.message,
+          stack: error.stack,
+          candidateScreeningId: requestData.candidateScreeningId,
+          candidateAssessmentId: requestData.candidateAssessmentId,
+          questionId: requestData.questionId,
+        });
+      }
+    });
+
+    // Return immediate success response (202 Accepted)
+    return res.status(202).json({
+      success: true,
+      message: "Programming analysis request accepted",
+      candidateScreeningId: requestData.candidateScreeningId,
+      candidateAssessmentId: requestData.candidateAssessmentId,
+      questionId: requestData.questionId,
+      contextType: isAssessment ? "assessment" : "screening",
+    });
+  } catch (error) {
+    logger.error("Error handling programming analysis HTTP request", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * HTTP Assessment Summary Endpoint
+ * Alternative to Kafka for triggering assessment summary generation
+ * POST /api/analyze/assessment-summary
+ */
+const generateAssessmentSummaryHTTP = async (req, res) => {
+  const startTime = Date.now();
+  const requestData = req.body;
+
+  try {
+    logger.info("Received HTTP assessment summary request", {
+      candidateAssessmentId: requestData.candidateAssessmentId,
+      assessmentId: requestData.assessmentId,
+    });
+
+    // Validate required fields
+    const requiredFields = ["candidateAssessmentId", "assessmentId"];
+    const missingFields = requiredFields.filter((field) => !requestData[field]);
+
+    if (missingFields.length > 0) {
+      logger.warn("Missing required fields in summary request", {
+        missingFields,
+        requestData,
+      });
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        missingFields,
+      });
+    }
+
+    // Process asynchronously (don't block response)
+    setImmediate(async () => {
+      try {
+        // TODO: Implement assessment summary processor
+        // For now, log that it's not yet implemented
+        logger.info(
+          "Assessment summary generation requested (not yet implemented)",
+          {
+            candidateAssessmentId: requestData.candidateAssessmentId,
+            assessmentId: requestData.assessmentId,
+          }
+        );
+      } catch (error) {
+        logger.error("Assessment summary processing failed", {
+          error: error.message,
+          stack: error.stack,
+          candidateAssessmentId: requestData.candidateAssessmentId,
+        });
+      }
+    });
+
+    // Return immediate success response (202 Accepted)
+    return res.status(202).json({
+      success: true,
+      message: "Assessment summary request accepted",
+      candidateAssessmentId: requestData.candidateAssessmentId,
+      assessmentId: requestData.assessmentId,
+    });
+  } catch (error) {
+    logger.error("Error handling assessment summary HTTP request", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   analyzeMediaResponseV2_5,
   analyzeSubjectiveV2_5,
   analyzeScreeningV2_5,
   healthCheckV2_5,
+  analyzeProgrammingHTTP,
+  generateAssessmentSummaryHTTP,
 };

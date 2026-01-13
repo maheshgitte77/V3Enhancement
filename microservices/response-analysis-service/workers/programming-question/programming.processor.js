@@ -79,7 +79,7 @@ const getLanguageName = (languageId) => {
 
 /**
  * Process programming response - AI code quality analysis only
- * Score is already determined by test case execution in screening-service
+ * Score is already determined by test case execution in screening/assessment service
  *
  * @param {Object} responseData - Programming question data from Kafka
  * @returns {Promise<Object>} Processing result with programmingAnalysisId
@@ -87,9 +87,18 @@ const getLanguageName = (languageId) => {
 const processProgrammingResponse = async (responseData) => {
   const startTime = Date.now();
 
+  // Detect context: screening or assessment
+  const isAssessment = !!responseData.candidateAssessmentId;
+  const contextType = isAssessment ? "assessment" : "screening";
+
   const {
+    // Screening context
     candidateScreeningId,
     screeningTestId,
+    // Assessment context
+    candidateAssessmentId,
+    assessmentId,
+    // Common fields
     questionId,
     code,
     languageId,
@@ -98,12 +107,14 @@ const processProgrammingResponse = async (responseData) => {
     questionTitle,
     questionDescription,
     testCases,
-    executionSummary, // Already has: passed, total, earnedScore, maxScore from screening-service
+    executionSummary, // Already has: passed, total, earnedScore, maxScore from execution service
   } = responseData;
 
   logger.info("Starting programming code quality analysis", {
     questionId,
     candidateScreeningId,
+    candidateAssessmentId,
+    contextType,
     languageId,
     skill,
     hasExecutionSummary: !!executionSummary,
@@ -149,24 +160,29 @@ const processProgrammingResponse = async (responseData) => {
         isBoilerplateOnly: true,
       };
 
-      // Save boilerplate placeholder to database
+      // Save boilerplate placeholder to database (context-aware)
       const analysisId = await databaseHandler.saveProgrammingAnalysis({
         candidateScreeningId,
         screeningTestId,
+        candidateAssessmentId,
+        assessmentId,
         questionId,
         skill,
         analysis: boilerplateAnalysis,
         tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         processingCost: { totalCost: 0, currency: "USD" },
+        contextType, // Pass context type to handler
       });
 
-      // Update question with analysisId
+      // Update question with analysisId (context-aware)
       await databaseHandler.updateProgrammingQuestionAnalysis({
         candidateScreeningId,
+        candidateAssessmentId,
         skill,
         questionId,
         analysisId,
         processingCost: { totalCost: 0, currency: "USD" },
+        contextType, // Pass context type to handler
       });
 
       return {
@@ -198,10 +214,12 @@ const processProgrammingResponse = async (responseData) => {
       totalTokens: 0,
     };
 
-    // Save AI analysis to database
+    // Save AI analysis to database (context-aware)
     const analysisId = await databaseHandler.saveProgrammingAnalysis({
       candidateScreeningId,
       screeningTestId,
+      candidateAssessmentId,
+      assessmentId,
       questionId,
       skill,
       analysis: {
@@ -211,15 +229,18 @@ const processProgrammingResponse = async (responseData) => {
       },
       tokenUsage,
       processingCost,
+      contextType, // Pass context type to handler
     });
 
-    // Update question with analysisId
+    // Update question with analysisId (context-aware)
     await databaseHandler.updateProgrammingQuestionAnalysis({
       candidateScreeningId,
+      candidateAssessmentId,
       skill,
       questionId,
       analysisId,
       processingCost,
+      contextType, // Pass context type to handler
     });
 
     const totalDuration = Date.now() - startTime;
@@ -227,6 +248,8 @@ const processProgrammingResponse = async (responseData) => {
     logger.info("Programming analysis completed successfully", {
       questionId,
       candidateScreeningId,
+      candidateAssessmentId,
+      contextType,
       totalDuration,
       analysisId: analysisId?.toString(),
       logicalCorrectnessScore: aiAnalysis.logicalCorrectness?.score,
