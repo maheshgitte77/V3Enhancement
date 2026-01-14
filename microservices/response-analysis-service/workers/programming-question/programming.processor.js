@@ -14,6 +14,9 @@ let logger = console;
 let aiExecutor = null;
 let databaseHandler = null;
 
+// Import Credit Service Client for billing
+const CreditServiceClient = require("../../utils/creditServiceClient");
+
 /**
  * Initialize programming processor with dependencies
  */
@@ -242,6 +245,48 @@ const processProgrammingResponse = async (responseData) => {
       processingCost,
       contextType, // Pass context type to handler
     });
+
+    // Deduct credits for AI programming analysis (non-blocking)
+    if (responseData.clientId && tokenUsage.totalTokens > 0) {
+      try {
+        await CreditServiceClient.deductAiUsage({
+          clientId: responseData.clientId,
+          modelId: "gemini-2.0-flash",
+          itemKey: "PROGRAMMING_ANALYSIS",
+          serviceKey: "AI_PROGRAMMING_ANALYSIS",
+          tokens: tokenUsage.totalTokens,
+          inputTokens: tokenUsage.inputTokens,
+          outputTokens: tokenUsage.outputTokens,
+          referenceId: `prog-analysis-${
+            isAssessment ? candidateAssessmentId : candidateScreeningId
+          }-${questionId}`,
+          meta: {
+            questionId,
+            skill,
+            contextType,
+            ...(isAssessment && { candidateAssessmentId, assessmentId }),
+            ...(!isAssessment && { candidateScreeningId, screeningTestId }),
+          },
+          jobId: responseData.jobId,
+          channelId: responseData.channelId,
+          assessmentId: isAssessment ? assessmentId : undefined,
+          screeningAssessmentId: !isAssessment ? screeningTestId : undefined,
+        });
+        logger.info("Credit deducted for programming analysis", {
+          questionId,
+          contextType,
+          tokens: tokenUsage.totalTokens,
+          clientId: responseData.clientId,
+        });
+      } catch (creditError) {
+        logger.error("Failed to deduct credits for programming analysis", {
+          error: creditError.message,
+          questionId,
+          contextType,
+        });
+        // Non-blocking - analysis already saved
+      }
+    }
 
     const totalDuration = Date.now() - startTime;
 
