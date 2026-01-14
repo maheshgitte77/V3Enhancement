@@ -882,6 +882,7 @@ const updateProgrammingQuestionAnalysis = async ({
                         analysisId,
                         timestamp: new Date(),
                       };
+                      question.programmingAnalysisId = analysisId;
                       question.aiAnalysisTimestamp = new Date();
                       question.processingCost = processingCost;
                     }

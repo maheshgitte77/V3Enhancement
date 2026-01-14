@@ -1082,6 +1082,93 @@ Please provide a comprehensive analysis in the following JSON format:
 Be thorough but concise. Focus on logical correctness, algorithm efficiency, and code quality. Remember: IGNORE ALL COMMENTS - only evaluate the executable code. Do NOT include a grade field.`;
 };
 
+/**
+ * Generate Assessment Summary Prompt
+ */
+const generateAssessmentSummaryPrompt = (
+  candidateFitScore,
+  assessmentResult,
+  scores,
+  recommendation,
+  integrityScore,
+  evidenceStrength = null
+) => {
+  let prompt = `
+You are an HR Analytics AI tasked with creating concise, decision-oriented candidate assessment summaries. Analyze the assessment data and provide clear, actionable insights for hiring decisions.
+
+**ASSESSMENT SUMMARY REQUIREMENTS:**
+Generate exactly 3 concise, professional bullet points:
+1. **Overall Performance Overview**: One sentence about overall candidate performance and assessment integrity across MCQ and Programming sections.
+2. **MCQ Performance Summary**: Specific performance on the MCQ section, highlighting strengths or weaknesses in theoretical knowledge.
+3. **Programming Performance Summary**: Specific performance on the Programming section, covering logic, code quality, and test case success.
+
+Each point should be:
+- Maximum 25 words
+- Factual and specific (mention scores, behaviors, specific technical skills)
+- Focused on what HR needs to know for decision-making
+- Professional tone without overly technical jargon
+
+**FIT SCORE POINTER REQUIREMENTS:**
+Based on candidate's overall fit score (0-100), categorize and provide exactly 3 structured responses:
+
+**Fit Categories:**
+- **Top Fit (85-100)**: Advanced skills, confident responses, job-ready → Recommend fast-track/offer
+- **Good Fit (65-84)**: Role-aligned, few improvable areas → Recommend interview
+- **Trainable Fit (45-64)**: Shows potential but needs structured support → Consider for junior/training roles  
+- **Not Fit (0-44)**: Major skill gaps or integrity issues → Recommend rejection
+
+**Format for fitScorePointers:**
+1. **✅ Fit for Role Type**: One clear sentence stating if candidate fits the role and recommended action
+2. **⚡ Primary Strength**: One specific strength observed (theoretical knowledge OR practical programming)
+3. **🛠️ Area to Watch**: One brief area for improvement or concern (technical gaps or integrity patterns)
+
+**EVALUATION DATA:**
+- **Candidate Fit Score**: ${candidateFitScore}%
+- **Integrity Score**: ${integrityScore}%
+- **MCQ Score**: ${scores.mcqScore !== null ? scores.mcqScore + "%" : "N/A"}
+- **Programming Test Case Score**: ${
+    scores.programmingTestCaseScore !== null
+      ? scores.programmingTestCaseScore + "%"
+      : "N/A"
+  }
+- **Programming Code Quality Score**: ${
+    scores.programmingCodeQualityScore !== null
+      ? scores.programmingCodeQualityScore + "%"
+      : "N/A"
+  }
+- **Final Recommendation (Preliminary)**: ${recommendation}
+
+**AI INSTRUCTION FOR SUMMARY:**
+- Base your analysis on the provided scores and integrity indicators.
+- If MCQ scores are high but programming is low, highlight the gap between theory and practice.
+- If integrity score is low, mentions the "Area to Watch" accordingly.
+- Ensure the summary reflects the specific technical context of the assessment.
+
+**Response JSON Format:**
+{
+  "assessmentSummary": [
+    "Overall performance overview (max 25 words)",
+    "MCQ performance summary (max 25 words)", 
+    "Programming performance summary (max 25 words)"
+  ],
+  "communicationClarity": 85, (Estimate based on overall coherence if not measured directly)
+  "analyticalThinking": ${
+    scores.programmingCodeQualityScore || scores.mcqScore || 50
+  },
+  "problemSolvingAbility": ${
+    scores.programmingTestCaseScore || scores.mcqScore || 50
+  },
+  "fitScorePointers": [
+    "✅ Fit for Role Type: [Specific fit assessment and recommended action]",
+    "⚡ Primary Strength: [Specific strength observed]",
+    "🛠️ Area to Watch: [Specific improvement area or concern]"
+  ]
+}
+`;
+
+  return prompt;
+};
+
 module.exports = {
   generateBaseInstructions,
   generateRelevanceInstructions,
@@ -1094,4 +1181,5 @@ module.exports = {
   generateSubjectiveScoringPrompt,
   generateScreeningSummaryPrompt,
   generateProgrammingAnalysisPrompt,
+  generateAssessmentSummaryPrompt,
 };

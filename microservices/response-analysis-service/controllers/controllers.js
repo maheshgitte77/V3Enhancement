@@ -19,11 +19,18 @@ const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
 const ProgrammingAnalysis = require("../model/ProgrammingAnalysis");
 
+// Assessment models
+const CandidateAssessmentResult = require("../model/CandidateAssessmentResult");
+const AssessmentProgrammingAnalysis = require("../model/AssessmentProgrammingAnalysis");
+
 // Import orchestrator
 const orchestrator = require("../workers/orchestrator");
 
 // Import V2.5 Summary Processor
 const summaryProcessor = require("../workers/screening-summary/summary.processor");
+
+// Import Assessment Summary Processor
+const assessmentSummaryProcessor = require("../workers/assessment-summary/assessment-summary.processor");
 
 const { GoogleGenAI } = require("@google/genai");
 
@@ -99,6 +106,17 @@ summaryProcessor.initializeSummaryProcessor({
 });
 
 logger.info("Summary Processor initialized successfully");
+
+// Initialize assessment summary processor
+assessmentSummaryProcessor.initializeAssessmentSummaryProcessor({
+  CandidateAssessmentResult,
+  AssessmentProgrammingAnalysis,
+  logger,
+  client,
+  v2_5Config: orchestrator.getConfig(),
+});
+
+logger.info("Assessment Summary Processor initialized successfully");
 
 // ============================================
 // MULTER CONFIGURATION
@@ -810,15 +828,12 @@ const generateAssessmentSummaryHTTP = async (req, res) => {
     // Process asynchronously (don't block response)
     setImmediate(async () => {
       try {
-        // TODO: Implement assessment summary processor
-        // For now, log that it's not yet implemented
-        logger.info(
-          "Assessment summary generation requested (not yet implemented)",
-          {
-            candidateAssessmentId: requestData.candidateAssessmentId,
-            assessmentId: requestData.assessmentId,
-          }
-        );
+        await assessmentSummaryProcessor.processAssessmentSummary(requestData);
+        logger.info("Assessment summary generation completed", {
+          candidateAssessmentId: requestData.candidateAssessmentId,
+          assessmentId: requestData.assessmentId,
+          duration: Date.now() - startTime,
+        });
       } catch (error) {
         logger.error("Assessment summary processing failed", {
           error: error.message,
