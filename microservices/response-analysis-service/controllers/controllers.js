@@ -586,8 +586,8 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
  */
 const analyzeScreeningV2_5 = async (req, res) => {
   logger.info("Received screening analysis request", {
-    candidateScreeningId: req.query?.candidateScreeningId,
-    screeningAssessmentId: req.query?.screeningAssessmentId,
+    candidateScreeningId: req.body?.candidateScreeningId,
+    screeningAssessmentId: req.body?.screeningAssessmentId,
   });
 
   const {
@@ -597,7 +597,7 @@ const analyzeScreeningV2_5 = async (req, res) => {
     clientId,
     channelId,
     jobId,
-  } = req.query;
+  } = req.body;
 
   try {
     // Validate required parameters
