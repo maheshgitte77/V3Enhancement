@@ -247,23 +247,32 @@ const processProgrammingResponse = async (responseData) => {
     });
 
     // Deduct credits for AI programming analysis (non-blocking)
+    logger.info("Checking credit deduction requirements", {
+      hasClientId: !!responseData.clientId,
+      hasTokens: tokenUsage.totalTokens > 0,
+      clientId: responseData.clientId,
+      jobId: responseData.jobId,
+      channelId: responseData.channelId,
+      tokens: tokenUsage.totalTokens,
+      questionId,
+      contextType,
+    });
+
     if (responseData.clientId && tokenUsage.totalTokens > 0) {
       try {
         await CreditServiceClient.deductAiUsage({
           clientId: responseData.clientId,
           modelId: "gemini-2.0-flash",
-          itemKey: "PROGRAMMING_ANALYSIS",
           serviceKey: "AI_PROGRAMMING_ANALYSIS",
           tokens: tokenUsage.totalTokens,
           inputTokens: tokenUsage.inputTokens,
           outputTokens: tokenUsage.outputTokens,
-          referenceId: `prog-analysis-${
-            isAssessment ? candidateAssessmentId : candidateScreeningId
-          }-${questionId}`,
+          referenceId: `prog-analysis-${analysisId}`,
           meta: {
             questionId,
             skill,
             contextType,
+            analysisId,
             ...(isAssessment && { candidateAssessmentId, assessmentId }),
             ...(!isAssessment && { candidateScreeningId, screeningTestId }),
           },
@@ -286,6 +295,15 @@ const processProgrammingResponse = async (responseData) => {
         });
         // Non-blocking - analysis already saved
       }
+    } else {
+      logger.warn("Credit deduction skipped for programming analysis", {
+        reason: !responseData.clientId ? "Missing clientId" : "No tokens used",
+        hasClientId: !!responseData.clientId,
+        clientId: responseData.clientId,
+        tokens: tokenUsage.totalTokens,
+        questionId,
+        contextType,
+      });
     }
 
     const totalDuration = Date.now() - startTime;
