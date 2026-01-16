@@ -337,6 +337,7 @@ const handleSummaryRequest = async (request) => {
     releaseScoreImmediately,
     channelId,
     jobId,
+    clientId,
   } = request;
 
   try {
@@ -347,6 +348,7 @@ const handleSummaryRequest = async (request) => {
     const result = await summaryProcessor.processScreeningSummary({
       candidateScreeningId,
       screeningAssessmentId,
+      clientId,
       v2_5Config: config,
       channelId,
       jobId,

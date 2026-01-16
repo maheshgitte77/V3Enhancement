@@ -1093,7 +1093,9 @@ const processScreeningSummary = async ({
         v2_5Config,
         clientId,
         candidateScreeningId,
-        screeningAssessmentId
+        screeningAssessmentId,
+        channelId,
+        jobId
       );
 
     // Collect languages used
@@ -1507,7 +1509,9 @@ const generateScreeningSummary = async (
   v2_5Config,
   clientId,
   candidateScreeningId,
-  screeningAssessmentId
+  screeningAssessmentId,
+  channelId,
+  jobId
 ) => {
   let screeningSummaryTokens = 0;
   let screeningSummaryInputTokens = 0;
