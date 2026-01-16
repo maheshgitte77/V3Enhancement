@@ -361,6 +361,6 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/questions", requireCredits, questionRoutes);
-app.use("/api/jobDescription", requireCredits, jobDescriptionRoutes);
+app.use("/api/jobDescription", jobDescriptionRoutes);
 
 module.exports = app;
