@@ -509,6 +509,56 @@ const processAudioResponse = async (responseData) => {
       wasAutoCorrected: syncValidation.wasAutoCorrected,
     });
 
+    // ====== SYNC integrityAnalysis WITH ALGORITHMIC DETECTION ======
+    // Fix: When algorithmic detection flags cheating but AI returned CLEAR verdict,
+    // update integrityAnalysis to reflect the actual detection state
+    if (
+      finalCheatingResults.isCheatingDetected &&
+      finalCheatingResults.cheatingConfidence > 0
+    ) {
+      const currentVerdict = stage1Results.integrityAnalysis?.verdict;
+      const shouldUpdateVerdict = currentVerdict === "CLEAR" || !currentVerdict;
+
+      if (shouldUpdateVerdict) {
+        // Determine user-friendly verdict message based on confidence
+        const newVerdict =
+          finalCheatingResults.cheatingConfidence >= 75
+            ? "Suspicious activity detected - Assessment integrity may be compromised"
+            : "Some concerns detected - Review recommended";
+
+        // Update integrityAnalysis verdict
+        if (!stage1Results.integrityAnalysis) {
+          stage1Results.integrityAnalysis = {};
+        }
+        stage1Results.integrityAnalysis.verdict = newVerdict;
+        stage1Results.integrityAnalysis.confidenceScore =
+          finalCheatingResults.cheatingConfidence / 100;
+
+        // Add flags from cheatingIndicators if integrityAnalysis.flags was empty
+        if (
+          !stage1Results.integrityAnalysis.flags ||
+          stage1Results.integrityAnalysis.flags.length === 0
+        ) {
+          stage1Results.integrityAnalysis.flags =
+            finalCheatingResults.cheatingIndicators?.map((indicator) => ({
+              type: "ALGORITHMIC_DETECTION",
+              severity:
+                finalCheatingResults.cheatingConfidence >= 75
+                  ? "HIGH"
+                  : "MEDIUM",
+              evidence: indicator,
+              keyTimestamps: [],
+            })) || [];
+        }
+
+        logger.info("V3: integrityAnalysis synced with algorithmic detection", {
+          questionId: responseData.questionId,
+          newVerdict: newVerdict,
+          cheatingConfidence: finalCheatingResults.cheatingConfidence,
+        });
+      }
+    }
+
     // ====== MERGE RESULTS ======
     logger.info("V3: Merging all stage results");
     const mergedAnalysis = resultMerger.mergeAnalysisResults(
