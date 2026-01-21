@@ -21,6 +21,7 @@ const generateScreeningQuestion = async (req, res) => {
       channelId,
       jobId,
       tempId,
+      screeningAssessmentId,
     } = req.body;
 
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -84,6 +85,7 @@ const generateScreeningQuestion = async (req, res) => {
               channelId,
               jobId,
               tempId,
+              screeningAssessmentId,
             }),
           });
 
@@ -97,7 +99,7 @@ const generateScreeningQuestion = async (req, res) => {
             questionConfig.questionsArray || questionsArray || [];
           console.log(
             "typeSpecificQuestionsArray",
-            typeSpecificQuestionsArray.length
+            typeSpecificQuestionsArray.length,
           );
 
           // Get server-side tracked used categories for Programming questions
@@ -105,7 +107,7 @@ const generateScreeningQuestion = async (req, res) => {
           if (questionConfig.type === "Programming" && clientId) {
             usedCategories = categoryTracker.getAllUsedCategories(
               clientId,
-              category.category
+              category.category,
             );
             // Refresh tracking timestamp to extend expiration (auto-refreshes on get, but explicit for clarity)
             if (usedCategories.length > 0) {
@@ -113,7 +115,7 @@ const generateScreeningQuestion = async (req, res) => {
             }
             console.log(
               `📊 Server-side used categories for ${category.category}:`,
-              usedCategories.length > 0 ? usedCategories.join(", ") : "None"
+              usedCategories.length > 0 ? usedCategories.join(", ") : "None",
             );
           }
 
@@ -139,6 +141,7 @@ const generateScreeningQuestion = async (req, res) => {
               channelId,
               jobId,
               tempId,
+              screeningAssessmentId,
             }),
           });
 
@@ -220,7 +223,7 @@ For each of the following languages, generate appropriate boilerplate code:
 ${languages
   .map(
     (lang) =>
-      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`
+      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`,
   )
   .join("\n")}
 
@@ -287,13 +290,13 @@ Ensure the JSON is valid and each language name matches exactly with the provide
           tempId,
         });
         console.log(
-          `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`
+          `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`,
         );
       }
     } catch (creditError) {
       console.error(
         "❌ AI Credit deduction failed (Non-blocking):",
-        creditError.message
+        creditError.message,
       );
     }
     // ---------------------------------

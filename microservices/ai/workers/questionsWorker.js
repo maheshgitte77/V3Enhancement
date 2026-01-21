@@ -11,7 +11,7 @@ const CreditServiceClient = require("../utils/creditServiceClient");
 require("dotenv").config();
 
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
-  broker.trim()
+  broker.trim(),
 );
 
 const kafka = new Kafka({
@@ -38,7 +38,7 @@ const retryGeminiCall = async (
   apiCall,
   maxRetries = 3,
   baseDelayMs = 1000,
-  consumerId = "unknown"
+  consumerId = "unknown",
 ) => {
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -55,8 +55,9 @@ const retryGeminiCall = async (
         // Exponential backoff: 1s, 2s, 4s, etc.
         const delayMs = baseDelayMs * Math.pow(2, attempt);
         console.log(
-          `⏳ Rate limit hit (Consumer ${consumerId}), retrying in ${delayMs}ms (attempt ${attempt + 1
-          }/${maxRetries})...`
+          `⏳ Rate limit hit (Consumer ${consumerId}), retrying in ${delayMs}ms (attempt ${
+            attempt + 1
+          }/${maxRetries})...`,
         );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
@@ -141,7 +142,7 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
           // Check if this looks like an HTML tag start
           const nextChars = jsonPortion.substring(
             i,
-            Math.min(i + 20, jsonPortion.length)
+            Math.min(i + 20, jsonPortion.length),
           );
           if (/^<[a-zA-Z\/!]/.test(nextChars)) {
             // Skip until we find matching >
@@ -220,16 +221,16 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
   } catch (parseError) {
     console.error(
       `❌ Error parsing AI response JSON in Consumer ${consumerId}:`,
-      parseError
+      parseError,
     );
     console.error(`Parse error: ${parseError.message}`);
     console.error(
       `Response text (first 1000 chars):`,
-      aiResponseText.substring(0, 1000)
+      aiResponseText.substring(0, 1000),
     );
     console.error(
       `Extracted JSON (first 1000 chars):`,
-      aiResponseJson.substring(0, 1000)
+      aiResponseJson.substring(0, 1000),
     );
 
     // Try to locate problematic area
@@ -240,7 +241,7 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
       const end = Math.min(aiResponseJson.length, errorPos + 100);
       console.error(
         `Problematic area around position ${errorPos}:`,
-        aiResponseJson.substring(start, end)
+        aiResponseJson.substring(start, end),
       );
     }
 
@@ -283,15 +284,15 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
       }
 
       throw new Error(
-        `Failed to parse AI response: ${parseError.message}. No valid JSON object found.`
+        `Failed to parse AI response: ${parseError.message}. No valid JSON object found.`,
       );
     } catch (fallbackError) {
       console.error(
         `❌ Fallback JSON extraction also failed (Consumer ${consumerId}):`,
-        fallbackError
+        fallbackError,
       );
       throw new Error(
-        `Failed to parse AI response: ${parseError.message}. Fallback extraction failed: ${fallbackError.message}`
+        `Failed to parse AI response: ${parseError.message}. Fallback extraction failed: ${fallbackError.message}`,
       );
     }
   }
@@ -313,7 +314,7 @@ const generateProgrammingTitlesPrompt = (
   JD,
   CandidateResumeData,
   questionsArray,
-  usedCategoriesFromServer = [] // Server-side tracked categories (preferred over parsing questionsArray)
+  usedCategoriesFromServer = [], // Server-side tracked categories (preferred over parsing questionsArray)
 ) => {
   const skillName = category.category;
   const skillType = category.skills || "unknown";
@@ -323,7 +324,7 @@ const generateProgrammingTitlesPrompt = (
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
   let usedCategories =
     Array.isArray(usedCategoriesFromServer) &&
-      usedCategoriesFromServer.length > 0
+    usedCategoriesFromServer.length > 0
       ? usedCategoriesFromServer
       : [];
   const usedCategoryIndices = new Set();
@@ -341,13 +342,13 @@ const generateProgrammingTitlesPrompt = (
       PROGRAMMING_LOGIC_CATEGORIES.forEach((cat, index) => {
         // Check if question matches any example from this category
         const matchesExample = cat.examples.some((ex) =>
-          questionLower.includes(ex.toLowerCase())
+          questionLower.includes(ex.toLowerCase()),
         );
 
         // Check category name keywords
         const categoryKeywords = cat.name.toLowerCase().split(/[\s&/]/);
         const matchesCategoryName = categoryKeywords.some(
-          (keyword) => keyword.length > 3 && questionLower.includes(keyword)
+          (keyword) => keyword.length > 3 && questionLower.includes(keyword),
         );
 
         // Check description keywords
@@ -356,7 +357,7 @@ const generateProgrammingTitlesPrompt = (
           .split(/[,\s()]+/)
           .filter((word) => word.length > 4);
         const matchesDescription = descriptionKeywords.some((keyword) =>
-          questionLower.includes(keyword)
+          questionLower.includes(keyword),
         );
 
         if (matchesExample || matchesCategoryName || matchesDescription) {
@@ -371,7 +372,7 @@ const generateProgrammingTitlesPrompt = (
     // Map used category names to indices
     usedCategories.forEach((catName) => {
       const index = PROGRAMMING_LOGIC_CATEGORIES.findIndex(
-        (cat) => cat.name === catName
+        (cat) => cat.name === catName,
       );
       if (index !== -1) {
         usedCategoryIndices.add(index);
@@ -382,7 +383,7 @@ const generateProgrammingTitlesPrompt = (
   // Get available categories (prioritize unused ones)
   const totalCategories = PROGRAMMING_LOGIC_CATEGORIES.length;
   const unusedCategories = PROGRAMMING_LOGIC_CATEGORIES.filter(
-    (_, idx) => !usedCategoryIndices.has(idx)
+    (_, idx) => !usedCategoryIndices.has(idx),
   );
   const usedCount = usedCategories.length;
   const usagePercentage = (usedCount / totalCategories) * 100;
@@ -398,14 +399,14 @@ const generateProgrammingTitlesPrompt = (
   if (usedCategories.length > 0) {
     console.log(
       `📊 Previously used logic categories (server-tracked): ${usedCategories.join(
-        ", "
-      )}`
+        ", ",
+      )}`,
     );
     if (isCategoryExhausted) {
       console.log(
         `🔄 Category Rotation Mode Activated: ${usedCount}/${totalCategories} categories used (${usagePercentage.toFixed(
-          1
-        )}%) - Allowing reuse with unique variations`
+          1,
+        )}%) - Allowing reuse with unique variations`,
       );
     }
   }
@@ -460,8 +461,8 @@ CRITICAL UNIQUENESS REQUIREMENTS - ASSESSMENT-WIDE:
 - This is part of an ONGOING ASSESSMENT - previous questions have already been generated
 - Each title must represent a DIFFERENT logic category/type from the following ${totalCategories} categories:
 ${PROGRAMMING_LOGIC_CATEGORIES.map(
-    (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`
-  ).join("\n")}
+  (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`,
+).join("\n")}
 
 - DISTRIBUTE titles across DIFFERENT logic categories to ensure maximum variety
 - Each title must use a UNIQUE logic approach/implementation type
@@ -483,7 +484,7 @@ Each title must:
       // Category rotation mode: allow reuse but ensure different problem variations
       prompt += `
 🔄 CATEGORY ROTATION MODE (${usedCount}/${totalCategories} categories used - ${usagePercentage.toFixed(
-        1
+        1,
       )}%):
 - Most categories have been used in this assessment
 - You may REUSE categories, but MUST generate COMPLETELY DIFFERENT problem variations
@@ -493,26 +494,30 @@ Each title must:
 
 PREVIOUSLY USED CATEGORIES (${usedCount}):
 ${usedCategories
-          .slice(0, 20)
-          .map((cat) => `- ${cat}`)
-          .join("\n")}${usedCategories.length > 20
-            ? `\n... and ${usedCategories.length - 20} more`
-            : ""
-        }
+  .slice(0, 20)
+  .map((cat) => `- ${cat}`)
+  .join("\n")}${
+        usedCategories.length > 20
+          ? `\n... and ${usedCategories.length - 20} more`
+          : ""
+      }
 
-UNUSED CATEGORIES (${unusedCategories.length
-        } remaining - prioritize these first):
-${unusedCategories.length > 0
-          ? unusedCategories
-            .slice(0, Math.min(number, unusedCategories.length))
-            .map((cat) => `- ${cat.name}`)
-            .join("\n")
-          : "None - all categories have been used"
-        }
+UNUSED CATEGORIES (${
+        unusedCategories.length
+      } remaining - prioritize these first):
+${
+  unusedCategories.length > 0
+    ? unusedCategories
+        .slice(0, Math.min(number, unusedCategories.length))
+        .map((cat) => `- ${cat.name}`)
+        .join("\n")
+    : "None - all categories have been used"
+}
 
 STRATEGY:
-1. First, use any remaining unused categories (${unusedCategories.length
-        } available)
+1. First, use any remaining unused categories (${
+        unusedCategories.length
+      } available)
 2. If more questions needed, reuse categories but with COMPLETELY DIFFERENT problem variations
 3. Ensure each question has unique logic, constraints, and problem statement
 `;
@@ -520,7 +525,7 @@ STRATEGY:
       // Normal mode: avoid used categories
       prompt += `
 ⚠️ PREVIOUSLY USED LOGIC CATEGORIES IN THIS ASSESSMENT (${usedCount}/${totalCategories} - ${usagePercentage.toFixed(
-        1
+        1,
       )}% used):
 ${usedCategories.map((cat) => `- ${cat}`).join("\n")}
 
@@ -541,9 +546,9 @@ PRIORITY: Use categories NOT in the above list. Only use previously used categor
     prompt += `
 📋 RECOMMENDED UNUSED CATEGORIES (prioritize these):
 ${unusedCategories
-        .slice(0, Math.min(number, unusedCategories.length))
-        .map((cat) => `- ${cat.name}`)
-        .join("\n")}
+  .slice(0, Math.min(number, unusedCategories.length))
+  .map((cat) => `- ${cat.name}`)
+  .join("\n")}
 `;
   }
 
@@ -580,22 +585,25 @@ CRITICAL JSON RULES:
 - No trailing commas
 - Titles array MUST contain exactly ${number} items
 - logicCategories array MUST contain exactly ${number} items, matching each title to its logic category
-- Each title MUST map to a DIFFERENT logic category from the ${totalCategories} available${isCategoryExhausted
+- Each title MUST map to a DIFFERENT logic category from the ${totalCategories} available${
+    isCategoryExhausted
       ? " (category rotation allowed - ensure unique problem variations)"
       : ""
-    }
-- ${isCategoryExhausted
+  }
+- ${
+    isCategoryExhausted
       ? "You may reuse categories, but each must have a COMPLETELY DIFFERENT problem statement and logic approach"
       : usedCategories.length > 0
         ? "If possible, avoid these previously used categories: " +
-        usedCategories.join(", ")
+          usedCategories.join(", ")
         : "Use any categories"
-    }
+  }
 - Ensure titles cover different logic categories for maximum uniqueness across the entire assessment
-- ${isCategoryExhausted
+- ${
+    isCategoryExhausted
       ? "CRITICAL: Even if reusing a category, the problem must be UNIQUE - different constraints, different approach, different scenario"
       : ""
-    }
+  }
 `;
 
   return prompt;
@@ -611,7 +619,7 @@ const generateCombinedAudioVideoSubjectivePrompt = (
   proposedSeniority,
   JD,
   CandidateResumeData,
-  questionsArray
+  questionsArray,
 ) => {
   const skillName = category.category;
   const skillType = category.skills || "unknown";
@@ -620,7 +628,7 @@ const generateCombinedAudioVideoSubjectivePrompt = (
   const audioConfig = questionConfigs.find((qc) => qc.type === "Audio");
   const videoConfig = questionConfigs.find((qc) => qc.type === "Video");
   const subjectiveConfig = questionConfigs.find(
-    (qc) => qc.type === "Subjective"
+    (qc) => qc.type === "Subjective",
   );
 
   const audioNumber = audioConfig ? audioConfig.number : 0;
@@ -652,9 +660,9 @@ skillType: "${skillType}"
 
 1. **Time Constraint Enforcement**
    - Each question MUST be answerable **completely and correctly** within its specified maxTime minutes.
-   ${audioNumber > 0 ? `- Audio questions: ${audioMaxTime} minutes each` : ''}
-   ${videoNumber > 0 ? `- Video questions: ${videoMaxTime} minutes each` : ''}
-   ${subjectiveNumber > 0 ? `- Subjective questions: ${subjectiveMaxTime} minutes each` : ''}
+   ${audioNumber > 0 ? `- Audio questions: ${audioMaxTime} minutes each` : ""}
+   ${videoNumber > 0 ? `- Video questions: ${videoMaxTime} minutes each` : ""}
+   ${subjectiveNumber > 0 ? `- Subjective questions: ${subjectiveMaxTime} minutes each` : ""}
    - Do NOT generate questions that require excessive theory, multi-stage reasoning, or long explanations beyond the given time.
 
 2. **Experience-Based Difficulty**
@@ -687,18 +695,21 @@ SCENARIO-BASED QUESTION REQUIREMENT (${scenarioBasedCount} out of ${totalNumber}
 - Distribute scenario-based questions across Audio, Video, and Subjective types proportionally
 
 Question Distribution:
-${audioNumber > 0
-      ? `- Audio: ${audioNumber} question(s) (maxTime: ${audioConfig.maxTime} minutes)`
-      : ""
-    }
-${videoNumber > 0
-      ? `- Video: ${videoNumber} question(s) (maxTime: ${videoConfig.maxTime} minutes)`
-      : ""
-    }
-${subjectiveNumber > 0
-      ? `- Subjective: ${subjectiveNumber} question(s) (maxTime: ${subjectiveConfig.maxTime} minutes)`
-      : ""
-    }
+${
+  audioNumber > 0
+    ? `- Audio: ${audioNumber} question(s) (maxTime: ${audioConfig.maxTime} minutes)`
+    : ""
+}
+${
+  videoNumber > 0
+    ? `- Video: ${videoNumber} question(s) (maxTime: ${videoConfig.maxTime} minutes)`
+    : ""
+}
+${
+  subjectiveNumber > 0
+    ? `- Subjective: ${subjectiveNumber} question(s) (maxTime: ${subjectiveConfig.maxTime} minutes)`
+    : ""
+}
 
 `;
 
@@ -747,12 +758,32 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 `;
 
   // Calculate scenario-based questions per type (proportional distribution)
-  let audioScenarioCount = audioNumber > 0 ? Math.max(0, Math.round(scenarioBasedCount * (audioNumber / totalNumber))) : 0;
-  let videoScenarioCount = videoNumber > 0 ? Math.max(0, Math.round(scenarioBasedCount * (videoNumber / totalNumber))) : 0;
-  let subjectiveScenarioCount = subjectiveNumber > 0 ? Math.max(0, Math.round(scenarioBasedCount * (subjectiveNumber / totalNumber))) : 0;
+  let audioScenarioCount =
+    audioNumber > 0
+      ? Math.max(
+          0,
+          Math.round(scenarioBasedCount * (audioNumber / totalNumber)),
+        )
+      : 0;
+  let videoScenarioCount =
+    videoNumber > 0
+      ? Math.max(
+          0,
+          Math.round(scenarioBasedCount * (videoNumber / totalNumber)),
+        )
+      : 0;
+  let subjectiveScenarioCount =
+    subjectiveNumber > 0
+      ? Math.max(
+          0,
+          Math.round(scenarioBasedCount * (subjectiveNumber / totalNumber)),
+        )
+      : 0;
 
   // Ensure at least one scenario-based question if total > 0 and distribute remaining count
-  let remainingScenarioCount = scenarioBasedCount - (audioScenarioCount + videoScenarioCount + subjectiveScenarioCount);
+  let remainingScenarioCount =
+    scenarioBasedCount -
+    (audioScenarioCount + videoScenarioCount + subjectiveScenarioCount);
   if (remainingScenarioCount > 0 && audioNumber > 0) {
     audioScenarioCount = audioScenarioCount + remainingScenarioCount;
   } else if (remainingScenarioCount > 0 && videoNumber > 0) {
@@ -764,7 +795,7 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   prompt += `
 **Audio Question Requirements** (if ${audioNumber} > 0):
 - Generate EXACTLY ${audioNumber} Audio questions
-- ${audioScenarioCount > 0 ? `Include EXACTLY ${audioScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : 'Include scenario-based questions as part of the 25-30% requirement'}
+- ${audioScenarioCount > 0 ? `Include EXACTLY ${audioScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include scenario-based questions as part of the 25-30% requirement"}
 - Must require ONLY verbal answers via voice
 - Do NOT ask for demonstrations, code execution, or visual aids
 - Use <br/> for line breaks in question text
@@ -773,7 +804,7 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 
 **Video Question Requirements** (if ${videoNumber} > 0):
 - Generate EXACTLY ${videoNumber} Video questions
-- ${videoScenarioCount > 0 ? `Include EXACTLY ${videoScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : 'Include scenario-based questions as part of the 25-30% requirement'}
+- ${videoScenarioCount > 0 ? `Include EXACTLY ${videoScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include scenario-based questions as part of the 25-30% requirement"}
 - Must require ONLY verbal answers
 - Do NOT ask for demonstrations, screen presentations, live demos, or visual aids
 - Use <br/> for line breaks in question text
@@ -782,7 +813,7 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 
 **Subjective Question Requirements** (if ${subjectiveNumber} > 0):
 - Generate EXACTLY ${subjectiveNumber} Subjective questions
-- ${subjectiveScenarioCount > 0 ? `Include EXACTLY ${subjectiveScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : 'Include scenario-based questions as part of the 25-30% requirement'}
+- ${subjectiveScenarioCount > 0 ? `Include EXACTLY ${subjectiveScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include scenario-based questions as part of the 25-30% requirement"}
 - Designed for text input in a text area
 - Do NOT require code execution, demos, or presentations
 - Use <br/> for line breaks in question text
@@ -800,7 +831,8 @@ Return JSON in this format:
 {
   "skillName": "${skillName}",
   "skillType": "${skillType}",
-  "Audio": ${audioNumber > 0
+  "Audio": ${
+    audioNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -809,8 +841,9 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-    },
-  "Video": ${videoNumber > 0
+  },
+  "Video": ${
+    videoNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -819,8 +852,9 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-    },
-  "Subjective": ${subjectiveNumber > 0
+  },
+  "Subjective": ${
+    subjectiveNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -829,7 +863,7 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-    }
+  }
 }
 
 VERIFY UNIQUENESS: Before returning, ensure that:
@@ -854,7 +888,7 @@ const generatePromptForType = (
   JD,
   CandidateResumeData,
   questionsArray,
-  titles // optional: for Programming, list of pre-generated titles
+  titles, // optional: for Programming, list of pre-generated titles
 ) => {
   const skillName = category.category;
   const skillType = category.skills || "unknown";
@@ -882,7 +916,9 @@ maxTime: ${maxTime} minutes
    - Avoid questions that are:
      - Too basic for senior candidates
      - Too complex or system-level for junior/mid candidates
-${questionType === "Programming" ? `
+${
+  questionType === "Programming"
+    ? `
 3. **Programming Questions (MANDATORY TIME FEASIBILITY)**
    - The candidate with **${experience} years of experience** MUST be able to:
      - Understand the problem
@@ -895,8 +931,10 @@ ${questionType === "Programming" ? `
      - Multi-file architecture
      - Advanced algorithms unless explicitly justified by role & experience
 
-4. **Resume & JD Alignment**` : `
-3. **Resume & JD Alignment**`}
+4. **Resume & JD Alignment**`
+    : `
+3. **Resume & JD Alignment**`
+}
    - Prefer technologies, frameworks, patterns, and scenarios that appear in:
      - Job Description
      - Candidate Resume Data if available
@@ -942,17 +980,19 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 - **CRITICAL DECISION**: Analyze the skillType "${skillType}" and skillName "${skillName}" to determine if this is a programming-related skill
 - **IF programming-related skill** (e.g., programming languages, frameworks, technologies that involve code):
   * Apply 50%-50% distribution: exactly ${Math.ceil(
-        number / 2
-      )} questions WITH code snippets AND exactly ${number - Math.ceil(number / 2)
-        } general/conceptual questions (NO code snippets)
+    number / 2,
+  )} questions WITH code snippets AND exactly ${
+    number - Math.ceil(number / 2)
+  } general/conceptual questions (NO code snippets)
   * For questions with code snippets, use markers: [SNIPPET_START:languageIdentifier]code content[SNIPPET_END]
   * Detect the programming language from skillType and use lowercase identifier (e.g., "Java" → "java", "Python" → "python", "JavaScript" → "javascript", "C++" → "cpp", "Node.js" → "javascript")
   * Inside snippet markers, use \\n for newlines (NOT <br/>)
   * Use <br/> for line breaks in question text surrounding code snippets
   * **VERIFY**: Count your questions - exactly ${Math.ceil(
-          number / 2
-        )} should have [SNIPPET_START] markers, exactly ${number - Math.ceil(number / 2)
-        } should NOT have any code snippets
+    number / 2,
+  )} should have [SNIPPET_START] markers, exactly ${
+    number - Math.ceil(number / 2)
+  } should NOT have any code snippets
 - **IF NOT programming-related skill** (e.g., soft skills, domain knowledge, tools without code):
   * Generate all ${number} questions as general/conceptual (NO code snippets)
   * Use <br/> for line breaks in question text
@@ -1065,7 +1105,7 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
           PROGRAMMING_LOGIC_CATEGORIES.forEach((cat) => {
             if (
               cat.examples.some((ex) =>
-                title.toLowerCase().includes(ex.toLowerCase())
+                title.toLowerCase().includes(ex.toLowerCase()),
               )
             ) {
               if (!identifiedCategories.includes(cat.name)) {
@@ -1088,8 +1128,8 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
           logicCategoryInfo += `
 Available logic categories (${totalCategories} total):
 ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 20)
-              .map((cat, idx) => `${idx + 1}. ${cat.name}`)
-              .join("\n")}
+  .map((cat, idx) => `${idx + 1}. ${cat.name}`)
+  .join("\n")}
 ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 `;
         }
@@ -1105,8 +1145,8 @@ ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 
 Available logic categories (${totalCategories} total):
 ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 25)
-            .map((cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`)
-            .join("\n")}
+  .map((cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`)
+  .join("\n")}
 ${totalCategories > 25 ? `... and ${totalCategories - 25} more categories` : ""}
 `;
       }
@@ -1120,42 +1160,45 @@ ${logicCategoryInfo}
   * Create scenarios that a ${jobRole} professional would encounter in their daily work
   * Examples of scenario-based formatting:
     - Instead of: "Find the maximum element in an array"
-    - Use: "As a ${jobRole}, you're analyzing ${experience <= 3
-          ? "user activity logs"
-          : experience <= 7
-            ? "performance metrics data"
-            : "system analytics"
-        } and need to find the peak ${experience <= 3
-          ? "usage"
-          : experience <= 7
-            ? "performance"
-            : "efficiency"
-        } value..."
+    - Use: "As a ${jobRole}, you're analyzing ${
+      experience <= 3
+        ? "user activity logs"
+        : experience <= 7
+          ? "performance metrics data"
+          : "system analytics"
+    } and need to find the peak ${
+      experience <= 3 ? "usage" : experience <= 7 ? "performance" : "efficiency"
+    } value..."
     - Instead of: "Count vowels in a string"
-    - Use: "You're building a ${jobRole === "Backend Developer"
-          ? "API endpoint"
-          : jobRole === "Frontend Developer"
-            ? "form validation"
-            : "data processing"
-        } feature that needs to ${experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
-        } text input..."
+    - Use: "You're building a ${
+      jobRole === "Backend Developer"
+        ? "API endpoint"
+        : jobRole === "Frontend Developer"
+          ? "form validation"
+          : "data processing"
+    } feature that needs to ${
+      experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
+    } text input..."
   * Make scenarios realistic and relatable to ${jobRole} responsibilities
   * Use domain-specific terminology when appropriate (but keep it understandable)
   * Connect the problem to actual work situations a ${jobRole} would face
 - **Experience Level Tailoring** (${experience} years):
-  * ${experience <= 3
-          ? "Junior Level"
-          : experience <= 7
-            ? "Mid-Level"
-            : "Senior Level"
-        } - Adjust scenario complexity accordingly
-  * ${experience <= 3 ? "Junior" : experience <= 7 ? "Mid-level" : "Senior"
-        } ${jobRole} scenarios should reflect ${experience <= 3
-          ? "learning and basic tasks"
-          : experience <= 7
-            ? "standard project work"
-            : "complex system design and optimization"
-        }
+  * ${
+    experience <= 3
+      ? "Junior Level"
+      : experience <= 7
+        ? "Mid-Level"
+        : "Senior Level"
+  } - Adjust scenario complexity accordingly
+  * ${
+    experience <= 3 ? "Junior" : experience <= 7 ? "Mid-level" : "Senior"
+  } ${jobRole} scenarios should reflect ${
+    experience <= 3
+      ? "learning and basic tasks"
+      : experience <= 7
+        ? "standard project work"
+        : "complex system design and optimization"
+  }
   * Use appropriate technical depth based on ${experience} years of experience & Question MUST be solvable within ${maxTime} minutes by an average candidate.
 - Each question must include:
   * **WELL-FORMATTED problem statement** with clear sections and proper HTML formatting:
@@ -1192,22 +1235,25 @@ ${logicCategoryInfo}
     - **CRITICAL**: In Examples section, always use <strong>Input:</strong> and <strong>Output:</strong> (bold/dark) for labels
     - **FORMATTING EXAMPLE** (follow this EXACT structure - NO <br/> tags before <h3> headings):
       <h3>Problem Description</h3>
-      <p>As a ${jobRole}, you're working on a ${experience <= 3
+      <p>As a ${jobRole}, you're working on a ${
+        experience <= 3
           ? "data processing module"
           : experience <= 7
             ? "performance monitoring system"
             : "analytics dashboard"
-        } that receives an array of <strong>n</strong> ${experience <= 3
+      } that receives an array of <strong>n</strong> ${
+        experience <= 3
           ? "user activity"
           : experience <= 7
             ? "transaction"
             : "performance metric"
-        } values. You need to find the <code>maximum</code> value to ${experience <= 3
+      } values. You need to find the <code>maximum</code> value to ${
+        experience <= 3
           ? "identify peak usage"
           : experience <= 7
             ? "determine system capacity"
             : "optimize resource allocation"
-        }.</p>
+      }.</p>
       <h3>Input Format</h3>
       <p>The first line contains an integer <strong>n</strong> representing the size of the array.<br/>The second line contains <strong>n</strong> space-separated integers.</p>
       <h3>Output Format</h3>
@@ -1238,8 +1284,9 @@ ${logicCategoryInfo}
   * Solvable using ONLY standard library functions (NO third-party libraries)
 - **CRITICAL TIME CONSTRAINT - STRICTLY ENFORCED**: maxTime = ${maxTime} minutes
   * **MANDATORY**: Question MUST be solvable within ${maxTime} minutes by an average candidate
-  * **Time-based complexity guidelines** (STRICTLY follow for ${maxTime} minutes):${maxTime <= 10
-          ? `
+  * **Time-based complexity guidelines** (STRICTLY follow for ${maxTime} minutes):${
+    maxTime <= 10
+      ? `
     - **${maxTime} minutes (5-10 minute range)**:
       * VERY SIMPLE problems only
       * Single loop or basic conditionals
@@ -1248,8 +1295,8 @@ ${logicCategoryInfo}
       * NO nested loops, NO complex algorithms, NO multiple data structures
       * Solution should be 10-30 lines of code
       * Examples: Find maximum in array, Count vowels, Sum of digits, Check palindrome`
-          : maxTime <= 20
-            ? `
+      : maxTime <= 20
+        ? `
     - **${maxTime} minutes (11-20 minute range)**:
       * SIMPLE to EASY problems
       * Single or double loops acceptable
@@ -1257,8 +1304,8 @@ ${logicCategoryInfo}
       * One data structure (array, string, or simple map)
       * Solution should be 20-50 lines of code
       * Examples: Remove duplicates, Rotate array, Two sum (brute force), Frequency count`
-            : maxTime <= 30
-              ? `
+        : maxTime <= 30
+          ? `
     - **${maxTime} minutes (21-30 minute range)**:
       * EASY to MEDIUM problems
       * Can use nested loops or optimized single pass
@@ -1266,29 +1313,30 @@ ${logicCategoryInfo}
       * One or two data structures
       * Solution should be 30-70 lines of code
       * Examples: Valid parentheses, Merge sorted arrays, Find missing number`
-              : maxTime <= 45
-                ? `
+          : maxTime <= 45
+            ? `
     - **${maxTime} minutes (31-45 minute range)**:
       * MEDIUM problems
       * Can use standard algorithms (sorting, hashing, two pointers)
       * Multiple data structures acceptable
       * Solution should be 40-100 lines of code
       * Examples: Group anagrams, Longest substring, Array manipulation`
-                : `
+            : `
     - **${maxTime} minutes (46+ minute range)**:
       * MEDIUM to HARD problems
       * Complex algorithms acceptable
       * Multiple data structures and optimizations
       * Solution can be 50-150 lines of code
       * Examples: Dynamic programming basics, Graph traversal basics, Advanced array problems`
-        }
+  }
   * **VERIFICATION**: Before generating, estimate if an average candidate can:
     1. Understand the problem: 1-2 minutes
     2. Plan the solution: 1-2 minutes
     3. Write the code: remaining time
     4. Test and debug: 1-2 minutes buffer
-  * **For ${maxTime} minutes, ensure the problem can be solved in ${maxTime - 2
-        } minutes of actual coding time**
+  * **For ${maxTime} minutes, ensure the problem can be solved in ${
+    maxTime - 2
+  } minutes of actual coding time**
 - Difficulty based on experience (${experience} years) - BUT TIME CONSTRAINT TAKES PRIORITY:
   * 0-3 years: Easy (basic loops, conditionals, simple data structures) - adjust for time limit
   * 3-7 years: Medium (algorithms, data structures, problem-solving) - adjust for time limit
@@ -1317,14 +1365,16 @@ If titles are provided, you MUST:
 - **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
   * Create a real-world context where a ${jobRole} would encounter this problem
   * Use job-role appropriate terminology and domain context
-  * Make it relatable to ${experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
-        } ${jobRole} work
-  * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${experience <= 3
-          ? "user data"
-          : experience <= 7
-            ? "transaction logs"
-            : "system performance metrics"
-        } and need to identify the peak value..."
+  * Make it relatable to ${
+    experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
+  } ${jobRole} work
+  * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${
+    experience <= 3
+      ? "user data"
+      : experience <= 7
+        ? "transaction logs"
+        : "system performance metrics"
+  } and need to identify the peak value..."
 
 **FINAL VALIDATION CHECKS** (MUST verify before outputting):
 1. **LINE BREAK CHECK**: Search your generated HTML for <br/><h3> pattern - if found, REMOVE the <br/> tag. The correct pattern is </p><h3> or </ul><h3>, NOT </p><br/><h3>
@@ -1359,13 +1409,13 @@ Return JSON in this format:
   "type": "MCQ",
   "MCQ": [
     ${Array(number)
-          .fill(0)
-          .map((_, idx) => {
-            const isMultipleCorrect = idx < multipleCorrectCount;
-            const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
+      .fill(0)
+      .map((_, idx) => {
+        const isMultipleCorrect = idx < multipleCorrectCount;
+        const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
 
-            if (idx < withCode) {
-              return `{
+        if (idx < withCode) {
+          return `{
       "questionTitle": "Brief summary with code snippet",
       "question": "Question text with [SNIPPET_START:detectedLanguage]code\\nhere[SNIPPET_END]. Use <br/> for line breaks in question text. Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers - NO markdown fences.",
       "options": {"A": "Option with code: format as markdown code block with triple backticks and language", "B": "Plain text option", "C": "Option with inline code: use single backticks around code", "D": "Another plain text option"},
@@ -1373,8 +1423,8 @@ Return JSON in this format:
       "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
-            } else {
-              return `{
+        } else {
+          return `{
       "questionTitle": "Brief summary",
       "question": "General question text with NO code snippets. Use <br/> for line breaks.",
       "options": {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"},
@@ -1382,9 +1432,9 @@ Return JSON in this format:
       "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
-            }
-          })
-          .join(",")}
+        }
+      })
+      .join(",")}
   ]
 }
 **CRITICAL INSTRUCTIONS**:
@@ -1411,15 +1461,15 @@ Return JSON in this format:
   "type": "${questionType}",
   "${questionType}": [
     ${Array(number)
-          .fill(0)
-          .map(
-            (_, idx) => `{
+      .fill(0)
+      .map(
+        (_, idx) => `{
       "questionTitle": "Brief summary",
       "question": "Question text. Use <br/> for line breaks.",
       "maxTime": ${maxTime}
-    }`
-          )
-          .join(",")}
+    }`,
+      )
+      .join(",")}
   ]
 }`;
       break;
@@ -1455,62 +1505,64 @@ Return JSON in this format:
   "type": "Programming",
   "Programming": [
     ${Array(programmingCount)
-          .fill(0)
-          .map((_, idx) => {
-            const title =
-              Array.isArray(titles) && titles[idx]
-                ? String(titles[idx]).replace(/"/g, '\\"')
-                : `Coding problem title`;
-            return `{
+      .fill(0)
+      .map((_, idx) => {
+        const title =
+          Array.isArray(titles) && titles[idx]
+            ? String(titles[idx]).replace(/"/g, '\\"')
+            : `Coding problem title`;
+        return `{
       "questionTitle": "${title}",
       "question": "<h3>Problem Description</h3><p>Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><br/><h3>Input Format</h3><p>Input specification with examples. Use <ul><li> for lists.</li></ul></p><br/><h3>Output Format</h3><p>Output specification here.</p><br/><h3>Constraints</h3><ul><li>Constraint 1</li><li>Constraint 2</li></ul><br/><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p><strong>Output:</strong> example output description</p><br/><p><strong>Input:</strong> 5<br/>1 2 3 4 5</p><p><strong>Output:</strong> 15</p>",
       "maxTime": ${maxTime},
       "testCases": [
         ${testCasesConfigForTemplate
-                .map(
-                  (tc, tcIdx) => `{
+          .map(
+            (tc, tcIdx) => `{
           "input": "Actual test input value ${tcIdx + 1}",
           "output": "EXACT expected output value ${tcIdx + 1}",
           "explanation": "Why this output is correct",
           "visible": ${tc.visible !== undefined ? tc.visible : tcIdx < 2},
-          "weightage": ${tc.weightage !== undefined
-                      ? tc.weightage
-                      : Math.floor(100 / testCasesConfigForTemplate.length)
-                    }
-        }`
-                )
-                .join(",")}
+          "weightage": ${
+            tc.weightage !== undefined
+              ? tc.weightage
+              : Math.floor(100 / testCasesConfigForTemplate.length)
+          }
+        }`,
+          )
+          .join(",")}
       ],
       "supportedLanguages": ${JSON.stringify(
-                  supportedLanguagesInfoForTemplate.map((lang) => ({
-                    languageId: lang.languageId,
-                    languageName: lang.languageName,
-                    language: lang.languageName.split(" (")[0],
-                    version: lang.languageName.includes("(")
-                      ? lang.languageName.split("(")[1].replace(")", "")
-                      : "",
-                  }))
-                )},
+        supportedLanguagesInfoForTemplate.map((lang) => ({
+          languageId: lang.languageId,
+          languageName: lang.languageName,
+          language: lang.languageName.split(" (")[0],
+          version: lang.languageName.includes("(")
+            ? lang.languageName.split("(")[1].replace(")", "")
+            : "",
+        })),
+      )},
       "supportedLanguageNames": ${JSON.stringify(
-                  supportedLanguageNamesForTemplate
-                )},
+        supportedLanguageNamesForTemplate,
+      )},
       "supportedLanguageIds": ${JSON.stringify(
-                  supportedLanguageIdsForTemplate
-                )},
+        supportedLanguageIdsForTemplate,
+      )},
       "boilerplateCode": {
-        ${supportedLanguageNamesForTemplate.length > 0
-                ? supportedLanguageNamesForTemplate
-                  .map(
-                    (langName) =>
-                      `"${langName}": "CRITICAL: Generate ONLY boilerplate code with \\\\n for newlines. Include: imports/headers, input reading code (Scanner/readline/input()), basic structure (main function/class), TODO comment (e.g., '// TODO: Implement the solution here')"`
-                  )
-                  .join(",")
-                : ""
-              }
+        ${
+          supportedLanguageNamesForTemplate.length > 0
+            ? supportedLanguageNamesForTemplate
+                .map(
+                  (langName) =>
+                    `"${langName}": "CRITICAL: Generate ONLY boilerplate code with \\\\n for newlines. Include: imports/headers, input reading code (Scanner/readline/input()), basic structure (main function/class), TODO comment (e.g., '// TODO: Implement the solution here')"`,
+                )
+                .join(",")
+            : ""
+        }
       }
     }`;
-          })
-          .join(",")}
+      })
+      .join(",")}
   ]
 }`;
       break;
@@ -1546,6 +1598,7 @@ const createConsumer = async (id) => {
       let channelId = null;
       let jobId = null;
       let tempId = null;
+      let screeningAssessmentId = null;
 
       try {
         const parsedMessage = JSON.parse(message.value.toString());
@@ -1566,14 +1619,15 @@ const createConsumer = async (id) => {
         channelId = parsedMessage.channelId;
         jobId = parsedMessage.jobId;
         tempId = parsedMessage.tempId;
+        screeningAssessmentId = parsedMessage.screeningAssessmentId;
       } catch (parseError) {
         console.error(
           `❌ Error parsing incoming Kafka message in Consumer ${id}:`,
-          parseError
+          parseError,
         );
         console.error(
           `Message value (first 500 chars):`,
-          message.value.toString().substring(0, 500)
+          message.value.toString().substring(0, 500),
         );
         return;
       }
@@ -1586,7 +1640,7 @@ const createConsumer = async (id) => {
           questionConfigs.length === 0
         ) {
           console.error(
-            `❌ Missing questionConfigs for AudioVideoSubjective in Consumer ${id}`
+            `❌ Missing questionConfigs for AudioVideoSubjective in Consumer ${id}`,
           );
           if (requestId) {
             try {
@@ -1609,7 +1663,7 @@ const createConsumer = async (id) => {
             } catch (errorSendError) {
               console.error(
                 `❌ Failed to send error response to Kafka:`,
-                errorSendError
+                errorSendError,
               );
             }
           }
@@ -1617,7 +1671,7 @@ const createConsumer = async (id) => {
         }
       } else if (!questionType || !questionConfig) {
         console.error(
-          `❌ Missing questionType or questionConfig in Consumer ${id}`
+          `❌ Missing questionType or questionConfig in Consumer ${id}`,
         );
         if (requestId) {
           try {
@@ -1639,7 +1693,7 @@ const createConsumer = async (id) => {
           } catch (errorSendError) {
             console.error(
               `❌ Failed to send error response to Kafka:`,
-              errorSendError
+              errorSendError,
             );
           }
         }
@@ -1686,7 +1740,7 @@ const createConsumer = async (id) => {
             proposedSeniority,
             JD,
             CandidateResumeData,
-            questionsArray
+            questionsArray,
           );
 
           let result, response, candidate;
@@ -1695,17 +1749,17 @@ const createConsumer = async (id) => {
               () => model.generateContent(combinedPrompt),
               3,
               1000,
-              id
+              id,
             );
             response = result.response;
             candidate = response.candidates?.[0]?.content;
           } catch (geminiError) {
             console.error(
               `❌ Error calling Gemini API for combined Audio/Video/Subjective in Consumer ${id}:`,
-              geminiError
+              geminiError,
             );
             throw new Error(
-              `Gemini API error: ${geminiError.message || "Unknown error"}`
+              `Gemini API error: ${geminiError.message || "Unknown error"}`,
             );
           }
 
@@ -1720,7 +1774,7 @@ const createConsumer = async (id) => {
           tokenUsage.totalTokens += responseTokenUsage.totalTokens;
 
           //Deduct Credits
-          await CreditServiceClient.deductAiUsage({
+          const reqBody = {
             clientId,
             modelId: "gemini-2.0-flash",
             referenceId: `ai_question_gen_${Date.now()}`,
@@ -1732,13 +1786,22 @@ const createConsumer = async (id) => {
             },
             channelId,
             jobId,
-            tempId,
-          });
+          };
+
+          if (screeningAssessmentId) {
+            reqBody.screeningAssessmentId = screeningAssessmentId;
+          }
+
+          if (tempId) {
+            reqBody.tempId = tempId;
+          }
+
+          await CreditServiceClient.deductAiUsage(reqBody);
 
           const aiResponseText = candidate.parts[0]?.text || "";
           const combinedResponse = extractJsonFromGeminiText(
             aiResponseText,
-            id
+            id,
           );
 
           // Split combined response into separate responses for each type
@@ -1772,7 +1835,7 @@ const createConsumer = async (id) => {
                 tokenUsage: {
                   promptTokens: Math.floor(responseTokenUsage.promptTokens / 3),
                   completionTokens: Math.floor(
-                    responseTokenUsage.completionTokens / 3
+                    responseTokenUsage.completionTokens / 3,
                   ),
                   totalTokens: Math.floor(responseTokenUsage.totalTokens / 3),
                 },
@@ -1808,7 +1871,7 @@ const createConsumer = async (id) => {
                 tokenUsage: {
                   promptTokens: Math.floor(responseTokenUsage.promptTokens / 3),
                   completionTokens: Math.floor(
-                    responseTokenUsage.completionTokens / 3
+                    responseTokenUsage.completionTokens / 3,
                   ),
                   totalTokens: Math.floor(responseTokenUsage.totalTokens / 3),
                 },
@@ -1842,7 +1905,7 @@ const createConsumer = async (id) => {
                 tokenUsage: {
                   promptTokens: Math.floor(responseTokenUsage.promptTokens / 3),
                   completionTokens: Math.floor(
-                    responseTokenUsage.completionTokens / 3
+                    responseTokenUsage.completionTokens / 3,
                   ),
                   totalTokens: Math.floor(responseTokenUsage.totalTokens / 3),
                 },
@@ -1858,21 +1921,21 @@ const createConsumer = async (id) => {
                 messages: responseMessages,
               });
               console.log(
-                `✅ Consumer ${id} completed processing combined Audio/Video/Subjective questions for '${category.category}'`
+                `✅ Consumer ${id} completed processing combined Audio/Video/Subjective questions for '${category.category}'`,
               );
               console.log(
-                `✅ ${responseMessages.length} response(s) sent to Kafka for requestId: ${requestId}`
+                `✅ ${responseMessages.length} response(s) sent to Kafka for requestId: ${requestId}`,
               );
             } catch (sendError) {
               console.error(
                 `❌ Error sending combined responses to Kafka in Consumer ${id}:`,
-                sendError
+                sendError,
               );
               throw sendError;
             }
           } else {
             throw new Error(
-              "No valid questions generated in combined response"
+              "No valid questions generated in combined response",
             );
           }
 
@@ -1892,7 +1955,7 @@ const createConsumer = async (id) => {
             JD,
             CandidateResumeData,
             questionsArray,
-            usedCategories // Server-side tracked categories (preferred)
+            usedCategories, // Server-side tracked categories (preferred)
           );
 
           let titlesResult, titlesResponse, titlesCandidate;
@@ -1901,7 +1964,7 @@ const createConsumer = async (id) => {
               () => model.generateContent(titlesPrompt),
               3,
               1000,
-              id
+              id,
             );
             titlesResponse = titlesResult.response;
             titlesCandidate = titlesResponse.candidates?.[0]?.content;
@@ -1912,7 +1975,7 @@ const createConsumer = async (id) => {
             tokenUsage.completionTokens += titlesTokenUsage.completionTokens;
             tokenUsage.totalTokens += titlesTokenUsage.totalTokens;
 
-            await CreditServiceClient.deductAiUsage({
+            const reqBody = {
               clientId,
               modelId: "gemini-2.0-flash",
               referenceId: `ai_question_gen_${Date.now()}`,
@@ -1925,15 +1988,26 @@ const createConsumer = async (id) => {
               channelId,
               jobId,
               tempId,
-            });
+            };
+
+            if (screeningAssessmentId) {
+              reqBody.screeningAssessmentId = screeningAssessmentId;
+            }
+
+            if (tempId) {
+              reqBody.tempId = tempId;
+            }
+
+            await CreditServiceClient.deductAiUsage(reqBody);
           } catch (geminiError) {
             console.error(
               `❌ Error calling Gemini API for titles in Consumer ${id}:`,
-              geminiError
+              geminiError,
             );
             throw new Error(
-              `Gemini API error (titles): ${geminiError.message || "Unknown error"
-              }`
+              `Gemini API error (titles): ${
+                geminiError.message || "Unknown error"
+              }`,
             );
           }
 
@@ -1946,20 +2020,20 @@ const createConsumer = async (id) => {
 
           if (titles.length < questionConfig.number) {
             throw new Error(
-              `Expected ${questionConfig.number} programming titles, got ${titles.length}`
+              `Expected ${questionConfig.number} programming titles, got ${titles.length}`,
             );
           }
 
           // Extract and log logic categories if provided
           const generatedLogicCategories = Array.isArray(
-            titlesJson.logicCategories
+            titlesJson.logicCategories,
           )
             ? titlesJson.logicCategories.slice(0, titles.length)
             : [];
 
           if (generatedLogicCategories.length > 0) {
             console.log(
-              `📊 Generated Programming titles with logic categories (Consumer ${id}):`
+              `📊 Generated Programming titles with logic categories (Consumer ${id}):`,
             );
             titles.forEach((title, idx) => {
               const category = generatedLogicCategories[idx] || "Unknown";
@@ -1967,7 +2041,7 @@ const createConsumer = async (id) => {
             });
           } else {
             console.log(
-              `📊 Generated ${titles.length} Programming titles (Consumer ${id}):`
+              `📊 Generated ${titles.length} Programming titles (Consumer ${id}):`,
             );
             titles.forEach((title, idx) => {
               console.log(`  ${idx + 1}. ${title}`);
@@ -1996,7 +2070,7 @@ const createConsumer = async (id) => {
               JD,
               CandidateResumeData,
               questionsArray,
-              batchTitles
+              batchTitles,
             );
 
             // Create promise for this batch
@@ -2004,22 +2078,22 @@ const createConsumer = async (id) => {
               try {
                 console.log(
                   `🚀 Starting Programming batch ${batchIndex}/${Math.ceil(
-                    titles.length / 2
-                  )} (Consumer ${id})...`
+                    titles.length / 2,
+                  )} (Consumer ${id})...`,
                 );
 
                 const batchResult = await retryGeminiCall(
                   () => model.generateContent(batchPrompt),
                   3,
                   2000, // Start with 2s delay for retries
-                  id
+                  id,
                 );
                 const batchResponse = batchResult.response;
                 const batchCandidate = batchResponse.candidates?.[0]?.content;
 
                 if (!batchCandidate || !batchCandidate.parts) {
                   throw new Error(
-                    "No valid response received from Gemini for batch"
+                    "No valid response received from Gemini for batch",
                   );
                 }
 
@@ -2034,14 +2108,14 @@ const createConsumer = async (id) => {
                   !Array.isArray(batchJson.Programming)
                 ) {
                   throw new Error(
-                    "Invalid Programming batch response: missing Programming array"
+                    "Invalid Programming batch response: missing Programming array",
                   );
                 }
 
                 console.log(
                   `✅ Completed Programming batch ${batchIndex}/${Math.ceil(
-                    titles.length / 2
-                  )} (Consumer ${id})`
+                    titles.length / 2,
+                  )} (Consumer ${id})`,
                 );
                 return {
                   batchIndex: batchIndex - 1, // 0-indexed for sorting
@@ -2051,11 +2125,12 @@ const createConsumer = async (id) => {
               } catch (geminiError) {
                 console.error(
                   `❌ Error calling Gemini API for Programming batch ${batchIndex} in Consumer ${id}:`,
-                  geminiError
+                  geminiError,
                 );
                 throw new Error(
-                  `Gemini API error (Programming batch ${batchIndex}): ${geminiError.message || "Unknown error"
-                  }`
+                  `Gemini API error (Programming batch ${batchIndex}): ${
+                    geminiError.message || "Unknown error"
+                  }`,
                 );
               }
             })();
@@ -2065,7 +2140,7 @@ const createConsumer = async (id) => {
 
           // Process all batches in parallel - use allSettled to handle partial failures
           console.log(
-            `🔄 Processing ${batchPromises.length} Programming batches in parallel (Consumer ${id})...`
+            `🔄 Processing ${batchPromises.length} Programming batches in parallel (Consumer ${id})...`,
           );
           const batchResults = await Promise.allSettled(batchPromises);
 
@@ -2080,7 +2155,7 @@ const createConsumer = async (id) => {
               const batchIndex = Math.floor((index * 2) / 2) + 1;
               console.error(
                 `❌ Programming batch ${batchIndex} failed in Consumer ${id}:`,
-                result.reason?.message || result.reason
+                result.reason?.message || result.reason,
               );
               failedBatches.push({
                 batchIndex: index,
@@ -2092,7 +2167,7 @@ const createConsumer = async (id) => {
           // Sort successful batches by batchIndex to maintain order
           successfulBatches.sort((a, b) => a.batchIndex - b.batchIndex);
           const allProgrammingQuestions = successfulBatches.flatMap(
-            (result) => result.questions
+            (result) => result.questions,
           );
 
           // Aggregate token usage from all batches
@@ -2111,16 +2186,16 @@ const createConsumer = async (id) => {
           // Log summary
           if (failedBatches.length > 0) {
             console.warn(
-              `⚠️ Consumer ${id}: ${successfulBatches.length}/${batchPromises.length} Programming batches succeeded. ${failedBatches.length} batch(es) failed.`
+              `⚠️ Consumer ${id}: ${successfulBatches.length}/${batchPromises.length} Programming batches succeeded. ${failedBatches.length} batch(es) failed.`,
             );
           } else {
             console.log(
-              `✅ Consumer ${id}: All ${successfulBatches.length} Programming batches succeeded.`
+              `✅ Consumer ${id}: All ${successfulBatches.length} Programming batches succeeded.`,
             );
           }
 
           console.log(
-            `📊 Token usage for Programming (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`
+            `📊 Token usage for Programming (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`,
           );
 
           // Build aiResponse object matching normal schema
@@ -2137,13 +2212,13 @@ const createConsumer = async (id) => {
             console.warn(
               `⚠️ Consumer ${id}: No Programming questions generated. All batches failed. Errors: ${failedBatches
                 .map((f) => f.error)
-                .join("; ")}`
+                .join("; ")}`,
             );
             // Still send response with empty array - let frontend handle it
           } else if (failedBatches.length > 0) {
             // Log partial success
             console.warn(
-              `⚠️ Consumer ${id}: Partial success - ${allProgrammingQuestions.length} Programming questions generated, ${failedBatches.length} batch(es) failed.`
+              `⚠️ Consumer ${id}: Partial success - ${allProgrammingQuestions.length} Programming questions generated, ${failedBatches.length} batch(es) failed.`,
             );
           }
         } else {
@@ -2158,7 +2233,7 @@ const createConsumer = async (id) => {
             proposedSeniority,
             JD,
             CandidateResumeData,
-            questionsArray
+            questionsArray,
           );
 
           let result, response, candidate;
@@ -2167,17 +2242,17 @@ const createConsumer = async (id) => {
               () => model.generateContent(prompt),
               3,
               1000,
-              id
+              id,
             );
             response = result.response;
             candidate = response.candidates?.[0]?.content;
           } catch (geminiError) {
             console.error(
               `❌ Error calling Gemini API in Consumer ${id}:`,
-              geminiError
+              geminiError,
             );
             throw new Error(
-              `Gemini API error: ${geminiError.message || "Unknown error"}`
+              `Gemini API error: ${geminiError.message || "Unknown error"}`,
             );
           }
 
@@ -2191,8 +2266,7 @@ const createConsumer = async (id) => {
           tokenUsage.completionTokens += responseTokenUsage.completionTokens;
           tokenUsage.totalTokens += responseTokenUsage.totalTokens;
 
-          // Deduc Credits
-          await CreditServiceClient.deductAiUsage({
+          const reqBody = {
             clientId,
             modelId: "gemini-2.0-flash",
             referenceId: `ai_question_gen_${Date.now()}`,
@@ -2204,14 +2278,24 @@ const createConsumer = async (id) => {
             },
             channelId,
             jobId,
-            tempId,
-          });
+          };
+
+          if (screeningAssessmentId) {
+            reqBody.screeningAssessmentId = screeningAssessmentId;
+          }
+
+          if (tempId) {
+            reqBody.tempId = tempId;
+          }
+
+          // Deduc Credits
+          await CreditServiceClient.deductAiUsage(reqBody);
 
           const aiResponseText = candidate.parts[0]?.text || "";
           aiResponse = extractJsonFromGeminiText(aiResponseText, id);
 
           console.log(
-            `📊 Token usage for ${questionType} (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`
+            `📊 Token usage for ${questionType} (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`,
           );
         }
 
@@ -2237,7 +2321,7 @@ const createConsumer = async (id) => {
                           .replace(/\r/g, "\n")
                           .trim();
                         return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
-                      }
+                      },
                     );
 
                     // STEP 1.5: Remove orphaned [SNIPPET_START] markers without [SNIPPET_END]
@@ -2261,7 +2345,7 @@ const createConsumer = async (id) => {
                         }
                         // If no meaningful content, just remove the marker
                         return "";
-                      }
+                      },
                     );
 
                     // STEP 2: Normalize already-fenced code blocks
@@ -2276,14 +2360,17 @@ const createConsumer = async (id) => {
                           .replace(/\r/g, "\n")
                           .trim();
                         return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
-                      }
+                      },
                     );
 
                     question.question = processedQuestion;
                   }
 
                   // STEP 3: Clean up options - convert [SNIPPET_START] markers to markdown format
-                  if (question.options && typeof question.options === "object") {
+                  if (
+                    question.options &&
+                    typeof question.options === "object"
+                  ) {
                     Object.keys(question.options).forEach((key) => {
                       if (typeof question.options[key] === "string") {
                         let optionText = question.options[key];
@@ -2293,7 +2380,9 @@ const createConsumer = async (id) => {
                         optionText = optionText.replace(
                           /\[SNIPPET_START:([^\]]+)\]([\s\S]*?)\[SNIPPET_END\]/gi,
                           (match, lang, codeContent) => {
-                            const language = (lang || "plaintext").toLowerCase();
+                            const language = (
+                              lang || "plaintext"
+                            ).toLowerCase();
                             const cleanedCode = codeContent
                               .replace(/<br\s*\/?>/gi, "\n")
                               .replace(/\r\n/g, "\n")
@@ -2301,7 +2390,7 @@ const createConsumer = async (id) => {
                               .trim();
                             // Convert to markdown code fence - PRESERVE BACKTICKS for frontend markdown rendering
                             return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
-                          }
+                          },
                         );
 
                         // STEP 3.2: Remove orphaned [SNIPPET_START] markers in options (without [SNIPPET_END])
@@ -2315,12 +2404,14 @@ const createConsumer = async (id) => {
                                 .replace(/\r\n/g, "\n")
                                 .replace(/\r/g, "\n")
                                 .trim();
-                              const language = (lang || "plaintext").toLowerCase();
+                              const language = (
+                                lang || "plaintext"
+                              ).toLowerCase();
                               // Convert to markdown code fence - PRESERVE BACKTICKS
                               return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
                             }
                             return "";
-                          }
+                          },
                         );
 
                         // STEP 3.3: Normalize existing markdown code fences (ensure proper formatting)
@@ -2336,7 +2427,7 @@ const createConsumer = async (id) => {
                               .trim();
                             // PRESERVE BACKTICKS - Frontend will render markdown
                             return `\`\`\`${language}\n${cleanedCode}\n\`\`\``;
-                          }
+                          },
                         );
 
                         // STEP 3.4: Clean up HTML tags outside of code blocks
@@ -2347,10 +2438,13 @@ const createConsumer = async (id) => {
                         let blockIndex = 0;
 
                         // Extract code blocks temporarily
-                        optionText = optionText.replace(codeBlockPattern, (match) => {
-                          codeBlocks.push(match);
-                          return `__CODE_BLOCK_${blockIndex++}__`;
-                        });
+                        optionText = optionText.replace(
+                          codeBlockPattern,
+                          (match) => {
+                            codeBlocks.push(match);
+                            return `__CODE_BLOCK_${blockIndex++}__`;
+                          },
+                        );
 
                         // Clean HTML tags outside code blocks
                         optionText = optionText.replace(/<br\s*\/?>/gi, " ");
@@ -2358,7 +2452,10 @@ const createConsumer = async (id) => {
 
                         // Restore code blocks
                         codeBlocks.forEach((block, idx) => {
-                          optionText = optionText.replace(`__CODE_BLOCK_${idx}__`, block);
+                          optionText = optionText.replace(
+                            `__CODE_BLOCK_${idx}__`,
+                            block,
+                          );
                         });
 
                         // CRITICAL: Preserve all markdown formatting including backticks
@@ -2370,20 +2467,34 @@ const createConsumer = async (id) => {
 
                   // STEP 4: Ensure isMultipleCorrect field is set correctly
                   // If not present, determine based on correctAnswer array length
-                  if (question.isMultipleCorrect === undefined || question.isMultipleCorrect === null) {
-                    const correctAnswerCount = Array.isArray(question.correctAnswer) ? question.correctAnswer.length : 0;
+                  if (
+                    question.isMultipleCorrect === undefined ||
+                    question.isMultipleCorrect === null
+                  ) {
+                    const correctAnswerCount = Array.isArray(
+                      question.correctAnswer,
+                    )
+                      ? question.correctAnswer.length
+                      : 0;
                     question.isMultipleCorrect = correctAnswerCount > 1;
                   }
 
                   // Validate correctAnswer matches isMultipleCorrect
-                  const correctAnswerCount = Array.isArray(question.correctAnswer) ? question.correctAnswer.length : 0;
+                  const correctAnswerCount = Array.isArray(
+                    question.correctAnswer,
+                  )
+                    ? question.correctAnswer.length
+                    : 0;
                   if (question.isMultipleCorrect && correctAnswerCount < 2) {
                     console.warn(
-                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=true but only ${correctAnswerCount} correct answer(s). Expected 2-4.`
+                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=true but only ${correctAnswerCount} correct answer(s). Expected 2-4.`,
                     );
-                  } else if (!question.isMultipleCorrect && correctAnswerCount !== 1) {
+                  } else if (
+                    !question.isMultipleCorrect &&
+                    correctAnswerCount !== 1
+                  ) {
                     console.warn(
-                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=false but ${correctAnswerCount} correct answer(s). Expected exactly 1.`
+                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=false but ${correctAnswerCount} correct answer(s). Expected exactly 1.`,
                     );
                     // Auto-fix: take first answer if multiple provided
                     if (correctAnswerCount > 1) {
@@ -2393,37 +2504,57 @@ const createConsumer = async (id) => {
                 } catch (mcqError) {
                   console.error(
                     `❌ Error processing MCQ question in Consumer ${id}:`,
-                    mcqError
+                    mcqError,
                   );
                 }
               });
 
               // STEP 5: Ensure 20% distribution of multiple correct questions
               const totalQuestions = aiResponse.MCQ.length;
-              const expectedMultipleCorrect = Math.max(1, Math.round(totalQuestions * 0.2));
-              const actualMultipleCorrect = aiResponse.MCQ.filter(q => q.isMultipleCorrect === true).length;
+              const expectedMultipleCorrect = Math.max(
+                1,
+                Math.round(totalQuestions * 0.2),
+              );
+              const actualMultipleCorrect = aiResponse.MCQ.filter(
+                (q) => q.isMultipleCorrect === true,
+              ).length;
 
               if (actualMultipleCorrect !== expectedMultipleCorrect) {
                 console.warn(
-                  `⚠️ MCQ multiple correct distribution: Expected ${expectedMultipleCorrect} (20%), got ${actualMultipleCorrect}. Adjusting...`
+                  `⚠️ MCQ multiple correct distribution: Expected ${expectedMultipleCorrect} (20%), got ${actualMultipleCorrect}. Adjusting...`,
                 );
 
                 // Sort questions by current isMultipleCorrect status
-                const multipleCorrectQuestions = aiResponse.MCQ.filter(q => q.isMultipleCorrect === true);
-                const singleCorrectQuestions = aiResponse.MCQ.filter(q => !q.isMultipleCorrect);
+                const multipleCorrectQuestions = aiResponse.MCQ.filter(
+                  (q) => q.isMultipleCorrect === true,
+                );
+                const singleCorrectQuestions = aiResponse.MCQ.filter(
+                  (q) => !q.isMultipleCorrect,
+                );
 
                 // Adjust to meet 20% requirement
                 if (actualMultipleCorrect < expectedMultipleCorrect) {
                   // Need more multiple correct - convert some single correct to multiple correct
-                  const needed = expectedMultipleCorrect - actualMultipleCorrect;
-                  for (let i = 0; i < Math.min(needed, singleCorrectQuestions.length); i++) {
+                  const needed =
+                    expectedMultipleCorrect - actualMultipleCorrect;
+                  for (
+                    let i = 0;
+                    i < Math.min(needed, singleCorrectQuestions.length);
+                    i++
+                  ) {
                     const q = singleCorrectQuestions[i];
                     q.isMultipleCorrect = true;
                     // If only one correct answer, add another valid option (if available)
-                    if (q.correctAnswer && q.correctAnswer.length === 1 && q.options) {
+                    if (
+                      q.correctAnswer &&
+                      q.correctAnswer.length === 1 &&
+                      q.options
+                    ) {
                       const correctKey = q.correctAnswer[0];
                       const optionKeys = Object.keys(q.options);
-                      const otherOptions = optionKeys.filter(key => key !== correctKey);
+                      const otherOptions = optionKeys.filter(
+                        (key) => key !== correctKey,
+                      );
                       if (otherOptions.length > 0) {
                         // Add one more correct answer (randomly or first available)
                         q.correctAnswer.push(otherOptions[0]);
@@ -2432,8 +2563,13 @@ const createConsumer = async (id) => {
                   }
                 } else if (actualMultipleCorrect > expectedMultipleCorrect) {
                   // Need fewer multiple correct - convert some to single correct
-                  const excess = actualMultipleCorrect - expectedMultipleCorrect;
-                  for (let i = 0; i < Math.min(excess, multipleCorrectQuestions.length); i++) {
+                  const excess =
+                    actualMultipleCorrect - expectedMultipleCorrect;
+                  for (
+                    let i = 0;
+                    i < Math.min(excess, multipleCorrectQuestions.length);
+                    i++
+                  ) {
                     const q = multipleCorrectQuestions[i];
                     q.isMultipleCorrect = false;
                     // Keep only first correct answer
@@ -2455,17 +2591,21 @@ const createConsumer = async (id) => {
                       // Ensure input and output are present
                       if (!tc.input || tc.input.trim() === "") {
                         console.warn(
-                          `⚠️ Test case ${index + 1
-                          } missing input for question: ${question.questionTitle
-                          }`
+                          `⚠️ Test case ${
+                            index + 1
+                          } missing input for question: ${
+                            question.questionTitle
+                          }`,
                         );
                         tc.input = "1"; // Default fallback
                       }
                       if (!tc.output || tc.output.trim() === "") {
                         console.warn(
-                          `⚠️ Test case ${index + 1
-                          } missing output for question: ${question.questionTitle
-                          }`
+                          `⚠️ Test case ${
+                            index + 1
+                          } missing output for question: ${
+                            question.questionTitle
+                          }`,
                         );
                         tc.output = "0"; // Default fallback
                       }
@@ -2521,7 +2661,7 @@ const createConsumer = async (id) => {
                 } catch (progError) {
                   console.error(
                     `❌ Error processing Programming question in Consumer ${id}:`,
-                    progError
+                    progError,
                   );
                 }
               });
@@ -2545,30 +2685,30 @@ const createConsumer = async (id) => {
                 ],
               });
               console.log(
-                `✅ Consumer ${id} completed processing ${questionType} questions for '${category.category}'`
+                `✅ Consumer ${id} completed processing ${questionType} questions for '${category.category}'`,
               );
               console.log(
-                `✅ Response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`
+                `✅ Response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`,
               );
             } catch (sendError) {
               console.error(
                 `❌ Error sending response to Kafka in Consumer ${id}:`,
-                sendError
+                sendError,
               );
               throw sendError;
             }
           } catch (processError) {
             console.error(
               `❌ Error processing questions in Consumer ${id}:`,
-              processError
+              processError,
             );
             throw new Error(
-              `Failed to process questions: ${processError.message}`
+              `Failed to process questions: ${processError.message}`,
             );
           }
         } else {
           throw new Error(
-            `Invalid response structure: missing ${questionType} field`
+            `Invalid response structure: missing ${questionType} field`,
           );
         }
       } catch (error) {
@@ -2593,12 +2733,12 @@ const createConsumer = async (id) => {
               ],
             });
             console.log(
-              `✅ Error response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`
+              `✅ Error response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`,
             );
           } catch (errorSendError) {
             console.error(
               `❌ Failed to send error response to Kafka:`,
-              errorSendError
+              errorSendError,
             );
           }
         }
