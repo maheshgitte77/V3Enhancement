@@ -37,7 +37,7 @@ const extractCandidateCode = (code, starterCode, languageId) => {
   // For Java, handle class wrapper specially
   if (languageId === 62 || languageId === 91) {
     const methodMatch = code.match(
-      /public\s+\w+\s+\w+\s*\([^)]*\)\s*\{([\s\S]*)\}/
+      /public\s+\w+\s+\w+\s*\([^)]*\)\s*\{([\s\S]*)\}/,
     );
     if (methodMatch) {
       return methodMatch[1].trim();
@@ -132,7 +132,7 @@ const processProgrammingResponse = async (responseData) => {
     if (!candidateCode || candidateCode.trim().length === 0) {
       logger.info(
         "No candidate code (only boilerplate), creating placeholder analysis",
-        { questionId }
+        { questionId },
       );
 
       const boilerplateAnalysis = {
@@ -211,11 +211,23 @@ const processProgrammingResponse = async (responseData) => {
     // Run AI analysis for code quality feedback
     logger.info("Running AI code quality analysis", { questionId });
 
+    console.log("---------------------------------------------------");
+    console.log(
+      `[ProgrammingProcessor] Generating Analysis for Question ID: ${questionId}`,
+    );
+    console.log("---------------------------------------------------");
+
     const aiAnalysis = await aiExecutor.executeProgrammingAnalysis({
       ...responseData,
       candidateCode,
       languageName,
     });
+
+    console.log("---------------------------------------------------");
+    console.log(
+      `[ProgrammingProcessor] Analysis Generated Successfully for Question ID: ${questionId}`,
+    );
+    console.log("---------------------------------------------------");
 
     const processingCost = aiAnalysis.metadata?.processingCost || {
       totalCost: 0,
@@ -245,7 +257,7 @@ const processProgrammingResponse = async (responseData) => {
       contextType, // Pass context type to handler
     });
 
-    // Update question with analysisId (context-aware)
+    // Update question with analysisId and AI scores (context-aware)
     await databaseHandler.updateProgrammingQuestionAnalysis({
       candidateScreeningId,
       candidateAssessmentId,
@@ -254,6 +266,10 @@ const processProgrammingResponse = async (responseData) => {
       analysisId,
       processingCost,
       contextType, // Pass context type to handler
+      aiAnalysis: {
+        logicalCorrectness: aiAnalysis.logicalCorrectness,
+        codeQuality: aiAnalysis.codeQuality,
+      },
     });
 
     // Deduct credits for AI programming analysis (non-blocking)

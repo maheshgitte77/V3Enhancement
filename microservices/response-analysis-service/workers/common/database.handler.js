@@ -43,7 +43,7 @@ const withRetry = async (
   operation,
   operationName,
   maxRetries = 3,
-  baseDelay = 1000
+  baseDelay = 1000,
 ) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -75,7 +75,7 @@ const withRetry = async (
 const generateTypeSpecificContextualFactors = (
   responseType,
   analysis,
-  additionalData = {}
+  additionalData = {},
 ) => {
   // FIXED: Use AI-provided contextual factors if available
   if (
@@ -95,7 +95,7 @@ const generateTypeSpecificContextualFactors = (
     {
       responseType,
       isCheatingDetected: analysis.isCheatingDetected,
-    }
+    },
   );
 
   // Minimal neutral fallback - don't manufacture positive/negative statements
@@ -109,7 +109,7 @@ const createTypeSpecificRecord = (
   responseType,
   responseData,
   analysis,
-  additionalData = {}
+  additionalData = {},
 ) => {
   // Helper to generate communication text from rating if missing
   const getCommunicationText = (analysis) => {
@@ -193,7 +193,7 @@ const createTypeSpecificRecord = (
       ? {
           ...analysis.behavioralAnalysis,
           behavioralTimestamps: normalizeBehavioralTimestamps(
-            analysis.behavioralAnalysis.behavioralTimestamps
+            analysis.behavioralAnalysis.behavioralTimestamps,
           ),
         }
       : undefined,
@@ -230,7 +230,7 @@ const createTypeSpecificRecord = (
             totalInputTokens += stage.tokenUsage.inputTokens || 0;
             totalOutputTokens += stage.tokenUsage.outputTokens || 0;
           }
-        }
+        },
       );
 
       return {
@@ -418,7 +418,7 @@ const normalizeAnswerTime = (answerTime) => {
   // Normalize effectiveAnswerTimePercentage
   if (normalized.effectiveAnswerTimePercentage !== undefined) {
     normalized.effectiveAnswerTimePercentage = percentageStringToNumber(
-      normalized.effectiveAnswerTimePercentage
+      normalized.effectiveAnswerTimePercentage,
     );
   }
 
@@ -433,7 +433,7 @@ const saveToDatabase = async (
   responseData,
   flagResults,
   flagStats,
-  processingCost
+  processingCost,
 ) => {
   logger.info("V2.5: Saving multi-stage results to database", {
     type: responseData.type,
@@ -449,19 +449,19 @@ const saveToDatabase = async (
       CandidateScreeningResult.findOne({
         candidateScreeningId: responseData.candidateScreeningId,
       }),
-    "findCandidateScreeningResult"
+    "findCandidateScreeningResult",
   );
 
   if (!doc) {
     throw new Error(
-      `CandidateScreeningResult not found for candidateScreeningId: ${responseData.candidateScreeningId}`
+      `CandidateScreeningResult not found for candidateScreeningId: ${responseData.candidateScreeningId}`,
     );
   }
 
   // Find the skill that contains this question
   if (!doc.skills || !Array.isArray(doc.skills)) {
     throw new Error(
-      `Skills array not found or invalid in CandidateScreeningResult for candidateScreeningId: ${responseData.candidateScreeningId}`
+      `Skills array not found or invalid in CandidateScreeningResult for candidateScreeningId: ${responseData.candidateScreeningId}`,
     );
   }
 
@@ -483,7 +483,7 @@ const saveToDatabase = async (
       if (s[responseTypeKey] && Array.isArray(s[responseTypeKey])) {
         const foundQuestion = s[responseTypeKey].find(
           (q) =>
-            q._id && q._id.toString() === responseData.questionId.toString()
+            q._id && q._id.toString() === responseData.questionId.toString(),
         );
         if (foundQuestion) {
           skill = s;
@@ -497,7 +497,7 @@ const saveToDatabase = async (
     throw new Error(
       `Skill not found for questionId: ${
         responseData.questionId
-      }. Available skills: ${doc.skills.map((s) => s.skill).join(", ")}`
+      }. Available skills: ${doc.skills.map((s) => s.skill).join(", ")}`,
     );
   }
 
@@ -510,17 +510,17 @@ const saveToDatabase = async (
 
   if (!skill[responseTypeKey] || !Array.isArray(skill[responseTypeKey])) {
     throw new Error(
-      `${normalizedType} array not found in skill: ${skill.skill}`
+      `${normalizedType} array not found in skill: ${skill.skill}`,
     );
   }
 
   const question = skill[responseTypeKey].find(
-    (q) => q._id && q._id.toString() === responseData.questionId.toString()
+    (q) => q._id && q._id.toString() === responseData.questionId.toString(),
   );
 
   if (!question) {
     throw new Error(
-      `Question not found with questionId: ${responseData.questionId} in ${normalizedType} questions of skill: ${skill.skill}`
+      `Question not found with questionId: ${responseData.questionId} in ${normalizedType} questions of skill: ${skill.skill}`,
     );
   }
 
@@ -529,13 +529,13 @@ const saveToDatabase = async (
     normalizedType,
     responseData,
     mergedAnalysis,
-    {}
+    {},
   );
 
   // Create CandidateAnswerAiResponse (with retry for transient failures)
   const questionAiResponse = await withRetry(
     () => CandidateAnswerAiResponse.create(typeSpecificRecord),
-    "createCandidateAnswerAiResponse"
+    "createCandidateAnswerAiResponse",
   );
 
   logger.info("V2.5: CandidateAnswerAiResponse created", {
@@ -553,7 +553,7 @@ const saveToDatabase = async (
   question.answerSummary = answerSummary;
   question.transcription = questionAiResponse.transcription || "";
   question.correctPercentage = normalizeCorrectPercentageForStorage(
-    questionAiResponse.correctPercentage || 0
+    questionAiResponse.correctPercentage || 0,
   );
 
   // Merge cheatingAnalysis instead of overwriting (preserve webcam snapshot processing results)
@@ -595,7 +595,7 @@ const saveToDatabase = async (
 
   const mergedFlagResults = Array.from(flagMap.values());
   const mergedFlaggedChecks = mergedFlagResults.filter(
-    (f) => f.detected
+    (f) => f.detected,
   ).length;
   const mergedClearChecks = mergedFlagResults.filter((f) => !f.detected).length;
 
@@ -627,7 +627,7 @@ const saveToDatabase = async (
         detectedFlags: mergedFlagResults
           .filter((f) => f.detected)
           .map((f) => f.flag || f.flagKey),
-      }
+      },
     );
   }
 
@@ -645,7 +645,7 @@ const saveToDatabase = async (
   question.cheatingConfidence = Math.max(
     existingConfidence,
     newConfidence,
-    flagBasedConfidence
+    flagBasedConfidence,
   );
 
   // Log if flag-based confidence was used
@@ -702,7 +702,7 @@ const saveToDatabase = async (
           threshold: 60,
           flaggedChecks: mergedFlaggedChecks,
           questionId: responseData.questionId,
-        }
+        },
       );
     }
   }
@@ -822,6 +822,7 @@ const saveProgrammingAnalysis = async ({
  * Update programming question with analysisId (context-aware)
  * - Screening: candidatescreeningresults collection
  * - Assessment: candidateassessmentresults collection
+ * NEW: Calculates and updates obtainedScore based on AI's logicalCorrectness
  */
 const updateProgrammingQuestionAnalysis = async ({
   candidateScreeningId,
@@ -831,6 +832,7 @@ const updateProgrammingQuestionAnalysis = async ({
   analysisId,
   processingCost,
   contextType,
+  aiAnalysis, // NEW: Contains logicalCorrectness and codeQuality scores
 }) => {
   const mongoose = require("mongoose");
   const { ObjectId } = mongoose.Types;
@@ -864,20 +866,32 @@ const updateProgrammingQuestionAnalysis = async ({
     return;
   }
 
+  // Track if we found and updated the question
+  let questionFound = false;
+  let updatedQuestion = null;
+  let skillIndex = -1;
+
   // Update the specific question
   // For assessments, structure is: skills[].programmingQuestions.{easy/medium/hard}Questions[]
   // For screenings, structure is: skills[].programming[]
   const updatedSkills =
-    doc.testQuestions?.skills?.map((skillItem) => {
+    doc.testQuestions?.skills?.map((skillItem, sIndex) => {
       if (isAssessment) {
         // Assessment structure
-        if (skillItem.skill?.name === skill && skillItem.programmingQuestions) {
+        // Assessment structure
+        // Relaxed check: Search all skills with programmingQuestions, not just name match
+        if (skillItem.programmingQuestions) {
           ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
             (difficulty) => {
               if (skillItem.programmingQuestions[difficulty]) {
                 skillItem.programmingQuestions[difficulty] =
                   skillItem.programmingQuestions[difficulty].map((question) => {
-                    if (question._id?.toString() === questionId.toString()) {
+                    const qId = question._id?.toString();
+                    const qDefId = question.question?._id?.toString();
+                    const targetId = questionId.toString();
+
+                    if (qId === targetId || qDefId === targetId) {
+                      // Store AI analysis metadata
                       question.aiAnalysis = {
                         analysisId,
                         timestamp: new Date(),
@@ -885,11 +899,45 @@ const updateProgrammingQuestionAnalysis = async ({
                       question.programmingAnalysisId = analysisId;
                       question.aiAnalysisTimestamp = new Date();
                       question.processingCost = processingCost;
+
+                      // NEW: Calculate score based on AI's logical correctness
+                      if (aiAnalysis?.logicalCorrectness) {
+                        const maxScore = question.question?.score || 0;
+                        const logicalScore =
+                          aiAnalysis.logicalCorrectness.score || 0;
+
+                        // Calculate obtained score: (AI score / 100) * maxScore
+                        const obtainedScore = Math.round(
+                          (logicalScore / 100) * maxScore,
+                        );
+
+                        question.obtainedScore = obtainedScore;
+                        question.aiLogicalScore = logicalScore;
+                        question.aiCodeQualityScore =
+                          aiAnalysis.codeQuality?.score || 0;
+
+                        logger.info(
+                          "Programming question score calculated from AI",
+                          {
+                            questionId,
+                            maxScore,
+                            logicalScore,
+                            obtainedScore,
+                            contextType: isAssessment
+                              ? "assessment"
+                              : "screening",
+                          },
+                        );
+                      }
+
+                      questionFound = true;
+                      updatedQuestion = question;
+                      skillIndex = sIndex;
                     }
                     return question;
                   });
               }
-            }
+            },
           );
         }
       } else {
@@ -900,6 +948,34 @@ const updateProgrammingQuestionAnalysis = async ({
               question.programmingAnalysisId = analysisId;
               question.programmingAnalysisTimestamp = new Date();
               question.processingCost = processingCost;
+
+              // NEW: Calculate score based on AI's logical correctness
+              if (aiAnalysis?.logicalCorrectness) {
+                const maxScore = question.question?.score || 0;
+                const logicalScore = aiAnalysis.logicalCorrectness.score || 0;
+
+                // Calculate obtained score: (AI score / 100) * maxScore
+                const obtainedScore = Math.round(
+                  (logicalScore / 100) * maxScore,
+                );
+
+                question.obtainedScore = obtainedScore;
+                question.aiLogicalScore = logicalScore;
+                question.aiCodeQualityScore =
+                  aiAnalysis.codeQuality?.score || 0;
+
+                logger.info("Programming question score calculated from AI", {
+                  questionId,
+                  maxScore,
+                  logicalScore,
+                  obtainedScore,
+                  contextType: isAssessment ? "assessment" : "screening",
+                });
+              }
+
+              questionFound = true;
+              updatedQuestion = question;
+              skillIndex = sIndex;
             }
             return question;
           });
@@ -907,14 +983,42 @@ const updateProgrammingQuestionAnalysis = async ({
       }
       return skillItem;
     }) ||
-    doc.skills?.map((skillItem) => {
+    doc.skills?.map((skillItem, sIndex) => {
       // Fallback for older schema structure
       if (skillItem.skill === skill && skillItem.programming) {
         skillItem.programming = skillItem.programming.map((question) => {
-          if (question._id?.toString() === questionId.toString()) {
+          const qId = question._id?.toString();
+          const qDefId = question.question?._id?.toString();
+          const targetId = questionId.toString();
+
+          if (qId === targetId || qDefId === targetId) {
             question.programmingAnalysisId = analysisId;
             question.programmingAnalysisTimestamp = new Date();
             question.processingCost = processingCost;
+
+            // NEW: Calculate score based on AI's logical correctness
+            if (aiAnalysis?.logicalCorrectness) {
+              const maxScore = question.question?.score || 0;
+              const logicalScore = aiAnalysis.logicalCorrectness.score || 0;
+
+              const obtainedScore = Math.round((logicalScore / 100) * maxScore);
+
+              question.obtainedScore = obtainedScore;
+              question.aiLogicalScore = logicalScore;
+              question.aiCodeQualityScore = aiAnalysis.codeQuality?.score || 0;
+
+              logger.info("Programming question score calculated from AI", {
+                questionId,
+                maxScore,
+                logicalScore,
+                obtainedScore,
+                contextType: isAssessment ? "assessment" : "screening",
+              });
+            }
+
+            questionFound = true;
+            updatedQuestion = question;
+            skillIndex = sIndex;
           }
           return question;
         });
@@ -922,26 +1026,108 @@ const updateProgrammingQuestionAnalysis = async ({
       return skillItem;
     });
 
-  // Update document
-  const updateField = doc.testQuestions?.skills
-    ? "testQuestions.skills"
-    : "skills";
-  await db
-    .collection(collectionName)
-    .updateOne(
+  // NEW: Recalculate skill-level and document-level scores
+  if (questionFound && updatedSkills && skillIndex >= 0) {
+    const targetSkill = updatedSkills[skillIndex];
+
+    // Recalculate skill's obtainedProgrammingScore
+    let skillProgrammingScore = 0;
+
+    if (isAssessment && targetSkill.programmingQuestions) {
+      // Assessment: sum across all difficulty levels
+      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
+        (difficulty) => {
+          if (targetSkill.programmingQuestions[difficulty]) {
+            targetSkill.programmingQuestions[difficulty].forEach((q) => {
+              skillProgrammingScore += q.obtainedScore || 0;
+            });
+          }
+        },
+      );
+    } else if (targetSkill.programming) {
+      // Screening: sum all programming questions
+      targetSkill.programming.forEach((q) => {
+        skillProgrammingScore += q.obtainedScore || 0;
+      });
+    }
+
+    targetSkill.obtainedProgrammingScore = skillProgrammingScore;
+
+    // Recalculate skill's total marksObtained (MCQ + Programming + SQL)
+    const mcqScore = targetSkill.obtainedMcqScore || 0;
+    const sqlScore = targetSkill.obtainedSqlScore || 0;
+    targetSkill.marksObtained = mcqScore + skillProgrammingScore + sqlScore;
+
+    logger.info("Skill-level scores recalculated", {
+      skill,
+      obtainedProgrammingScore: skillProgrammingScore,
+      marksObtained: targetSkill.marksObtained,
+      contextType: isAssessment ? "assessment" : "screening",
+    });
+
+    // Recalculate document-level totalObtainedScore
+    let totalObtainedScore = 0;
+    updatedSkills.forEach((s) => {
+      totalObtainedScore += s.marksObtained || 0;
+    });
+
+    // Update document
+    const updateField = doc.testQuestions?.skills
+      ? "testQuestions.skills"
+      : "skills";
+    await db.collection(collectionName).updateOne(
       { [idField]: idObjectId },
-      { $set: { [updateField]: updatedSkills } }
+      {
+        $set: {
+          [updateField]: updatedSkills,
+          totalObtainedScore: totalObtainedScore,
+        },
+      },
     );
 
-  logger.info(
-    `Programming question updated with analysisId in ${collectionName}`,
-    {
-      [idField]: idValue,
-      contextType: isAssessment ? "assessment" : "screening",
-      questionId,
-      analysisId,
-    }
-  );
+    logger.info(
+      `Programming question updated with AI-based score in ${collectionName}`,
+      {
+        [idField]: idValue,
+        contextType: isAssessment ? "assessment" : "screening",
+        questionId,
+        analysisId,
+        obtainedScore: updatedQuestion?.obtainedScore,
+        totalObtainedScore,
+      },
+    );
+  } else if (questionFound) {
+    // Question found but no score recalculation needed (or skillIndex issue) - save the updated skills array
+    const updateField = doc.testQuestions?.skills
+      ? "testQuestions.skills"
+      : "skills";
+    await db
+      .collection(collectionName)
+      .updateOne(
+        { [idField]: idObjectId },
+        { $set: { [updateField]: updatedSkills } },
+      );
+
+    logger.info(
+      `Programming question updated with analysisId in ${collectionName}`,
+      {
+        [idField]: idValue,
+        contextType: isAssessment ? "assessment" : "screening",
+        questionId,
+        analysisId,
+      },
+    );
+  } else {
+    logger.warn(
+      `Programming question NOT found for update in ${collectionName}`,
+      {
+        [idField]: idValue,
+        contextType: isAssessment ? "assessment" : "screening",
+        questionId,
+        skill,
+      },
+    );
+  }
 };
 
 module.exports = {
