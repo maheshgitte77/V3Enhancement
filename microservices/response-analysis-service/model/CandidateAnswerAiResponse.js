@@ -292,6 +292,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
               "TAB_SWITCHING",
               "EXTERNAL_INTERACTION",
               "QUESTION_COPYING",
+              "ALGORITHMIC_DETECTION",
             ],
           },
           severity: {
@@ -623,7 +624,7 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
   {
     timestamps: true,
     strict: false, // Allow additional fields for flexibility
-  }
+  },
 );
 
 /**
@@ -761,5 +762,5 @@ CandidateAnswerAiResponseSchema.pre("validate", function (next) {
 
 module.exports = mongoose.model(
   "CandidateAnswerAiResponse",
-  CandidateAnswerAiResponseSchema
+  CandidateAnswerAiResponseSchema,
 );

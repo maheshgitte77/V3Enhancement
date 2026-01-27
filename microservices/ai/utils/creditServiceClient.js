@@ -13,13 +13,18 @@ class CreditServiceClient {
       if (!clientId) return null;
       const baseUrl = process.env.CREDIT_SERVICE_URL;
       const response = await axios.get(
-        `${baseUrl}/credits/wallet/${clientId}/balance`
+        `${baseUrl}/credits/wallet/${clientId}/balance`,
+        {
+          headers: {
+            "x-service-key": process.env.CREDIT_SERVICE_KEY,
+          },
+        },
       );
       return response.data;
     } catch (error) {
       console.error(
         `❌ Failed to fetch balance for client ${clientId}:`,
-        error.message
+        error.message,
       );
       return null;
     }
@@ -45,14 +50,19 @@ class CreditServiceClient {
 
       const response = await axios.post(
         `${baseUrl}/credits/transaction/ai-usage`,
-        { ...CreditServiceClient.filterReqBody(reqBody), serviceKey: sKey }
+        { ...CreditServiceClient.filterReqBody(reqBody), serviceKey: sKey },
+        {
+          headers: {
+            "x-service-key": process.env.CREDIT_SERVICE_KEY,
+          },
+        },
       );
       console.log(`✅ Credit deduction SUCCESS:`, response.data);
       return response.data;
     } catch (error) {
       console.error(
         `❌ Credit deduction FAILED: `,
-        error.response?.data || error.message
+        error.response?.data || error.message,
       );
       if (error.response) {
         const status = error.response.status;
@@ -66,7 +76,7 @@ class CreditServiceClient {
         }
         console.error(
           "❌ Credit service error:",
-          data.message || "Unknown error"
+          data.message || "Unknown error",
         );
       } else if (error.request) {
         console.error("❌ Credit service unreachable");
