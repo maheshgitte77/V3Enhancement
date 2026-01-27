@@ -878,13 +878,19 @@ const updateProgrammingQuestionAnalysis = async ({
     doc.testQuestions?.skills?.map((skillItem, sIndex) => {
       if (isAssessment) {
         // Assessment structure
-        if (skillItem.skill?.name === skill && skillItem.programmingQuestions) {
+        // Assessment structure
+        // Relaxed check: Search all skills with programmingQuestions, not just name match
+        if (skillItem.programmingQuestions) {
           ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
             (difficulty) => {
               if (skillItem.programmingQuestions[difficulty]) {
                 skillItem.programmingQuestions[difficulty] =
                   skillItem.programmingQuestions[difficulty].map((question) => {
-                    if (question._id?.toString() === questionId.toString()) {
+                    const qId = question._id?.toString();
+                    const qDefId = question.question?._id?.toString();
+                    const targetId = questionId.toString();
+
+                    if (qId === targetId || qDefId === targetId) {
                       // Store AI analysis metadata
                       question.aiAnalysis = {
                         analysisId,
@@ -981,7 +987,11 @@ const updateProgrammingQuestionAnalysis = async ({
       // Fallback for older schema structure
       if (skillItem.skill === skill && skillItem.programming) {
         skillItem.programming = skillItem.programming.map((question) => {
-          if (question._id?.toString() === questionId.toString()) {
+          const qId = question._id?.toString();
+          const qDefId = question.question?._id?.toString();
+          const targetId = questionId.toString();
+
+          if (qId === targetId || qDefId === targetId) {
             question.programmingAnalysisId = analysisId;
             question.programmingAnalysisTimestamp = new Date();
             question.processingCost = processingCost;
@@ -1086,8 +1096,8 @@ const updateProgrammingQuestionAnalysis = async ({
         totalObtainedScore,
       },
     );
-  } else {
-    // Question not found or no score update needed - just update analysisId
+  } else if (questionFound) {
+    // Question found but no score recalculation needed (or skillIndex issue) - save the updated skills array
     const updateField = doc.testQuestions?.skills
       ? "testQuestions.skills"
       : "skills";
@@ -1105,6 +1115,16 @@ const updateProgrammingQuestionAnalysis = async ({
         contextType: isAssessment ? "assessment" : "screening",
         questionId,
         analysisId,
+      },
+    );
+  } else {
+    logger.warn(
+      `Programming question NOT found for update in ${collectionName}`,
+      {
+        [idField]: idValue,
+        contextType: isAssessment ? "assessment" : "screening",
+        questionId,
+        skill,
       },
     );
   }
