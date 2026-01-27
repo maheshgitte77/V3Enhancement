@@ -216,7 +216,7 @@ const pollFileStatus = async (fileName) => {
           fileName,
           attempt: attempt + 1,
           lastKnownState,
-        }
+        },
       );
 
       const file = await client.files.get({ name: fileName });
@@ -239,7 +239,7 @@ const pollFileStatus = async (fileName) => {
 
       const delay = Math.min(
         POLL_CONFIG.baseDelayMs * Math.pow(2, attempt),
-        POLL_CONFIG.maxDelayMs
+        POLL_CONFIG.maxDelayMs,
       );
       logger.info(`V2.5: Waiting ${delay}ms before next poll attempt`, {
         fileName,
@@ -278,7 +278,7 @@ const pollFileStatus = async (fileName) => {
   }
 
   throw new Error(
-    `File polling timed out after ${POLL_CONFIG.maxAttempts} attempts`
+    `File polling timed out after ${POLL_CONFIG.maxAttempts} attempts`,
   );
 };
 
@@ -332,7 +332,7 @@ const processVideoResponse = async (responseData) => {
       // Extract file information from responseData.file object
       if (!responseData.file) {
         throw new Error(
-          "File object is missing in responseData and no Azure URL provided"
+          "File object is missing in responseData and no Azure URL provided",
         );
       }
 
@@ -343,7 +343,7 @@ const processVideoResponse = async (responseData) => {
       // Validate required file properties
       if (!fileName) {
         throw new Error(
-          "File name is missing: both filename and originalname are undefined"
+          "File name is missing: both filename and originalname are undefined",
         );
       }
       if (!fileMimetype) {
@@ -410,7 +410,7 @@ const processVideoResponse = async (responseData) => {
     const stage1Results = await aiExecutor.executeBehavioralAnalysis(
       fileInput,
       responseData,
-      "video"
+      "video",
     );
 
     logger.info("V2.5: Stage 1 - Behavioral analysis completed", {
@@ -430,7 +430,7 @@ const processVideoResponse = async (responseData) => {
         const results = await aiExecutor.executeScoring(
           stage1Results,
           responseData,
-          "video"
+          "video",
         );
         logger.info("V2.5: Stage 2 - Scoring completed", {
           correctPercentage: results.correctPercentage,
@@ -447,7 +447,7 @@ const processVideoResponse = async (responseData) => {
           null, // Stage 2 not available yet
           responseData,
           "video",
-          null // No typing analysis for video
+          null, // No typing analysis for video
         );
         logger.info("V2.5: Stage 3 - Initial cheating detection completed", {
           isCheatingDetected: results.isCheatingDetected,
@@ -462,7 +462,7 @@ const processVideoResponse = async (responseData) => {
     const finalCheatingResults = cheatingDetector.refineCheatingDetection(
       stage3InitialResults,
       stage2Results,
-      stage1Results
+      stage1Results,
     );
 
     // Process flags with cached analysis for performance
@@ -472,13 +472,13 @@ const processVideoResponse = async (responseData) => {
       responseData,
       "video",
       null,
-      cachedAnalysis
+      cachedAnalysis,
     );
 
     // ENHANCED: Validate sync between cheating detection and flag system
     const syncValidation = cheatingDetector.validateCheatingFlagSync(
       finalCheatingResults,
-      flagResults
+      flagResults,
     );
 
     // Use validated flags (auto-corrected if needed)
@@ -509,12 +509,65 @@ const processVideoResponse = async (responseData) => {
       wasAutoCorrected: syncValidation.wasAutoCorrected,
     });
 
+    // ====== SYNC integrityAnalysis WITH ALGORITHMIC DETECTION ======
+    // Fix: When algorithmic detection flags cheating but AI returned CLEAR verdict,
+    // update integrityAnalysis to reflect the actual detection state
+    if (
+      finalCheatingResults.isCheatingDetected &&
+      finalCheatingResults.cheatingConfidence > 0
+    ) {
+      const currentVerdict = stage1Results.integrityAnalysis?.verdict;
+      const shouldUpdateVerdict = currentVerdict === "CLEAR" || !currentVerdict;
+
+      if (shouldUpdateVerdict) {
+        // Determine user-friendly verdict message based on confidence
+        const newVerdict =
+          finalCheatingResults.cheatingConfidence >= 75
+            ? "SUSPECT"
+            : "INCONCLUSIVE";
+
+        // Update integrityAnalysis verdict
+        if (!stage1Results.integrityAnalysis) {
+          stage1Results.integrityAnalysis = {};
+        }
+        stage1Results.integrityAnalysis.verdict = newVerdict;
+        stage1Results.integrityAnalysis.confidenceScore =
+          finalCheatingResults.cheatingConfidence / 100;
+
+        // Add flags from cheatingIndicators if integrityAnalysis.flags was empty
+        if (
+          !stage1Results.integrityAnalysis.flags ||
+          stage1Results.integrityAnalysis.flags.length === 0
+        ) {
+          stage1Results.integrityAnalysis.flags =
+            finalCheatingResults.cheatingIndicators?.map((indicator) => ({
+              type: "ALGORITHMIC_DETECTION",
+              severity:
+                finalCheatingResults.cheatingConfidence >= 75
+                  ? "HIGH"
+                  : "MEDIUM",
+              evidence: indicator,
+              keyTimestamps: [],
+            })) || [];
+        }
+
+        logger.info(
+          "V2.5: integrityAnalysis synced with algorithmic detection",
+          {
+            questionId: responseData.questionId,
+            newVerdict: newVerdict,
+            cheatingConfidence: finalCheatingResults.cheatingConfidence,
+          },
+        );
+      }
+    }
+
     // ====== MERGE RESULTS ======
     logger.info("V2.5: Merging all stage results");
     const mergedAnalysis = resultMerger.mergeAnalysisResults(
       stage1Results,
       stage2Results,
-      finalCheatingResults
+      finalCheatingResults,
     );
 
     // Validate results
@@ -549,7 +602,7 @@ const processVideoResponse = async (responseData) => {
         responseData,
         validatedFlagResults, // Use validated/auto-corrected flags
         flagStats,
-        processingCost
+        processingCost,
       );
 
     const totalDuration = Date.now() - startTime;

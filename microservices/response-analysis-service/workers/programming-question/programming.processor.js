@@ -140,25 +140,35 @@ const processProgrammingResponse = async (responseData) => {
           score: 0,
           maxScore: 100,
           reasoning:
-            "No implementation code found. Only boilerplate submitted.",
-          strengths: [],
-          weaknesses: ["No implementation provided"],
-          suggestions: ["Implement the required solution logic"],
+            "The candidate submitted only the starter template without implementing any solution logic.",
+          strengths: [
+            "Not evaluated as the candidate submitted the starter template",
+          ],
+          weaknesses: [
+            "Not evaluated as the candidate submitted the starter template",
+          ],
+          suggestions: [
+            "Not evaluated as the candidate submitted the starter template",
+          ],
         },
         codeQuality: {
           score: 0,
           maxScore: 100,
-          reasoning: "Unable to assess - no candidate code found.",
+          reasoning:
+            "Code quality cannot be evaluated as the candidate did not write any custom code.",
           aspects: {
-            readability: "N/A",
-            maintainability: "N/A",
-            efficiency: "N/A",
-            bestPractices: "N/A",
+            readability: "Not evaluable – no custom code was written",
+            maintainability: "Not evaluable – no custom code was written",
+            efficiency: "Not evaluable – no custom code was written",
+            bestPractices: "Not evaluable – no custom code was written",
           },
         },
         overallAssessment: {
-          summary: "No implementation submitted.",
-          recommendations: ["Complete the implementation"],
+          summary:
+            "Not evaluated as the candidate submitted the starter template",
+          recommendations: [
+            "Not evaluated as the candidate submitted the starter template",
+          ],
         },
         isBoilerplateOnly: true,
       };

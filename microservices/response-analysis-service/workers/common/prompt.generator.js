@@ -1052,6 +1052,36 @@ ${candidateCode || "// No code provided"}
 TEST CASES (for context):
 ${JSON.stringify(testCases || [], null, 2)}
 
+**MANDATORY ARRAY CONTENT RULES:**
+You MUST provide at least 1 item in EACH array field (strengths, weaknesses, suggestions, recommendations). NEVER return empty arrays.
+
+**For EXCELLENT code (score >= 85):**
+- DO NOT fabricate or hallucinate weaknesses that don't exist
+- In "weaknesses": Use positive affirmations like:
+  - "No significant weaknesses identified - the implementation is well-crafted"
+  - "The candidate has addressed all key aspects of the problem effectively"
+  - "No major issues found in the logic or implementation"
+- In "suggestions": Use encouraging statements like:
+  - "The candidate has demonstrated strong problem-solving skills"
+  - "Continue applying these coding practices in future implementations"
+  - "The solution shows good understanding of the requirements"
+- In "recommendations": Use affirmative feedback like:
+  - "Excellent implementation - the candidate has covered the requirements comprehensively"
+  - "Strong coding skills demonstrated - ready for production-level work"
+  - "The candidate shows proficiency in ${
+    languageName || "the programming language"
+  }"
+
+**For AVERAGE code (score 50-84):**
+- Provide specific, real technical issues found
+- Give actionable improvement suggestions
+- Be constructive but honest
+
+**For POOR code (score < 50):**
+- Clearly identify fundamental issues
+- Provide learning-focused recommendations
+- Be specific about what needs improvement
+
 Please provide a comprehensive analysis in the following JSON format:
 {
   "logicalCorrectness": {
