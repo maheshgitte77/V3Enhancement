@@ -211,11 +211,23 @@ const processProgrammingResponse = async (responseData) => {
     // Run AI analysis for code quality feedback
     logger.info("Running AI code quality analysis", { questionId });
 
+    console.log("---------------------------------------------------");
+    console.log(
+      `[ProgrammingProcessor] Generating Analysis for Question ID: ${questionId}`,
+    );
+    console.log("---------------------------------------------------");
+
     const aiAnalysis = await aiExecutor.executeProgrammingAnalysis({
       ...responseData,
       candidateCode,
       languageName,
     });
+
+    console.log("---------------------------------------------------");
+    console.log(
+      `[ProgrammingProcessor] Analysis Generated Successfully for Question ID: ${questionId}`,
+    );
+    console.log("---------------------------------------------------");
 
     const processingCost = aiAnalysis.metadata?.processingCost || {
       totalCost: 0,
