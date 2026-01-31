@@ -651,7 +651,7 @@ If candidate has 3-5 years experience AND answer is relevant:
  */
 const generateSubjectiveScoringPrompt = (
   responseData,
-  typingAnalysis = null
+  typingAnalysis = null,
 ) => {
   let typingContext = "";
 
@@ -834,7 +834,7 @@ const generateScreeningSummaryPrompt = (
   questionData,
   recommendation,
   integrityScore,
-  evidenceStrength = null
+  evidenceStrength = null,
 ) => {
   let prompt = `
 You are an HR Analytics AI tasked with creating concise, decision-oriented candidate evaluation summaries. Analyze the screening data and provide clear, actionable insights for hiring decisions.
@@ -913,7 +913,7 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - This could be due to candidate thinking deeply, looking at notes, or AI analysis error
 - DO NOT treat this as a red flag or integrity concern in the summary
 - If mentioning at all, phrase as: "Minor observation in Q${evidenceStrength.flaggedQuestionIndices.join(
-        ", Q"
+        ", Q",
       )} may warrant brief clarification during interview"
 - Focus the summary on the candidate's STRENGTHS and technical performance
 - The recommendation "${recommendation}" should NOT be negatively impacted by this minor observation
@@ -941,7 +941,7 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
       // Strong concern - AI should clearly highlight integrity issues
       const correlationInfo = evidenceStrength.hasCorrelatedCheatingPattern
         ? `\n- Correlated Cheating Patterns: ${evidenceStrength.matchedCorrelations.join(
-            ", "
+            ", ",
           )} (Strong indicator of deliberate cheating)`
         : "";
 
@@ -1103,6 +1103,14 @@ Please provide a comprehensive analysis in the following JSON format:
       "bestPractices": "Good"
     }
   },
+  "analyticalThinking": {
+    "score": 82,
+    "reasoning": "The candidate breaks down the problem effectively..."
+  },
+  "problemSolvingAbility": {
+    "score": 88,
+    "reasoning": "Demonstrates strong ability to handle edge cases..."
+  },
   "overallAssessment": {
     "summary": "Solid solution with room for improvement",
     "recommendations": ["Focus on edge cases", "Optimize time complexity"]
@@ -1121,16 +1129,59 @@ const generateAssessmentSummaryPrompt = (
   scores,
   recommendation,
   integrityScore,
-  evidenceStrength = null
+  metadata = {},
 ) => {
+  const { hasMcq, hasProgramming, hasSql } = metadata;
+
+  // Build dynamic summary requirements based on assessment content
+  let summaryPoints = [
+    "1. **Overall Performance Overview**: One sentence about overall candidate performance and assessment integrity across all attempted sections.",
+  ];
+
+  if (hasMcq && hasProgramming) {
+    summaryPoints.push(
+      "2. **MCQ Performance Summary**: Specific performance on the MCQ section, highlighting strengths or weaknesses in theoretical knowledge.",
+      "3. **Programming Performance Summary**: Specific performance on the Programming section, covering logic, code quality, and test case success.",
+    );
+  } else if (hasMcq && hasSql) {
+    summaryPoints.push(
+      "2. **Theoretical Knowledge**: Deep dive into MCQ performance, identifying specific technical areas where the candidate excelled or struggled.",
+      "3. **SQL & Database Proficiency**: Analysis of database query implementation, schema understanding, and logical correctness in SQL.",
+    );
+  } else if (hasProgramming && hasSql) {
+    summaryPoints.push(
+      "2. **Technical Implementation**: Analyze the candidate's ability to translate requirements into functional code and efficient algorithms.",
+      "3. **SQL & Database Proficiency**: Analysis of database query implementation, schema understanding, and logical correctness in SQL.",
+    );
+  } else if (hasProgramming) {
+    summaryPoints.push(
+      "2. **Code Logic & Algorithmic Thinking**: Detailed analysis of problem-solving approach, algorithm efficiency, and handling of complex logic.",
+      "3. **Practical Implementation Quality**: Evaluation of code readability, maintainability, and test case success rates.",
+    );
+  } else if (hasMcq) {
+    summaryPoints.push(
+      "2. **Theoretical Depth**: Analysis of candidate's grasp on conceptual topics as demonstrated in MCQ performance.",
+      "3. **Skill Consistency**: Evaluation of performance stability across different technical domains and difficulty levels.",
+    );
+  } else if (hasSql) {
+    summaryPoints.push(
+      "2. **Database Design & Logic**: Analysis of the candidate's ability to structure queries and understand data relationships.",
+      "3. **Query Accuracy**: Evaluation of SQL accuracy, handling of joins/filtering, and correctness against requirements.",
+    );
+  } else {
+    // Fallback if structure is unknown
+    summaryPoints.push(
+      "2. **Technical Section Analysis**: Specific performance indicators from attempted technical assessments.",
+      "3. **Learning Potential**: Analysis of candidate's approach to the assessment and areas for development.",
+    );
+  }
+
   let prompt = `
 You are an HR Analytics AI tasked with creating concise, decision-oriented candidate assessment summaries. Analyze the assessment data and provide clear, actionable insights for hiring decisions.
 
 **ASSESSMENT SUMMARY REQUIREMENTS:**
 Generate exactly 3 concise, professional bullet points:
-1. **Overall Performance Overview**: One sentence about overall candidate performance and assessment integrity across MCQ and Programming sections.
-2. **MCQ Performance Summary**: Specific performance on the MCQ section, highlighting strengths or weaknesses in theoretical knowledge.
-3. **Programming Performance Summary**: Specific performance on the Programming section, covering logic, code quality, and test case success.
+${summaryPoints.join("\n")}
 
 Each point should be:
 - Maximum 25 words
@@ -1149,7 +1200,7 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 
 **Format for fitScorePointers:**
 1. **✅ Fit for Role Type**: One clear sentence stating if candidate fits the role and recommended action
-2. **⚡ Primary Strength**: One specific strength observed (theoretical knowledge OR practical programming)
+2. **⚡ Primary Strength**: One specific strength observed (theoretical knowledge OR practical skills)
 3. **🛠️ Area to Watch**: One brief area for improvement or concern (technical gaps or integrity patterns)
 
 **EVALUATION DATA:**
@@ -1166,27 +1217,41 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
       ? scores.programmingCodeQualityScore + "%"
       : "N/A"
   }
+- **SQL Score**: ${scores.sqlScore !== null ? scores.sqlScore + "%" : "N/A"}
 - **Final Recommendation (Preliminary)**: ${recommendation}
 
 **AI INSTRUCTION FOR SUMMARY:**
 - Base your analysis on the provided scores and integrity indicators.
-- If MCQ scores are high but programming is low, highlight the gap between theory and practice.
-- If integrity score is low, mentions the "Area to Watch" accordingly.
+- If MCQ scores are high but practical scores (Programming/SQL) are low, highlight the gap between theory and practice.
+- If integrity score is low, mention the "Area to Watch" accordingly.
 - Ensure the summary reflects the specific technical context of the assessment.
+- DO NOT mention "Programming" if it wasn't part of the test (N/A). Stick to what was actually tested.
 
 **Response JSON Format:**
 {
   "assessmentSummary": [
     "Overall performance overview (max 25 words)",
-    "MCQ performance summary (max 25 words)", 
-    "Programming performance summary (max 25 words)"
+    "Section performance summary 1 (max 25 words)", 
+    "Section performance summary 2 (max 25 words)"
   ],
-  "communicationClarity": 85, (Estimate based on overall coherence if not measured directly)
+  "communicationClarity": 85,
   "analyticalThinking": ${
-    scores.programmingCodeQualityScore || scores.mcqScore || 50
+    scores.programmingCodeQualityScore !== null
+      ? scores.programmingCodeQualityScore
+      : scores.mcqScore !== null
+        ? scores.mcqScore
+        : scores.sqlScore !== null
+          ? scores.sqlScore
+          : 50
   },
   "problemSolvingAbility": ${
-    scores.programmingTestCaseScore || scores.mcqScore || 50
+    scores.programmingTestCaseScore !== null
+      ? scores.programmingTestCaseScore
+      : scores.mcqScore !== null
+        ? scores.mcqScore
+        : scores.sqlScore !== null
+          ? scores.sqlScore
+          : 50
   },
   "fitScorePointers": [
     "✅ Fit for Role Type: [Specific fit assessment and recommended action]",

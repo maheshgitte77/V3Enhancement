@@ -79,47 +79,40 @@ const parseAIResponse = (aiResponse) => {
  * @returns {number} Average fit score (0-100)
  */
 const calculateCandidateFitScore = (assessmentResult) => {
-  let scores = [];
+  let totalObtained = 0;
+  let totalMax = 0;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
-      // MCQ scores
-      const mcqQuestions = skill.mcqQuestions || {};
-      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
-        if (mcqQuestions[level]) {
-          mcqQuestions[level].forEach((mcq) => {
-            if (mcq.isAttempted && mcq.obtainedScore !== undefined) {
-              const maxScore = mcq.question?.marks || 1;
-              const percentage = (mcq.obtainedScore / maxScore) * 100;
-              scores.push(percentage);
-            }
-          });
-        }
-      });
-
-      // Programming scores
-      const programmingQuestions = skill.programmingQuestions || {};
-      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
-        if (programmingQuestions[level]) {
-          programmingQuestions[level].forEach((prog) => {
-            if (prog.isAttempted && prog.obtainedScore !== undefined) {
-              const maxScore = prog.question?.marks || 100;
-              const percentage = (prog.obtainedScore / maxScore) * 100;
-              scores.push(percentage);
-            }
-          });
-        }
-      });
+      ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
+        (type) => {
+          const questions = skill[type] || {};
+          ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
+            (level) => {
+              if (questions[level]) {
+                questions[level].forEach((q) => {
+                  if (q.isAttempted && q.obtainedScore !== undefined) {
+                    const max =
+                      q.question?.marks ||
+                      (type === "programmingQuestions" ? 100 : 1);
+                    totalObtained += Math.min(q.obtainedScore, max);
+                    totalMax += max;
+                  }
+                });
+              }
+            },
+          );
+        },
+      );
     });
   }
 
-  const candidateFitScore = scores.length
-    ? parseFloat(
-        (scores.reduce((sum, val) => sum + val, 0) / scores.length).toFixed(2)
-      )
-    : 0;
+  const candidateFitScore =
+    totalMax > 0
+      ? parseFloat(((totalObtained / totalMax) * 100).toFixed(2))
+      : 0;
 
-  return candidateFitScore;
+  return Math.min(candidateFitScore, 100);
 };
 
 /**
@@ -147,9 +140,9 @@ const calculateIntegrityScore = (assessmentResult) => {
                 totalCheatingFlags += question.detectedCheatings?.length || 0;
               }
             });
-          }
+          },
         );
-      }
+      },
     );
   });
 
@@ -164,20 +157,20 @@ const calculateIntegrityScore = (assessmentResult) => {
 
   const flagsPenalty = Math.min(
     (totalCheatingFlags / maxExpectedFlags) * 40,
-    40
+    40,
   );
   const exitsPenalty = Math.min(
     (totalFullScreenExits / maxExpectedExits) * 30,
-    30
+    30,
   );
   const switchesPenalty = Math.min(
     (totalTabSwitches / maxExpectedSwitches) * 30,
-    30
+    30,
   );
 
   const integrityScore = Math.max(
     0,
-    Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty)
+    Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty),
   );
 
   return isNaN(integrityScore) ? 100 : integrityScore;
@@ -189,8 +182,8 @@ const calculateIntegrityScore = (assessmentResult) => {
  * @returns {number|null} MCQ score or null
  */
 const calculateMcqScore = (assessmentResult) => {
-  let totalMcqScore = 0;
-  let mcqCount = 0;
+  let totalScore = 0;
+  let maxPossible = 0;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -200,9 +193,8 @@ const calculateMcqScore = (assessmentResult) => {
           mcqQuestions[level].forEach((mcq) => {
             if (mcq.isAttempted && mcq.obtainedScore !== undefined) {
               const maxScore = mcq.question?.marks || 1;
-              const percentage = (mcq.obtainedScore / maxScore) * 100;
-              totalMcqScore += percentage;
-              mcqCount++;
+              totalScore += Math.min(mcq.obtainedScore, maxScore);
+              maxPossible += maxScore;
             }
           });
         }
@@ -210,7 +202,7 @@ const calculateMcqScore = (assessmentResult) => {
     });
   }
 
-  return mcqCount > 0 ? Math.round(totalMcqScore / mcqCount) : null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : null;
 };
 
 /**
@@ -219,8 +211,8 @@ const calculateMcqScore = (assessmentResult) => {
  * @returns {number|null} Average test case score or null
  */
 const calculateProgrammingTestCaseScore = (assessmentResult) => {
-  let totalEarnedScore = 0;
-  let programmingQuestionCount = 0;
+  let totalScore = 0;
+  let maxPossible = 0;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -230,9 +222,8 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
           programmingQuestions[level].forEach((prog) => {
             if (prog.isAttempted && prog.obtainedScore !== undefined) {
               const maxScore = prog.question?.marks || 100;
-              const percentage = (prog.obtainedScore / maxScore) * 100;
-              totalEarnedScore += percentage;
-              programmingQuestionCount++;
+              totalScore += Math.min(prog.obtainedScore, maxScore);
+              maxPossible += maxScore;
             }
           });
         }
@@ -240,9 +231,36 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
     });
   }
 
-  return programmingQuestionCount > 0
-    ? Math.round(totalEarnedScore / programmingQuestionCount)
-    : null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : null;
+};
+
+/**
+ * Calculate SQL performance score
+ * @param {Object} assessmentResult - Assessment result object
+ * @returns {number|null} SQL score or null
+ */
+const calculateSqlScore = (assessmentResult) => {
+  let totalScore = 0;
+  let maxPossible = 0;
+
+  if (assessmentResult.testQuestions?.skills) {
+    assessmentResult.testQuestions.skills.forEach((skill) => {
+      const sqlQuestions = skill.sqlQuestions || {};
+      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
+        if (sqlQuestions[level]) {
+          sqlQuestions[level].forEach((sql) => {
+            if (sql.isAttempted && sql.obtainedScore !== undefined) {
+              const maxScore = sql.question?.marks || 1;
+              totalScore += Math.min(sql.obtainedScore, maxScore);
+              maxPossible += maxScore;
+            }
+          });
+        }
+      });
+    });
+  }
+
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : null;
 };
 
 /**
@@ -313,9 +331,9 @@ const calculateTimeEfficiencyScore = (assessmentResult) => {
                 questionTimeEfficiency.push(efficiency);
               }
             });
-          }
+          },
         );
-      }
+      },
     );
   });
 
@@ -331,7 +349,7 @@ const calculateTimeEfficiencyScore = (assessmentResult) => {
       : 100;
 
   const timeEfficiencyScore = Math.round(
-    avgQuestionEfficiency * 0.7 + overallEfficiency * 0.3
+    avgQuestionEfficiency * 0.7 + overallEfficiency * 0.3,
   );
 
   return isNaN(timeEfficiencyScore) ? 100 : Math.min(timeEfficiencyScore, 100);
@@ -369,6 +387,7 @@ const processAssessmentSummary = async (requestData) => {
     const mcqScore = calculateMcqScore(assessmentResult);
     const programmingTestCaseScore =
       calculateProgrammingTestCaseScore(assessmentResult);
+    const sqlScore = calculateSqlScore(assessmentResult);
     const programmingCodeQualityScore =
       await calculateProgrammingCodeQualityScore(candidateAssessmentId);
 
@@ -376,12 +395,13 @@ const processAssessmentSummary = async (requestData) => {
       mcqScore,
       programmingTestCaseScore,
       programmingCodeQualityScore,
+      sqlScore,
       timeEfficiencyScore,
     };
 
     const recommendation = calculateRecommendation(
       candidateFitScore,
-      integrityScore
+      integrityScore,
     );
 
     // 3. Generate AI summary using Gemini
@@ -406,12 +426,19 @@ const processAssessmentSummary = async (requestData) => {
     let outputTokens = 0;
 
     try {
+      const metadata = {
+        hasMcq: mcqScore !== null,
+        hasProgramming: programmingTestCaseScore !== null,
+        hasSql: sqlScore !== null,
+      };
+
       const prompt = generateAssessmentSummaryPrompt(
         candidateFitScore,
         assessmentResult,
         scores,
         recommendation,
-        integrityScore
+        integrityScore,
+        metadata,
       );
 
       const aiStartTime = Date.now();
@@ -450,7 +477,7 @@ const processAssessmentSummary = async (requestData) => {
         {
           error: aiError.message,
           candidateAssessmentId,
-        }
+        },
       );
       // Continue with fallback summary
     }
@@ -474,7 +501,7 @@ const processAssessmentSummary = async (requestData) => {
           inputTokens,
           outputTokens,
         },
-      }
+      },
     );
 
     // 5. Deduct credits for AI usage (fire and forget)

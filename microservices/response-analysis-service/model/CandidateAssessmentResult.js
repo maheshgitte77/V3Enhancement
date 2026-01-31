@@ -353,11 +353,11 @@ const CandidateAssessmentResultSchema = new mongoose.Schema(
   {
     strict: false,
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model(
   "CandidateAssessmentResult",
   CandidateAssessmentResultSchema,
-  "candidateassessmentresults"
+  "candidateassessmentresults",
 );
