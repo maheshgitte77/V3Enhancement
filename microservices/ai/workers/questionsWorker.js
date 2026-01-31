@@ -326,6 +326,7 @@ const generateProgrammingTitlesPrompt = (
   )
     ? questionConfig.complexity
     : "Easy";
+  const isScenarioBased = questionConfig.isScenarioBased !== false; // Default to true if not provided
 
 
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
@@ -468,14 +469,43 @@ maxTime: ${maxTime} minutes
    - Questions should resemble **real Assessment questions**, not academic exams.
    - Focus on decision-making, reasoning, and practical application.
 
+${isScenarioBased
+      ? `6. **SCENARIO-BASED FORMATTING (MANDATORY)**
+   - ALL titles must be formatted as REAL-WORLD SCENARIOS relevant to the ${jobRole} role
+   - Create scenarios that a ${jobRole} professional would encounter in their daily work
+   - Examples:
+     * Instead of: "Find Maximum Element"
+     * Use: "As a ${jobRole}, you're analyzing ${experience <= 3
+        ? "user activity logs"
+        : experience <= 7
+          ? "performance metrics data"
+          : "system analytics"
+      } and need to find the peak value..."
+     * Instead of: "Count Vowels"
+     * Use: "You're building a ${jobRole === "Backend Developer"
+        ? "API endpoint"
+        : jobRole === "Frontend Developer"
+          ? "form validation"
+          : "data processing"
+      } feature that needs to validate text input..."
+   - Make scenarios realistic and relatable to ${jobRole} responsibilities
+   - Use domain-specific terminology when appropriate`
+      : `6. **POPULAR INTERVIEW/ASSESSMENT QUESTIONS (MANDATORY)**
+   - Generate titles for the MOST POPULAR and FREQUENTLY ASKED programming questions in interviews and assessments
+   - Focus on classic coding interview problems that are commonly used across tech companies
+   - Examples: "Two Sum", "Reverse Linked List", "Valid Parentheses", "Merge Two Sorted Arrays", "Find Maximum Element in Array"
+   - These should be well-known problems that candidates typically encounter in coding interviews
+   - Keep titles concise and direct - no need for scenario-based formatting
+   - Prioritize problems that test fundamental programming concepts, algorithms, and data structures`}
+
 Ensure all generated questions strictly follow the above constraints.
 
 CRITICAL UNIQUENESS REQUIREMENTS - ASSESSMENT-WIDE:
 - This is part of an ONGOING ASSESSMENT - previous questions have already been generated
 - Each title must represent a DIFFERENT logic category/type from the following ${totalCategories} categories:
 ${PROGRAMMING_LOGIC_CATEGORIES.map(
-    (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`,
-  ).join("\n")}
+        (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`,
+      ).join("\n")}
 
 - DISTRIBUTE titles across DIFFERENT logic categories to ensure maximum variety
 - Each title must use a UNIQUE logic approach/implementation type
@@ -1083,6 +1113,7 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
       )
         ? questionConfig.complexity
         : "Easy";
+      const isScenarioBased = questionConfig.isScenarioBased !== false; // Default to true if not provided
       const testCasesCount = programmingConfig.testCasesCount || 5;
       const testCasesConfig =
         programmingConfig.testCasesConfig ||
@@ -1185,30 +1216,44 @@ ${promptText}
 - Generate EXACTLY ${effectiveNumber} Programming questions
 - **Preferred Complexity**: ${complexityPreference} (adjust down if maxTime requires simpler problems)
 ${logicCategoryInfo}
-- **CRITICAL: SCENARIO-BASED FORMATTING** - ALL questions must be scenario-based:
-  * Job Role Context: "${jobRole}" with ${experience} years of experience
+${isScenarioBased
+          ? `- **CRITICAL: SCENARIO-BASED FORMATTING** - ALL questions must be scenario-based:`
+          : `- **CRITICAL: POPULAR INTERVIEW/ASSESSMENT QUESTIONS** - Generate classic, frequently asked programming problems:`}
+${isScenarioBased
+          ? `  * Job Role Context: "${jobRole}" with ${experience} years of experience
   * **MANDATORY**: Even if using frequently asked/common problems, format them as REAL-WORLD SCENARIOS relevant to the job role
   * Create scenarios that a ${jobRole} professional would encounter in their daily work
   * Examples of scenario-based formatting:
     - Instead of: "Find the maximum element in an array"
     - Use: "As a ${jobRole}, you're analyzing ${experience <= 3
-          ? "user activity logs"
-          : experience <= 7
-            ? "performance metrics data"
-            : "system analytics"
-        } and need to find the peak ${experience <= 3 ? "usage" : experience <= 7 ? "performance" : "efficiency"
-        } value..."
+            ? "user activity logs"
+            : experience <= 7
+              ? "performance metrics data"
+              : "system analytics"
+          } and need to find the peak ${experience <= 3 ? "usage" : experience <= 7 ? "performance" : "efficiency"
+          } value..."
     - Instead of: "Count vowels in a string"
     - Use: "You're building a ${jobRole === "Backend Developer"
-          ? "API endpoint"
-          : jobRole === "Frontend Developer"
-            ? "form validation"
-            : "data processing"
-        } feature that needs to ${experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
-        } text input..."
+            ? "API endpoint"
+            : jobRole === "Frontend Developer"
+              ? "form validation"
+              : "data processing"
+          } feature that needs to ${experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
+          } text input..."
   * Make scenarios realistic and relatable to ${jobRole} responsibilities
   * Use domain-specific terminology when appropriate (but keep it understandable)
-  * Connect the problem to actual work situations a ${jobRole} would face
+  * Connect the problem to actual work situations a ${jobRole} would face`
+          : `  * Generate classic, well-known programming problems commonly asked in coding interviews and assessments
+  * Focus on popular problems like: "Two Sum", "Reverse Linked List", "Valid Parentheses", "Merge Two Sorted Arrays", "Find Maximum Element in Array", "Binary Search", "Palindrome Check", etc.
+  * These should be problems that test fundamental programming concepts, algorithms, and data structures
+  * Keep problem statements direct and clear - no need for elaborate scenario-based context
+  * Use standard problem descriptions that candidates would recognize from typical coding interviews
+  * Examples:
+    - "Given an array of integers, find two numbers that add up to a specific target"
+    - "Reverse a singly linked list"
+    - "Check if a string contains valid parentheses"
+    - "Merge two sorted arrays into one sorted array"
+  * Focus on clarity and standard problem formulations rather than job-role specific scenarios`}
 - **Experience Level Tailoring** (${experience} years):
   * ${experience <= 3
           ? "Junior Level"
@@ -1237,11 +1282,17 @@ ${logicCategoryInfo}
     - Use <br/> ONLY within paragraphs for line breaks between sentences or between content elements (like between example input/output pairs)
     - **CRITICAL**: The <h3> heading tags have built-in CSS spacing - adding <br/> before them creates DOUBLE spacing which looks wrong
     - Structure the problem statement as follows:
-      * <h3>Problem Description</h3>: Scenario-based explanation relevant to ${jobRole} role with ${experience} years experience (add <br/> after important sentences WITHIN the paragraph)
+      * <h3>Problem Description</h3>: ${isScenarioBased
+          ? `Scenario-based explanation relevant to ${jobRole} role with ${experience} years experience (add <br/> after important sentences WITHIN the paragraph)
         - Start with a real-world scenario/context
         - Connect the problem to ${jobRole} work responsibilities
         - Use job-role appropriate terminology and context
-        - Make it relatable to daily work situations
+        - Make it relatable to daily work situations`
+          : `Clear, direct problem statement for a popular interview/assessment question (add <br/> after important sentences WITHIN the paragraph)
+        - Describe the problem concisely and clearly
+        - Use standard problem formulations that candidates recognize
+        - Focus on the core algorithmic challenge
+        - Keep it straightforward without elaborate scenarios`}
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Input Format</h3>: Detailed input specification with examples
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
@@ -1259,22 +1310,24 @@ ${logicCategoryInfo}
     - **CRITICAL**: In Examples section, always use <strong>Input:</strong> and <strong>Output:</strong> (bold/dark) for labels
     - **FORMATTING EXAMPLE** (follow this EXACT structure - NO <br/> tags before <h3> headings):
       <h3>Problem Description</h3>
-      <p>As a ${jobRole}, you're working on a ${experience <= 3
-          ? "data processing module"
-          : experience <= 7
-            ? "performance monitoring system"
-            : "analytics dashboard"
-        } that receives an array of <strong>n</strong> ${experience <= 3
-          ? "user activity"
-          : experience <= 7
-            ? "transaction"
-            : "performance metric"
-        } values. You need to find the <code>maximum</code> value to ${experience <= 3
-          ? "identify peak usage"
-          : experience <= 7
-            ? "determine system capacity"
-            : "optimize resource allocation"
-        }.</p>
+      <p>${isScenarioBased
+          ? `As a ${jobRole}, you're working on a ${experience <= 3
+            ? "data processing module"
+            : experience <= 7
+              ? "performance monitoring system"
+              : "analytics dashboard"
+          } that receives an array of <strong>n</strong> ${experience <= 3
+            ? "user activity"
+            : experience <= 7
+              ? "transaction"
+              : "performance metric"
+          } values. You need to find the <code>maximum</code> value to ${experience <= 3
+            ? "identify peak usage"
+            : experience <= 7
+              ? "determine system capacity"
+              : "optimize resource allocation"
+          }.`
+          : `Given an array of <strong>n</strong> integers, find the <code>maximum</code> element in the array.`}</p>
       <h3>Input Format</h3>
       <p>The first line contains an integer <strong>n</strong> representing the size of the array.<br/>The second line contains <strong>n</strong> space-separated integers.</p>
       <h3>Output Format</h3>
@@ -1389,17 +1442,23 @@ If titles are provided, you MUST:
 - Implement the logic category indicated by the title from the ${totalCategories} available categories
 - Ensure each question uses a DIFFERENT logic category/approach to maintain uniqueness across the entire assessment
 - **CRITICAL**: Adjust the complexity of the problem to match the maxTime (${maxTime} minutes) - if the title suggests a complex problem but maxTime is short, simplify it while keeping the core logic category
-- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
+${isScenarioBased
+          ? `- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
   * Create a real-world context where a ${jobRole} would encounter this problem
   * Use job-role appropriate terminology and domain context
   * Make it relatable to ${experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
-        } ${jobRole} work
+          } ${jobRole} work
   * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${experience <= 3
-          ? "user data"
-          : experience <= 7
-            ? "transaction logs"
-            : "system performance metrics"
-        } and need to identify the peak value..."
+            ? "user data"
+            : experience <= 7
+              ? "transaction logs"
+              : "system performance metrics"
+          } and need to identify the peak value..."`
+          : `- **POPULAR INTERVIEW QUESTIONS**: Use standard, well-known problem formulations:
+  * Keep titles and problem descriptions direct and recognizable
+  * Focus on classic coding interview problems
+  * No need for elaborate scenario-based context
+  * Example: "Find Maximum Element" → Keep as a straightforward problem: "Given an array of integers, find the maximum element"`}
 
 **FINAL VALIDATION CHECKS** (MUST verify before outputting):
 1. **LINE BREAK CHECK**: Search your generated HTML for <br/><h3> pattern - if found, REMOVE the <br/> tag. The correct pattern is </p><h3> or </ul><h3>, NOT </p><br/><h3>
