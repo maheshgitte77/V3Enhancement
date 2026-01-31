@@ -902,6 +902,9 @@ const updateProgrammingQuestionAnalysis = async ({
 
                       // NEW: Calculate score based on AI's logical correctness
                       if (aiAnalysis?.logicalCorrectness) {
+                        /* 
+                        // COMMENTED OUT: Do not overwrite score with AI estimate. 
+                        // Score is determined by test case execution in main service.
                         const maxScore = question.question?.score || 0;
                         const logicalScore =
                           aiAnalysis.logicalCorrectness.score || 0;
@@ -912,10 +915,13 @@ const updateProgrammingQuestionAnalysis = async ({
                         );
 
                         question.obtainedScore = obtainedScore;
-                        question.aiLogicalScore = logicalScore;
+                        */
+                        question.aiLogicalScore =
+                          aiAnalysis.logicalCorrectness.score || 0;
                         question.aiCodeQualityScore =
                           aiAnalysis.codeQuality?.score || 0;
 
+                        /*
                         logger.info(
                           "Programming question score calculated from AI",
                           {
@@ -928,6 +934,7 @@ const updateProgrammingQuestionAnalysis = async ({
                               : "screening",
                           },
                         );
+                        */
                       }
 
                       questionFound = true;
@@ -951,6 +958,8 @@ const updateProgrammingQuestionAnalysis = async ({
 
               // NEW: Calculate score based on AI's logical correctness
               if (aiAnalysis?.logicalCorrectness) {
+                /*
+                // COMMENTED OUT: Do not overwrite score with AI estimate.
                 const maxScore = question.question?.score || 0;
                 const logicalScore = aiAnalysis.logicalCorrectness.score || 0;
 
@@ -960,10 +969,13 @@ const updateProgrammingQuestionAnalysis = async ({
                 );
 
                 question.obtainedScore = obtainedScore;
-                question.aiLogicalScore = logicalScore;
+                */
+                question.aiLogicalScore =
+                  aiAnalysis.logicalCorrectness.score || 0;
                 question.aiCodeQualityScore =
                   aiAnalysis.codeQuality?.score || 0;
 
+                /*
                 logger.info("Programming question score calculated from AI", {
                   questionId,
                   maxScore,
@@ -971,6 +983,7 @@ const updateProgrammingQuestionAnalysis = async ({
                   obtainedScore,
                   contextType: isAssessment ? "assessment" : "screening",
                 });
+                */
               }
 
               questionFound = true;
@@ -998,15 +1011,20 @@ const updateProgrammingQuestionAnalysis = async ({
 
             // NEW: Calculate score based on AI's logical correctness
             if (aiAnalysis?.logicalCorrectness) {
+              /*
+              // COMMENTED OUT: Do not overwrite score with AI estimate.
               const maxScore = question.question?.score || 0;
               const logicalScore = aiAnalysis.logicalCorrectness.score || 0;
 
               const obtainedScore = Math.round((logicalScore / 100) * maxScore);
 
               question.obtainedScore = obtainedScore;
-              question.aiLogicalScore = logicalScore;
+              */
+              question.aiLogicalScore =
+                aiAnalysis.logicalCorrectness.score || 0;
               question.aiCodeQualityScore = aiAnalysis.codeQuality?.score || 0;
 
+              /*
               logger.info("Programming question score calculated from AI", {
                 questionId,
                 maxScore,
@@ -1014,6 +1032,7 @@ const updateProgrammingQuestionAnalysis = async ({
                 obtainedScore,
                 contextType: isAssessment ? "assessment" : "screening",
               });
+              */
             }
 
             questionFound = true;
@@ -1030,6 +1049,9 @@ const updateProgrammingQuestionAnalysis = async ({
   if (questionFound && updatedSkills && skillIndex >= 0) {
     const targetSkill = updatedSkills[skillIndex];
 
+    /* 
+    // COMMENTED OUT: Do not recalculate totalObtainedScore here.
+    // This allows the main service (running test cases) to control the score.
     // Recalculate skill's obtainedProgrammingScore
     let skillProgrammingScore = 0;
 
@@ -1094,6 +1116,32 @@ const updateProgrammingQuestionAnalysis = async ({
         analysisId,
         obtainedScore: updatedQuestion?.obtainedScore,
         totalObtainedScore,
+      },
+    );
+    */
+
+    // Instead, just perform the update of the skills array (with AI metadata)
+    // WITHOUT updating the score fields
+    const updateField = doc.testQuestions?.skills
+      ? "testQuestions.skills"
+      : "skills";
+
+    await db.collection(collectionName).updateOne(
+      { [idField]: idObjectId },
+      {
+        $set: {
+          [updateField]: updatedSkills,
+        },
+      },
+    );
+
+    logger.info(
+      `Programming question analysis metatdata updated in ${collectionName}`,
+      {
+        [idField]: idValue,
+        contextType: isAssessment ? "assessment" : "screening",
+        questionId,
+        analysisId,
       },
     );
   } else if (questionFound) {
