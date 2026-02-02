@@ -74,6 +74,65 @@ const parseAIResponse = (aiResponse) => {
 };
 
 /**
+ * Build a detailed technical breakdown of question performance for the AI prompt
+ */
+const buildTechnicalContext = (assessmentResult, aiLogics = []) => {
+  let context = "### Candidate Technical Performance Breakdown\n\n";
+
+  if (assessmentResult.testQuestions?.skills) {
+    assessmentResult.testQuestions.skills.forEach((skill) => {
+      context += `#### Skill Area: ${skill.skillName || "General"}\n`;
+
+      ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
+        (type) => {
+          const questions = skill[type];
+          if (!questions) return;
+
+          const typeLabel = type.replace("Questions", "").toUpperCase();
+          ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
+            (level) => {
+              const qList = questions[level];
+              if (qList && qList.length > 0) {
+                qList.forEach((q, idx) => {
+                  const status = q.isAttempted ? "Attempted" : "Not Attempted";
+                  const max =
+                    q.question?.marks ||
+                    (type === "programmingQuestions" ? 100 : 1);
+                  const score = q.isAttempted
+                    ? `${q.obtainedScore}/${max}`
+                    : "0/" + max;
+
+                  context += `- [${typeLabel}] [${level
+                    .replace("Questions", "")
+                    .toUpperCase()}] Result: ${status}, Score: ${score}\n`;
+
+                  // Add AI Reasoning for programming questions if available
+                  if (type === "programmingQuestions" && q.isAttempted) {
+                    const qId = q.question?._id || q.question;
+                    const aiLogic = aiLogics.find(
+                      (a) => a.questionId?.toString() === qId?.toString(),
+                    );
+                    if (aiLogic) {
+                      context += `  - AI Logical Quality: ${aiLogic.logicalCorrectness?.score || 0}% | Code Quality: ${aiLogic.codeQuality?.score || 0}%\n`;
+                      context += `  - AI Analysis: ${aiLogic.logicalCorrectness?.reasoning || "Logic matches requirements."}\n`;
+                    }
+                  }
+                });
+              }
+            },
+          );
+        },
+      );
+      context += "\n";
+    });
+  } else {
+    context += "No question-level data available.\n";
+  }
+
+  return context;
+};
+
+/**
  * Calculate candidate fit score from MCQ and Programming questions
  * @param {Object} assessmentResult - Assessment result object
  * @returns {number} Average fit score (0-100)
@@ -91,12 +150,13 @@ const calculateCandidateFitScore = (assessmentResult) => {
             (level) => {
               if (questions[level]) {
                 questions[level].forEach((q) => {
+                  const max =
+                    q.question?.marks ||
+                    q.question?.score ||
+                    (type === "programmingQuestions" ? 100 : 1);
+                  totalMax += max;
                   if (q.isAttempted && q.obtainedScore !== undefined) {
-                    const max =
-                      q.question?.marks ||
-                      (type === "programmingQuestions" ? 100 : 1);
                     totalObtained += Math.min(q.obtainedScore, max);
-                    totalMax += max;
                   }
                 });
               }
@@ -107,12 +167,7 @@ const calculateCandidateFitScore = (assessmentResult) => {
     });
   }
 
-  const candidateFitScore =
-    totalMax > 0
-      ? parseFloat(((totalObtained / totalMax) * 100).toFixed(2))
-      : 0;
-
-  return Math.min(candidateFitScore, 100);
+  return totalMax > 0 ? Math.round((totalObtained / totalMax) * 100) : 0;
 };
 
 /**
@@ -184,6 +239,7 @@ const calculateIntegrityScore = (assessmentResult) => {
 const calculateMcqScore = (assessmentResult) => {
   let totalScore = 0;
   let maxPossible = 0;
+  let hasQuestions = false;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -191,10 +247,11 @@ const calculateMcqScore = (assessmentResult) => {
       ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
         if (mcqQuestions[level]) {
           mcqQuestions[level].forEach((mcq) => {
+            hasQuestions = true;
+            const max = mcq.question?.marks || mcq.question?.score || 1;
+            maxPossible += max;
             if (mcq.isAttempted && mcq.obtainedScore !== undefined) {
-              const maxScore = mcq.question?.marks || 1;
-              totalScore += Math.min(mcq.obtainedScore, maxScore);
-              maxPossible += maxScore;
+              totalScore += Math.min(mcq.obtainedScore, max);
             }
           });
         }
@@ -202,7 +259,8 @@ const calculateMcqScore = (assessmentResult) => {
     });
   }
 
-  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : null;
+  if (!hasQuestions) return null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
 };
 
 /**
@@ -213,6 +271,7 @@ const calculateMcqScore = (assessmentResult) => {
 const calculateProgrammingTestCaseScore = (assessmentResult) => {
   let totalScore = 0;
   let maxPossible = 0;
+  let hasQuestions = false;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -220,10 +279,12 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
       ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
         if (programmingQuestions[level]) {
           programmingQuestions[level].forEach((prog) => {
+            hasQuestions = true;
+            const maxScore =
+              prog.question?.marks || prog.question?.score || 100;
+            maxPossible += maxScore;
             if (prog.isAttempted && prog.obtainedScore !== undefined) {
-              const maxScore = prog.question?.marks || 100;
               totalScore += Math.min(prog.obtainedScore, maxScore);
-              maxPossible += maxScore;
             }
           });
         }
@@ -231,7 +292,8 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
     });
   }
 
-  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : null;
+  if (!hasQuestions) return null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
 };
 
 /**
@@ -242,6 +304,7 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
 const calculateSqlScore = (assessmentResult) => {
   let totalScore = 0;
   let maxPossible = 0;
+  let hasQuestions = false;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -249,10 +312,11 @@ const calculateSqlScore = (assessmentResult) => {
       ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
         if (sqlQuestions[level]) {
           sqlQuestions[level].forEach((sql) => {
+            hasQuestions = true;
+            const maxScore = sql.question?.marks || sql.question?.score || 1;
+            maxPossible += maxScore;
             if (sql.isAttempted && sql.obtainedScore !== undefined) {
-              const maxScore = sql.question?.marks || 1;
               totalScore += Math.min(sql.obtainedScore, maxScore);
-              maxPossible += maxScore;
             }
           });
         }
@@ -260,7 +324,8 @@ const calculateSqlScore = (assessmentResult) => {
     });
   }
 
-  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : null;
+  if (!hasQuestions) return null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
 };
 
 /**
@@ -441,50 +506,39 @@ const processAssessmentSummary = async (requestData) => {
           // Easy: Weight 1x
           if (questions.easyQuestions) {
             questions.easyQuestions.forEach((q) => {
+              const max =
+                q.question?.marks ||
+                (type === "programmingQuestions" ? 100 : 1);
+              totalReasoningMax += 1;
               if (q.isAttempted) {
-                // For programming, use test case score (obtainedScore / max)
-                const scorePct =
-                  (q.obtainedScore || 0) /
-                  (q.question?.marks ||
-                    (type === "programmingQuestions" ? 100 : 1));
-                totalReasoningPoints += scorePct * 1;
-                totalReasoningMax += 1;
+                const scorePct = (q.obtainedScore || 0) / max;
+                totalReasoningPoints += Math.min(scorePct, 1) * 1;
               }
             });
           }
           // Medium: Weight 2x (Reasoning is tested more here)
           if (questions.mediumQuestions) {
             questions.mediumQuestions.forEach((q) => {
+              const max =
+                q.question?.marks ||
+                (type === "programmingQuestions" ? 100 : 1);
+              totalReasoningMax += 2;
               if (q.isAttempted) {
-                const scorePct =
-                  (q.obtainedScore || 0) /
-                  (q.question?.marks ||
-                    (type === "programmingQuestions" ? 100 : 1));
-                totalReasoningPoints += scorePct * 2;
-                totalReasoningMax += 2;
+                const scorePct = (q.obtainedScore || 0) / max;
+                totalReasoningPoints += Math.min(scorePct, 1) * 2;
               }
             });
           }
           // Hard: Weight 3x (Strongest indicator of reasoning)
           if (questions.hardQuestions) {
             questions.hardQuestions.forEach((q) => {
+              const max =
+                q.question?.marks ||
+                (type === "programmingQuestions" ? 100 : 1);
+              totalReasoningMax += 3;
               if (q.isAttempted) {
-                // Fix: Handle cases where obtainedScore is % (0-100) but marks is small (e.g. 5)
-                const max =
-                  q.question?.marks ||
-                  (type === "programmingQuestions" ? 100 : 1);
-                const rawRatio = (q.obtainedScore || 0) / max;
-                const scorePct = Math.min(rawRatio, 1); // Clamp to 1.0
-
-                // Debug log for programming
-                if (type === "programmingQuestions") {
-                  logger.info(
-                    `Programming Q Analysis (Hard): Score=${q.obtainedScore}, Max=${max}, Ratio=${rawRatio}, Clamped=${scorePct}`,
-                  );
-                }
-
-                totalReasoningPoints += scorePct * 3;
-                totalReasoningMax += 3;
+                const scorePct = (q.obtainedScore || 0) / max;
+                totalReasoningPoints += Math.min(scorePct, 1) * 3;
               }
             });
           }
@@ -561,6 +615,7 @@ const processAssessmentSummary = async (requestData) => {
         hasMcq: mcqScore !== null,
         hasProgramming: programmingTestCaseScore !== null,
         hasSql: sqlScore !== null,
+        technicalContext: buildTechnicalContext(assessmentResult, aiLogics),
       };
 
       const prompt = generateAssessmentSummaryPrompt(

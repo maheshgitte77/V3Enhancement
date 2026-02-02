@@ -1184,7 +1184,7 @@ Generate exactly 3 concise, professional bullet points:
 ${summaryPoints.join("\n")}
 
 Each point should be:
-- Maximum 25 words
+- Maximum 40 words
 - Factual and specific (mention scores, behaviors, specific technical skills)
 - Focused on what HR needs to know for decision-making
 - Professional tone without overly technical jargon
@@ -1218,8 +1218,12 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - **SQL Score**: ${scores.sqlScore !== null ? scores.sqlScore + "%" : "N/A"}
 - **Final Recommendation (Preliminary)**: ${recommendation}
 
+**TECHNICAL BREAKDOWN:**
+${metadata.technicalContext || "No detailed question-level data available."}
+
 **AI INSTRUCTION FOR SUMMARY:**
-- Base your analysis on the provided scores and integrity indicators.
+- Base your analysis on the provided scores, integrity indicators, and the detailed TECHNICAL BREAKDOWN.
+- In the summary, mention specific skills or question types where the candidate excelled or struggled (e.g., "Excelled in Hard Programming tasks but struggled with Medium SQL queries").
 - If MCQ scores are high but practical scores (Programming/SQL) are low, highlight the gap between theory and practice.
 - If integrity score is low, mention the "Area to Watch" accordingly.
 - Ensure the summary reflects the specific technical context of the assessment.
