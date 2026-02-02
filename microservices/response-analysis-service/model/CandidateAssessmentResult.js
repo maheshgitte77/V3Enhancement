@@ -307,15 +307,15 @@ const CandidateAssessmentResultSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    communicationClarity: {
+    technicalAccuracy: {
       type: Number,
       default: 0,
     },
-    analyticalThinking: {
+    codeQualityScore: {
       type: Number,
       default: 0,
     },
-    problemSolvingAbility: {
+    reasoningScore: {
       type: Number,
       default: 0,
     },

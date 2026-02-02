@@ -380,23 +380,162 @@ const processAssessmentSummary = async (requestData) => {
       throw new Error("Assessment result not found");
     }
 
-    // 2. Calculate initial scores
+    // 2. Calculate Base Scores
     const candidateFitScore = calculateCandidateFitScore(assessmentResult);
     const integrityScore = calculateIntegrityScore(assessmentResult);
     const timeEfficiencyScore = calculateTimeEfficiencyScore(assessmentResult);
-    const mcqScore = calculateMcqScore(assessmentResult);
+    const mcqScore = calculateMcqScore(assessmentResult); // Null if no MCQ
     const programmingTestCaseScore =
-      calculateProgrammingTestCaseScore(assessmentResult);
-    const sqlScore = calculateSqlScore(assessmentResult);
-    const programmingCodeQualityScore =
-      await calculateProgrammingCodeQualityScore(candidateAssessmentId);
+      calculateProgrammingTestCaseScore(assessmentResult); // Null if no Programming
+    const sqlScore = calculateSqlScore(assessmentResult); // Null if no SQL
+    const programmingCodeQuality = await calculateProgrammingCodeQualityScore(
+      candidateAssessmentId,
+    ); // Null if no AI analysis
+
+    // -------------------------------------------------------------------------
+    // NEW METRICS CALCULATION
+    // -------------------------------------------------------------------------
+
+    // A. Technical Accuracy (The "What")
+    // Formula: Weighted average of MCQ Accuracy and Programming Test Case Accuracy
+    let validComponents = 0;
+    let totalAccuracySum = 0;
+
+    if (mcqScore !== null) {
+      totalAccuracySum += mcqScore;
+      validComponents++;
+    }
+    if (programmingTestCaseScore !== null) {
+      totalAccuracySum += programmingTestCaseScore;
+      validComponents++;
+    }
+    if (sqlScore !== null) {
+      totalAccuracySum += sqlScore;
+      validComponents++;
+    }
+
+    const technicalAccuracy =
+      validComponents > 0 ? Math.round(totalAccuracySum / validComponents) : 0;
+
+    // B. Code Quality Score (The "How")
+    // Formula: Uses AI 'codeQuality' score. If pure MCQ, we use technical accuracy as a proxy for "Theoretical Quality".
+    let codeQualityScore = 0;
+    if (programmingCodeQuality !== null) {
+      codeQualityScore = programmingCodeQuality;
+    } else if (programmingTestCaseScore === null && mcqScore !== null) {
+      // Pure MCQ Assessment: "Quality" is inferred from theoretical depth
+      codeQualityScore = technicalAccuracy;
+    }
+
+    // C. Reasoning Score (The "Why")
+    // Formula: Heavily weights Hard/Medium questions + AI Logic Score
+    let totalReasoningPoints = 0;
+    let totalReasoningMax = 0;
+
+    assessmentResult.testQuestions?.skills?.forEach((skill) => {
+      ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
+        (type) => {
+          const questions = skill[type];
+          if (!questions) return;
+
+          // Easy: Weight 1x
+          if (questions.easyQuestions) {
+            questions.easyQuestions.forEach((q) => {
+              if (q.isAttempted) {
+                // For programming, use test case score (obtainedScore / max)
+                const scorePct =
+                  (q.obtainedScore || 0) /
+                  (q.question?.marks ||
+                    (type === "programmingQuestions" ? 100 : 1));
+                totalReasoningPoints += scorePct * 1;
+                totalReasoningMax += 1;
+              }
+            });
+          }
+          // Medium: Weight 2x (Reasoning is tested more here)
+          if (questions.mediumQuestions) {
+            questions.mediumQuestions.forEach((q) => {
+              if (q.isAttempted) {
+                const scorePct =
+                  (q.obtainedScore || 0) /
+                  (q.question?.marks ||
+                    (type === "programmingQuestions" ? 100 : 1));
+                totalReasoningPoints += scorePct * 2;
+                totalReasoningMax += 2;
+              }
+            });
+          }
+          // Hard: Weight 3x (Strongest indicator of reasoning)
+          if (questions.hardQuestions) {
+            questions.hardQuestions.forEach((q) => {
+              if (q.isAttempted) {
+                // Fix: Handle cases where obtainedScore is % (0-100) but marks is small (e.g. 5)
+                const max =
+                  q.question?.marks ||
+                  (type === "programmingQuestions" ? 100 : 1);
+                const rawRatio = (q.obtainedScore || 0) / max;
+                const scorePct = Math.min(rawRatio, 1); // Clamp to 1.0
+
+                // Debug log for programming
+                if (type === "programmingQuestions") {
+                  logger.info(
+                    `Programming Q Analysis (Hard): Score=${q.obtainedScore}, Max=${max}, Ratio=${rawRatio}, Clamped=${scorePct}`,
+                  );
+                }
+
+                totalReasoningPoints += scorePct * 3;
+                totalReasoningMax += 3;
+              }
+            });
+          }
+        },
+      );
+    });
+
+    let reasoningScore = 0;
+    if (totalReasoningMax > 0) {
+      reasoningScore = Math.round(
+        (totalReasoningPoints / totalReasoningMax) * 100,
+      );
+    }
+
+    // Boost reasoning with AI logical correctness if available
+    // If we have AI analysis, it accounts for 40% of the reasoning score
+    const aiLogics = await AssessmentProgrammingAnalysis.find({
+      candidateAssessmentId: candidateAssessmentId,
+    });
+    if (aiLogics && aiLogics.length > 0) {
+      let totalAiLogic = 0;
+      let count = 0;
+      aiLogics.forEach((a) => {
+        if (a.logicalCorrectness?.score) {
+          totalAiLogic += a.logicalCorrectness.score;
+          count++;
+        }
+      });
+      if (count > 0) {
+        const avgAiLogic = totalAiLogic / count;
+        logger.info(
+          `Reasoning Score Adjustment: Base=${reasoningScore}, AI_Logic=${avgAiLogic}`,
+        );
+        // 60% Execution Performance (Weighted Hard/Med), 40% AI Logic Analysis
+        reasoningScore = Math.round(reasoningScore * 0.6 + avgAiLogic * 0.4);
+      }
+    }
+
+    // Final safety clamp
+    reasoningScore = Math.min(reasoningScore, 100);
 
     const scores = {
       mcqScore,
       programmingTestCaseScore,
-      programmingCodeQualityScore,
+      programmingCodeQuality, // raw AI score
       sqlScore,
       timeEfficiencyScore,
+      // New Metrics for Prompt
+      technicalAccuracy,
+      codeQualityScore,
+      reasoningScore,
     };
 
     const recommendation = calculateRecommendation(
@@ -406,19 +545,11 @@ const processAssessmentSummary = async (requestData) => {
 
     // 3. Generate AI summary using Gemini
     let aiSummaryData = {
-      assessmentSummary: [
-        "Assessment completed across theoretical and practical stages.",
-        "Theory performance shows candidate's knowledge base.",
-        "Programming section evaluates implementation capability.",
-      ],
-      fitScorePointers: [
-        `✅ Fit for Role: ${recommendation}`,
-        "⚡ Primary Strength: Identified through scoring",
-        "🛠️ Area to Watch: Integrity and performance patterns",
-      ],
-      communicationClarity: 80,
-      analyticalThinking: candidateFitScore,
-      problemSolvingAbility: programmingTestCaseScore || candidateFitScore,
+      assessmentSummary: ["Assessment analysis pending."],
+      fitScorePointers: [`Fit: ${recommendation}`],
+      technicalAccuracy: technicalAccuracy,
+      codeQualityScore: codeQualityScore,
+      reasoningScore: reasoningScore,
     };
 
     let totalTokensUsed = 0;
@@ -451,16 +582,18 @@ const processAssessmentSummary = async (requestData) => {
 
       const parsedAiResponse = parseAIResponse(text);
       if (parsedAiResponse) {
-        aiSummaryData = parsedAiResponse;
+        aiSummaryData = {
+          ...aiSummaryData,
+          ...parsedAiResponse, // Overwrite summary text, keep calculated scores
+        };
       }
 
-      // Extract token usage if available
+      // Extract token usage
       if (result.usageMetadata) {
         inputTokens = result.usageMetadata.promptTokenCount || 0;
         outputTokens = result.usageMetadata.candidatesTokenCount || 0;
         totalTokensUsed = result.usageMetadata.totalTokenCount || 0;
       } else {
-        // Fallback estimation
         inputTokens = Math.ceil(prompt.length / 4);
         outputTokens = Math.ceil(text.length / 4);
         totalTokensUsed = inputTokens + outputTokens;
@@ -473,25 +606,28 @@ const processAssessmentSummary = async (requestData) => {
       });
     } catch (aiError) {
       logger.error(
-        "AI Generation failed for assessment summary, using fallback",
+        "AI Generation failed for assessment summary, using calculated values",
         {
           error: aiError.message,
           candidateAssessmentId,
         },
       );
-      // Continue with fallback summary
     }
 
-    // 4. Update CandidateAssessmentResult
+    // 4. Update CandidateAssessmentResult with NEW FIELDS
     await CandidateAssessmentResult.updateOne(
       { candidateAssessmentId },
       {
         $set: {
           assessmentSummary: aiSummaryData.assessmentSummary,
           fitScorePointers: aiSummaryData.fitScorePointers,
-          communicationClarity: aiSummaryData.communicationClarity,
-          analyticalThinking: aiSummaryData.analyticalThinking,
-          problemSolvingAbility: aiSummaryData.problemSolvingAbility,
+
+          // NEW FIELDS ---------------------
+          technicalAccuracy: technicalAccuracy,
+          codeQualityScore: codeQualityScore,
+          reasoningScore: reasoningScore,
+          // --------------------------------
+
           candidateFitScore,
           integrityScore,
           recommendation,
@@ -545,7 +681,9 @@ const processAssessmentSummary = async (requestData) => {
       scores: {
         candidateFitScore,
         integrityScore,
-        ...scores,
+        technicalAccuracy,
+        codeQualityScore,
+        reasoningScore,
       },
       summary: aiSummaryData.assessmentSummary,
     };

@@ -1206,15 +1206,13 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 **EVALUATION DATA:**
 - **Candidate Fit Score**: ${candidateFitScore}%
 - **Integrity Score**: ${integrityScore}%
+- **Technical Accuracy**: ${scores.technicalAccuracy}%
+- **Code Quality Score**: ${scores.codeQualityScore}%
+- **Reasoning Score**: ${scores.reasoningScore}%
 - **MCQ Score**: ${scores.mcqScore !== null ? scores.mcqScore + "%" : "N/A"}
 - **Programming Test Case Score**: ${
     scores.programmingTestCaseScore !== null
       ? scores.programmingTestCaseScore + "%"
-      : "N/A"
-  }
-- **Programming Code Quality Score**: ${
-    scores.programmingCodeQualityScore !== null
-      ? scores.programmingCodeQualityScore + "%"
       : "N/A"
   }
 - **SQL Score**: ${scores.sqlScore !== null ? scores.sqlScore + "%" : "N/A"}
@@ -1234,25 +1232,6 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
     "Section performance summary 1 (max 25 words)", 
     "Section performance summary 2 (max 25 words)"
   ],
-  "communicationClarity": 85,
-  "analyticalThinking": ${
-    scores.programmingCodeQualityScore !== null
-      ? scores.programmingCodeQualityScore
-      : scores.mcqScore !== null
-        ? scores.mcqScore
-        : scores.sqlScore !== null
-          ? scores.sqlScore
-          : 50
-  },
-  "problemSolvingAbility": ${
-    scores.programmingTestCaseScore !== null
-      ? scores.programmingTestCaseScore
-      : scores.mcqScore !== null
-        ? scores.mcqScore
-        : scores.sqlScore !== null
-          ? scores.sqlScore
-          : 50
-  },
   "fitScorePointers": [
     "✅ Fit for Role Type: [Specific fit assessment and recommended action]",
     "⚡ Primary Strength: [Specific strength observed]",
