@@ -673,47 +673,70 @@ const generateCombinedAudioVideoSubjectivePrompt = (
 
   const totalNumber = audioNumber + videoNumber + subjectiveNumber;
 
-  // Calculate scenario-based questions (25-30% of total)
-  const scenarioBasedCount = Math.max(1, Math.round(totalNumber * 0.27)); // ~27% (middle of 25-30%)
+  // Calculate scenario-based questions (<= 25% of total)
+  const scenarioBasedCount = Math.floor(totalNumber * 0.25);
   const regularCount = totalNumber - scenarioBasedCount;
 
   // Get maxTime values for each type
   const audioMaxTime = audioConfig ? audioConfig.maxTime : 0;
   const videoMaxTime = videoConfig ? videoConfig.maxTime : 0;
   const subjectiveMaxTime = subjectiveConfig ? subjectiveConfig.maxTime : 0;
+  const audioWordMin = audioMaxTime > 0 ? Math.round(audioMaxTime * 30) : 0;
+  const audioWordMax = audioMaxTime > 0 ? Math.round(audioMaxTime * 45) : 0;
+  const videoWordMin = videoMaxTime > 0 ? Math.round(videoMaxTime * 30) : 0;
+  const videoWordMax = videoMaxTime > 0 ? Math.round(videoMaxTime * 45) : 0;
+  const subjectiveWordMin =
+    subjectiveMaxTime > 0 ? Math.round(subjectiveMaxTime * 15) : 0;
+  const subjectiveWordMax =
+    subjectiveMaxTime > 0 ? Math.round(subjectiveMaxTime * 25) : 0;
 
   let prompt = `You are a ${jobRole} interviewer evaluating a candidate with approximately ${experience} years of hands-on experience.
 
 Generate ${totalNumber} unique interview questions for the following skill:
 skillName: "${skillName}"
-skillType: "${skillType}"
-- Candidate Experience Level: ${experience} years
-- Job Role: ${jobRole}
+- Candidate Experience Level: ${experience} years of hands-on experience in ${skillName}
+- Job Role: ${jobRole} related to only ${skillName}
 - Job Seniority Level: ${proposedSeniority}
 - Job Description: ${JD}
 
 ### 🔴 CRITICAL & IMPORTANT RULES (MUST FOLLOW STRICTLY):
 
-1. **Time Constraint Enforcement**
+1. **ONE QUESTION PER ITEM (STRICT)**
+   - Each output item must ask **exactly ONE question**—do NOT merge 2 or 3 sub-questions into one.
+   - The "question" field must contain a **single** clear question or instruction. Do NOT chain multiple questions.
+
+2. **Time Constraint Enforcement**
    - Each question MUST be answerable **completely and correctly** within its specified maxTime minutes.
    ${audioNumber > 0 ? `- Audio questions: ${audioMaxTime} minutes each` : ""}
    ${videoNumber > 0 ? `- Video questions: ${videoMaxTime} minutes each` : ""}
    ${subjectiveNumber > 0 ? `- Subjective questions: ${subjectiveMaxTime} minutes each` : ""}
+   - Keep questions **single-focus** (no multi-part prompts) and short enough for the time limit.
+   - If maxTime ≤ 1 minute, the expected answer must be brief (2-4 sentences or a short paragraph).
    - Do NOT generate questions that require excessive theory, multi-stage reasoning, or long explanations beyond the given time.
+   - Expected answer length guidance:
+     ${audioNumber > 0 ? `- Audio: ~${audioWordMin}-${audioWordMax} spoken words total` : ""}
+     ${videoNumber > 0 ? `- Video: ~${videoWordMin}-${videoWordMax} spoken words total` : ""}
+     ${subjectiveNumber > 0 ? `- Subjective: ~${subjectiveWordMin}-${subjectiveWordMax} typed words total` : ""}
 
-2. **Experience-Based Difficulty**
-   - Difficulty MUST strictly match the candidate's experience (${experience} years), job role, and seniority.
+2. **Skill Purity (NO MIXING)**
+   - Generate questions ONLY about **${skillName}**.
+   - Do NOT include or blend other skills (even if listed in JD).
+
+3. **Experience-Based Difficulty**
+   - Difficulty MUST strictly match the candidate's experience (${experience} years) of hands-on experience in ${skillName}, job role related to only ${skillName}, and seniority.
    - Avoid questions that are:
-     - Too basic for senior candidates
-     - Too complex or system-level for junior/mid candidates
+     - ${experience < 2 ? `'Too basic for junior/mid candidates with less than 2 years of hands-on experience in ${skillName}'` : ""}
+     - ${experience >= 2 && experience < 5 ? `'Too basic for mid-level candidates with 2-5 years of hands-on experience in ${skillName}'` : ""}
+     - ${experience >= 5 && experience < 10 ? `'Too Medium for senior candidates with 5-10 years of hands-on experience in ${skillName}'` : ""}
+     - ${experience >= 10 ? `'Too Medium-Hard for senior candidates with 10+ years of hands-on experience in ${skillName}'` : ""}
 
-3. **Resume & JD Alignment**
+4. **Resume & JD Alignment**
    - Prefer technologies, frameworks, patterns, and scenarios that appear in:
      - Job Description
      - Candidate Resume Data if available
    - Avoid unrelated or unfamiliar tech.
 
-4. **Practical & Assessment-Ready**
+5. **Practical & Assessment-Ready**
    - Questions should resemble **real Assessment questions**, not academic exams.
    - Focus on decision-making, reasoning, and practical application.
 
@@ -725,10 +748,11 @@ CRITICAL UNIQUENESS REQUIREMENT:
 - Each question must have a DISTINCT purpose and require DIFFERENT answers
 - Audio, Video, and Subjective questions must cover DIFFERENT aspects/topics
 - Even if titles are different, the core meaning and expected answers must be unique
+- Each question must be clear, unambiguous, and easy to understand
 
-SCENARIO-BASED QUESTION REQUIREMENT (${scenarioBasedCount} out of ${totalNumber} questions - 25-30%):
-- Generate EXACTLY ${scenarioBasedCount} scenario-based, real-world questions
-- Distribute scenario-based questions across Audio, Video, and Subjective types proportionally
+SCENARIO-BASED QUESTION REQUIREMENT (${scenarioBasedCount} out of ${totalNumber} questions - ≤ 25%):
+- Generate EXACTLY ${scenarioBasedCount} scenario-based, real-world questions based on ${skillName} only & are answerable within the specified maxTime for its question type
+- Distribute scenario-based questions across Audio, Video, and Subjective types proportionally based on ${skillName}
 
 Question Distribution:
 ${audioNumber > 0
@@ -763,29 +787,21 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 
   prompt += `
 **SCENARIO-BASED QUESTION GUIDELINES** (Apply to ${scenarioBasedCount} questions):
-- Generate realistic, scenario-based interview questions that reflect day-to-day tasks performed by a ${experience}-year ${jobRole}
-- Questions must be based on commonly asked ${skillName} interview topics
+- Generate realistic, scenario-based interview questions that reflect day-to-day tasks performed by a ${experience}-year ${jobRole} related to only ${skillName} & are answerable within the specified maxTime for its question type
+- Questions must be based on commonly asked ${skillName} interview topics and MUST explicitly mention "${skillName}"
 - Focus on implementation-level experience, not strategy or planning
 - The candidate should talk about how they implemented, debugged, fixed, or executed ${skillName} tasks, not how they designed overall processes
-- Avoid topics like test strategy ownership, framework architecture decisions, or team-wide planning
+- Avoid topics like strategy ownership, framework architecture decisions, or team-wide planning
 - Ask questions that verify actual hands-on exposure (writing scripts, fixing failures, handling waits, locators, data, and execution issues)
 - Each scenario-based question should:
-  * Start with a realistic work situation: "Imagine you're working on..." or "You're tasked with..." or "During your work, you encounter..."
-  * Present a specific problem or challenge related to ${skillName}
-  * Ask how the candidate would handle it based on their ${experience} years of experience
-  * Feel like a real interviewer conversation
-  * Be answerable within the specified maxTime for its question type
-  * Focus on practical, hands-on experience rather than theoretical knowledge
-
-**SCENARIO-BASED QUESTION EXAMPLES** (for reference - create similar but unique questions):
-- "Imagine you're working on a test automation project and your test scripts are failing intermittently. How would you debug and fix this issue?"
-- "You're tasked with automating a web application that has dynamic elements. How would you handle element identification and wait strategies?"
-- "During your work, you encounter a situation where test data needs to be managed across multiple test environments. How would you approach this?"
-- "You're working on a project where test execution is taking too long. What steps would you take to optimize and improve performance?"
+  * Start with a realistic, conversational workplace situation (vary openers like "While working on…", "During development…", "How would you handle…", "Suppose…", "Your team notices…", "Walk me through…", "Describe a time when…")
+  * Present ONE specific ${skillName}-related problem that is answerable within the maxTime for its type
+  * Ask how the candidate would handle it based on ${experience} years of experience and ${skillName} related to only ${skillName} & are answerable within the specified maxTime for its question type
+  * Sound like a real interviewer conversation, not a long multi-part prompt
 
 **REGULAR QUESTION GUIDELINES** (Apply to remaining ${regularCount} questions):
-- Can focus on concepts, definitions, best practices, or general knowledge
-- Should still be practical and relevant to ${skillName}
+- Can focus on core concepts, definitions, best practices, or general knowledge related to ${skillName} & are answerable within the specified maxTime for its question type
+- Should still be practical and relevant to ${skillName} & are answerable within the specified maxTime for its question type
 - Should verify understanding of ${skillName} fundamentals
 - Should be answerable within the specified maxTime for its question type
 `;
@@ -828,27 +844,33 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   prompt += `
 **Audio Question Requirements** (if ${audioNumber} > 0):
 - Generate EXACTLY ${audioNumber} Audio questions
-- ${audioScenarioCount > 0 ? `Include EXACTLY ${audioScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include scenario-based questions as part of the 25-30% requirement"}
+- **ONE question per item**: Each "question" field must ask exactly ONE thing. Do NOT merge 2+ sub-questions.
+- ${audioScenarioCount > 0 ? `Include EXACTLY ${audioScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include ZERO scenario-based questions (to keep total ≤ 25%)"}
 - Must require ONLY verbal answers via voice
 - Do NOT ask for demonstrations, code execution, or visual aids
+- Each question MUST mention "${skillName}" explicitly
 - Use <br/> for line breaks in question text
 - Each question should be answerable in ${audioConfig ? audioConfig.maxTime : 0} minutes via audio and feel like a real interviewer conversation
 - Ensure these questions are COMPLETELY DIFFERENT from Video and Subjective questions
 
 **Video Question Requirements** (if ${videoNumber} > 0):
 - Generate EXACTLY ${videoNumber} Video questions
-- ${videoScenarioCount > 0 ? `Include EXACTLY ${videoScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include scenario-based questions as part of the 25-30% requirement"}
+- **ONE question per item**: Each "question" field must ask exactly ONE thing. Do NOT merge 2+ sub-questions.
+- ${videoScenarioCount > 0 ? `Include EXACTLY ${videoScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include ZERO scenario-based questions (to keep total ≤ 25%)"}
 - Must require ONLY verbal answers
 - Do NOT ask for demonstrations, screen presentations, live demos, or visual aids
+- Each question MUST mention "${skillName}" explicitly
 - Use <br/> for line breaks in question text
 - Each question should be answerable in ${videoConfig ? videoConfig.maxTime : 0} minutes via video and feel like a real interviewer conversation
 - Ensure these questions are COMPLETELY DIFFERENT from Audio and Subjective questions
 
 **Subjective Question Requirements** (if ${subjectiveNumber} > 0):
 - Generate EXACTLY ${subjectiveNumber} Subjective questions
-- ${subjectiveScenarioCount > 0 ? `Include EXACTLY ${subjectiveScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include scenario-based questions as part of the 25-30% requirement"}
+- **ONE question per item**: Each "question" field must ask exactly ONE thing. Do NOT merge 2+ sub-questions.
+- ${subjectiveScenarioCount > 0 ? `Include EXACTLY ${subjectiveScenarioCount} scenario-based questions (see SCENARIO-BASED QUESTION GUIDELINES below)` : "Include ZERO scenario-based questions (to keep total ≤ 25%)"}
 - Designed for text input in a text area
 - Do NOT require code execution, demos, or presentations
+- Each question MUST mention "${skillName}" explicitly
 - Use <br/> for line breaks in question text
 - Each question should be answerable in ${subjectiveConfig ? subjectiveConfig.maxTime : 0} minutes via written response
 - Ensure these questions are COMPLETELY DIFFERENT from Audio and Video questions
@@ -901,6 +923,11 @@ VERIFY UNIQUENESS: Before returning, ensure that:
 2. All Video questions are unique and different from Audio/Subjective
 3. All Subjective questions are unique and different from Audio/Video
 4. No question shares the same core meaning or expected answer with another
+5. All questions are related to ${skillName} only & are answerable within the specified maxTime for its question type
+6. Randomly vary the opening phrase. Never start every question with "Imagine".
+7. Ensure questions sound like a real interviewer speaking naturally.
+
+
 `;
 
   return prompt;
@@ -924,6 +951,10 @@ const generatePromptForType = (
   const skillType = category.skills || "unknown";
   const number = questionConfig.number;
   const maxTime = questionConfig.maxTime;
+  const verbalWordMin = Math.round(maxTime * 30);
+  const verbalWordMax = Math.round(maxTime * 45);
+  const writtenWordMin = Math.round(maxTime * 15);
+  const writtenWordMax = Math.round(maxTime * 25);
   const promptText =
     (questionConfig.promptText || questionConfig.customPrompt || "").trim();
   const complexityPreference = ["Easy", "Medium", "Hard"].includes(
@@ -934,7 +965,6 @@ const generatePromptForType = (
 
   let prompt = `Generate ${number} ${questionType} interview question(s) for the following skill:
 skillName: "${skillName}"
-skillType: "${skillType}"
 number: ${number}
 maxTime: ${maxTime} minutes
 - Candidate Experience Level: ${experience} years
@@ -946,16 +976,23 @@ maxTime: ${maxTime} minutes
 
 1. **Time Constraint Enforcement**
    - Each question MUST be answerable **completely and correctly** within **${maxTime} minutes**.
+   - Keep questions **single-focus** (no multi-part prompts) and short enough for the time limit.
+   - If maxTime ≤ 1 minute, the expected answer must be brief (2-4 sentences or a short paragraph).
    - Do NOT generate questions that require excessive theory, multi-stage reasoning, or long explanations beyond the given time.
+   - Expected answer length guidance: Audio/Video ~${verbalWordMin}-${verbalWordMax} spoken words, Subjective ~${writtenWordMin}-${writtenWordMax} typed words
 
-2. **Experience-Based Difficulty**
+2. **Skill Purity (NO MIXING)**
+   - Generate questions ONLY about **${skillName}**.
+   - Do NOT include or blend other skills (even if listed in JD).
+
+3. **Experience-Based Difficulty**
    - Difficulty MUST strictly match the candidate's experience (${experience} years), job role, and seniority.
    - Avoid questions that are:
      - Too basic for senior candidates
      - Too complex or system-level for junior/mid candidates
 ${questionType === "Programming"
       ? `
-3. **Programming Questions (MANDATORY TIME FEASIBILITY)**
+4. **Programming Questions (MANDATORY TIME FEASIBILITY)**
    - The candidate with **${experience} years of experience** MUST be able to:
      - Understand the problem
      - Design the logic
@@ -967,18 +1004,19 @@ ${questionType === "Programming"
      - Multi-file architecture
      - Advanced algorithms unless explicitly justified by role & experience
 
-4. **Resume & JD Alignment**`
+6. **Resume & JD Alignment**`
       : `
-3. **Resume & JD Alignment**`
+5. **Resume & JD Alignment**`
     }
    - Prefer technologies, frameworks, patterns, and scenarios that appear in:
      - Job Description
      - Candidate Resume Data if available
    - Avoid unrelated or unfamiliar tech.
 
-${questionType === "Programming" ? `5. **Practical & Assessment-Ready**` : `4. **Practical & Assessment-Ready**`}
+${questionType === "Programming" ? `7. **Practical & Assessment-Ready**` : `6. **Practical & Assessment-Ready**`}
    - Questions should resemble **real Assessment questions**, not academic exams.
    - Focus on decision-making, reasoning, and practical application.
+   - Questions must be clear, unambiguous, and easy to understand.
 
 Ensure all generated questions strictly follow the above constraints.
 `;
@@ -1057,49 +1095,55 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
       break;
 
     case "Audio":
-      const audioScenarioNum = Math.max(1, Math.round(number * 0.27)); // 25-30% scenario-based
+      const audioScenarioNum = Math.floor(number * 0.25); // <= 25% scenario-based
       prompt += `\n**Audio Question Requirements**:
-- Generate EXACTLY ${number} Audio questions
-- Include approximately ${audioScenarioNum} scenario-based, real-world questions (25-30% of total)
-- Scenario-based questions should present realistic work situations: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
-- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole}, focusing on implementation-level experience
-- Regular questions can focus on concepts, definitions, or general knowledge
+- Generate EXACTLY ${number} Audio questions on skill ${skillName}
+- **ONE question per item**: Each "question" field must ask exactly ONE thing. Do NOT merge 2+ sub-questions (no "and", "also", "additionally", or multiple sentences each asking something different).
+- Include EXACTLY ${audioScenarioNum} scenario-based, real-world questions (≤ 25% of total) on skill ${skillName}
+- Scenario-based questions should present realistic work situations for skill ${skillName}: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
+- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole} related to only ${skillName}, focusing on implementation-level experience ${experience}
+- Regular questions can focus on concepts, definitions, or general knowledge related to ${skillName} only
 - Must require ONLY verbal answers via voice
 - Do NOT ask for demonstrations, code execution, or visual aids
 - Focus on verbal explanations, concepts, experiences, or scenario-based problem-solving
 - Each question should be answerable in ${maxTime} minutes via audio and feel like a real interviewer conversation
+- Expected answer length: ~${verbalWordMin}-${verbalWordMax} spoken words total
 - Use <br/> for line breaks in question text
 `;
       break;
 
     case "Video":
-      const videoScenarioNum = Math.max(1, Math.round(number * 0.27)); // 25-30% scenario-based
+      const videoScenarioNum = Math.floor(number * 0.25); // <= 25% scenario-based
       prompt += `\n**Video Question Requirements**:
-- Generate EXACTLY ${number} Video questions
-- Include approximately ${videoScenarioNum} scenario-based, real-world questions (25-30% of total)
-- Scenario-based questions should present realistic work situations: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
-- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole}, focusing on implementation-level experience
-- Regular questions can focus on concepts, definitions, or general knowledge
+- Generate EXACTLY ${number} Video questions on skill ${skillName}
+- **ONE question per item**: Each "question" field must ask exactly ONE thing. Do NOT merge 2+ sub-questions (no "and", "also", "additionally", or multiple sentences each asking something different).
+- Include EXACTLY ${videoScenarioNum} scenario-based, real-world questions (≤ 25% of total) on skill ${skillName}
+- Scenario-based questions should present realistic work situations for skill ${skillName}: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
+- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole} related to only ${skillName}, focusing on implementation-level experience
+- Regular questions can focus on concepts, definitions, or general knowledge related to ${skillName} only
 - Must require ONLY verbal answers
 - Do NOT ask for demonstrations, screen presentations, live demos, or visual aids
 - Focus on explanations, concepts, experiences, or scenario-based problem-solving
 - Each question should be answerable in ${maxTime} minutes via video and feel like a real interviewer conversation
+- Expected answer length: ~${verbalWordMin}-${verbalWordMax} spoken words total
 - Use <br/> for line breaks in question text
 `;
       break;
 
     case "Subjective":
-      const subjectiveScenarioNum = Math.max(1, Math.round(number * 0.27)); // 25-30% scenario-based
+      const subjectiveScenarioNum = Math.floor(number * 0.25); // <= 25% scenario-based
       prompt += `\n**Subjective Question Requirements**:
-- Generate EXACTLY ${number} Subjective questions
-- Include approximately ${subjectiveScenarioNum} scenario-based, real-world questions (25-30% of total)
-- Scenario-based questions should present realistic work situations: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
-- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole}, focusing on implementation-level experience
-- Regular questions can focus on concepts, definitions, or general knowledge
+- Generate EXACTLY ${number} Subjective questions on skill ${skillName}
+- **ONE question per item**: Each "question" field must ask exactly ONE thing. Do NOT merge 2+ sub-questions (no "and", "also", "additionally", or multiple sentences each asking something different).
+- Include EXACTLY ${subjectiveScenarioNum} scenario-based, real-world questions (≤ 25% of total) on skill ${skillName}
+- Scenario-based questions should present realistic work situations for skill ${skillName}: "Imagine you're working on X, how would you handle Y?" or "Describe a time when you had to Z"
+- Scenario-based questions should reflect day-to-day tasks performed by a ${experience}-year ${jobRole} related to only ${skillName}, focusing on implementation-level experience
+- Regular questions can focus on concepts, definitions, or general knowledge related to ${skillName} only
 - Designed for text input in a text area
 - Focus on written responses requiring explanations, analysis, descriptions, or scenario-based problem-solving
 - Do NOT require code execution, demos, or presentations
 - Each question should be answerable in ${maxTime} minutes via written response
+- Expected answer length: ~${writtenWordMin}-${writtenWordMax} typed words total
 - Use <br/> for line breaks in question text
 `;
       break;
