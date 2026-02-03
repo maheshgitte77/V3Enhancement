@@ -12,37 +12,141 @@ const generateJobDescription = async (req, res) => {
   try {
     const jobDetails = req.body;
     const channelId = jobDetails.channelId;
+    const officialSkills = jobDetails.officialSkills || []; // List of {id, name}
 
-    // ✅ Create a structured prompt for the AI
-    const prompt = `Generate a structured job description for a ${jobDetails.seniority.join(
-      ", "
-    )} ${jobDetails.jobTitle} in the ${
-      jobDetails.domain
-    } domain. Format it with proper headings, bullet points, and a professional tone.
-        - Job Title: ${jobDetails.jobTitle}
-        - Experience: ${jobDetails.experience} years
-        - Priority: ${jobDetails.priority}
-        - Seniority Level: ${jobDetails.seniority.join(", ")}
-        - Job Type: ${jobDetails.jobType}
-        - Job Style: ${jobDetails.jobStyle}
-        - Total Positions: ${jobDetails.totalPositions}
-        - Locations: ${jobDetails.jobLocation.join(", ")}
-        - Notice Period: ${jobDetails.noticePeriod} days
-        - Domain: ${jobDetails.domain}
-        - Due Date: ${jobDetails.dueDate}
-        - Hiring Manager: ${jobDetails.hiringManager}
-        - Application Link: ${jobDetails.applicationLink}
-        - Required Skills: ${jobDetails.requiredSkill.join(", ")}
-        - Good to Have Skills: ${jobDetails.goodToHaveSkill.join(", ")}
-        - Aptitude Skills: ${jobDetails.aptitudeSkill.join(", ")}  
+    // Helper for fuzzy matching
+    const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+    const findMatchedSkill = (name) => {
+      if (!name) return null;
+      const normName = normalize(name);
 
-        Provide a professional and structured job description.`;
+      // 1. Exact normalized match
+      let match = officialSkills.find((s) => normalize(s.name) === normName);
+      if (match) return match;
+
+      // 2. Substring match (e.g. "Express" in "Express.js")
+      match = officialSkills.find((s) => {
+        const normS = normalize(s.name);
+        return normName.includes(normS) || normS.includes(normName);
+      });
+
+      return match || null;
+    };
+
+    const prompt = `
+Generate a professional, structured Job Description.
+**OUTPUT MUST BE RAW HTML ONLY. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+
+**STRICT LAYOUT RULES:**
+1. **Job Title**: <p><strong>Job Title:</strong> ${jobDetails.jobRole || jobDetails.jobTitle}</p>
+
+2. **SUMMARY :** 
+   - <h3><strong>SUMMARY :</strong></h3>
+   - 2 descriptive paragraphs wrapped in <p> tags.
+
+3. **KEY ROLES & RESPONSIBILITIES :** 
+   - <h3><strong>KEY ROLES & RESPONSIBILITIES :</strong></h3>
+   - Use a SINGLE <ul> containing multiple <li> items.
+
+4. **KNOWLEDGE/ SKILLS/ATTRIBUTES :**
+   - <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :</strong></h3>
+   - <p><strong>Required Experience, Skills and Qualifications</strong></p>
+   - SINGLE <ul> with items as "<strong>Skill Name</strong>: Description".
+   - (If Education exists): <p><strong>Education</strong></p><ul><li>(Qualification)</li></ul>
+
+5. **Good to have skills :** (If applicable)
+   - <h3><strong>Good to have skills :</strong></h3>
+   - SINGLE <ul> with "Skill: Description" format.
+
+6. **Other Requirements :** (If applicable)
+   - <h3><strong>Other Requirements :</strong></h3>
+   - SINGLE <ul> with "Requirement: Description" format.
+
+**CRITICAL RULES:**
+- **Skill Enrichment**: For EVERY skill mentioned, you MUST provide a professional 1-line description (e.g., "Skill Name: Expert-level proficiency in..."). If the description isn't in the input, **create a high-quality one based on the Job Role and Seniority**.
+- **Empty Sections**: Skip header if no data.
+- **Single List**: Wrap all points of a section in ONE <ul>.
+
+7. **Skill Mapping**: 
+   - Categorize skills into 'required', 'goodToHave', and 'aptitude'.
+   - Match against: ${JSON.stringify(officialSkills)}.
+
+**MATCHING DATA REQUEST:**
+At the very end, provide JSON tagged [SKILL_DATA] containing the FULL list of skills found/mapped:
+{
+  "required": [
+    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
+  ],
+  "goodToHave": [
+    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
+  ],
+  "aptitude": [
+    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
+  ]
+}
+
+**DETAILS:**
+- Job Title: ${jobDetails.jobRole || jobDetails.jobTitle}
+- Seniority: ${jobDetails.seniority?.join(", ")}
+- Required: ${jobDetails.requiredSkill.join(", ")}
+- Good to Have: ${jobDetails.goodToHaveSkill.join(", ")}
+- Aptitude: ${jobDetails.aptitudeSkill.join(", ")}
+
+Generate HTML now.
+`;
 
     const result = await model.generateContent(prompt);
-
-    const jobDescription =
+    const fullText =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
+
+    // Split text from skill data
+    const parts = fullText.split("[SKILL_DATA]");
+    const jobDescription = parts[0].replace(/```html|```/gi, "").trim();
+    let rawSkillData = null;
+
+    if (parts[1]) {
+      try {
+        const jsonStr = parts[1].replace(/```json|```/gi, "").trim();
+        rawSkillData = JSON.parse(jsonStr);
+      } catch (e) {
+        console.error("Failed to parse skill data JSON:", e);
+      }
+    }
+
+    // Post-process skills with fuzzy matching
+    const skillData = {
+      required: [],
+      goodToHave: [],
+      aptitude: [],
+    };
+
+    if (rawSkillData) {
+      ["required", "goodToHave", "aptitude"].forEach((category) => {
+        if (Array.isArray(rawSkillData[category])) {
+          rawSkillData[category].forEach((skill) => {
+            const match = findMatchedSkill(skill.name);
+            if (match) {
+              skillData[category].push({
+                id: match.id || match._id,
+                name: match.name,
+                description:
+                  skill.description ||
+                  `${match.name}: Professional proficiency.`,
+              });
+            } else {
+              skillData[category].push({
+                id: null,
+                name: skill.name,
+                description:
+                  skill.description ||
+                  `${skill.name}: Professional proficiency.`,
+              });
+            }
+          });
+        }
+      });
+    }
 
     const usageMetadata = result.response?.usageMetadata || {};
     const inputTokens = usageMetadata.promptTokenCount || 0;
@@ -54,7 +158,6 @@ const generateJobDescription = async (req, res) => {
       const tempId = req.body.tempId;
 
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
         const referenceId = `jd_gen_${Date.now()}`;
         await CreditServiceClient.deductAiUsage({
           clientId,
@@ -73,19 +176,14 @@ const generateJobDescription = async (req, res) => {
         });
       }
     } catch (creditError) {
-      console.error(
-        `❌ AI Credit deduction failed (Non-blocking):`,
-        creditError.message
-      );
+      console.error(`❌ AI Credit deduction failed:`, creditError.message);
     }
-    // ---------------------------------
-
-    const totalTokenCount = result.response.usageMetadata?.totalTokenCount || 0;
 
     return res.status(200).json({
       message: "Job description generated successfully",
       jobDescription,
-      totalTokenCount,
+      skillData,
+      totalTokenCount: inputTokens + outputTokens,
     });
   } catch (error) {
     console.error("❌ Error in generateJobDescription:", error);
@@ -94,110 +192,27 @@ const generateJobDescription = async (req, res) => {
 };
 
 const generateJobDescriptionForJobOverview = async (req, res) => {
+  // Keeping this as a shorter version but following same section rules
   try {
     const jobDetails = req.body;
-    const channelId = jobDetails.channelId;
-
-    console.log("Channel ID:", channelId);
-    // ✅ Create a structured prompt for AI with Typography
     const prompt = `
-Generate a professional job description for a ${jobDetails.seniority.join(
-      ", "
-    )} ${jobDetails.jobTitle} in the ${jobDetails.domain} domain.
+Generate a brief but professional Job Description overview.
+Sections:
+1. SUMMARY (No title, just 1 paragraph)
+2. KEY ROLES & RESPONSIBILITIES (Bullet points)
+3. REQUIRED SKILLS (Bullet points)
 
-**Output must include only the following sections:**
-- **Job Summary** (Start with content directly, without the "Job Summary" title)
-- **Responsibilities**
-- **Required Skills**
-- **Good to Have Skills**
-- **Other Requirements** (If any aptitude skills are required, list them here)
-
-**Formatting Instructions:**
-- Do not include a title for the "Job Summary" section—start with the content directly.
-- Use only bullet points (●) for lists, without additional symbols (*, -, etc.).
-- Ensure clarity and readability by keeping points concise.
-
-**Job Details:**
-- **Job Title:** ${jobDetails.jobTitle}  
-- **Experience:** ${jobDetails.experience} years  
-- **Seniority Level:** ${jobDetails.seniority.join(", ")}  
-- **Job Type:** ${jobDetails.jobType}  
-- **Locations:** ${jobDetails.jobLocation.join(", ")}  
-- **Required Skills:** ${jobDetails.requiredSkill.join(", ")}  
-- **Good to Have Skills:** ${jobDetails.goodToHaveSkill.join(", ")}
-- **Aptitude Skills:** ${jobDetails.aptitudeSkill.join(", ")}  
-
-**Provide only these sections in the response without extra details.**
+**Formatting**: Use bullet points (●) and simple dividers (---).
+**Role**: ${jobDetails.jobRole || jobDetails.jobTitle}
+**Details**: ${JSON.stringify(jobDetails)}
 `;
 
     const result = await model.generateContent(prompt);
-
     const jobDescription =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
-    // Extract token usage and calculate cost
-    const usageMetadata = result.response?.usageMetadata || {};
-    const inputTokens = usageMetadata.promptTokenCount || 0;
-    const outputTokens = usageMetadata.candidatesTokenCount || 0;
-
-    let processingCost = null;
-    if (inputTokens > 0 || outputTokens > 0) {
-      processingCost = calculateProcessingCost(
-        inputTokens,
-        outputTokens,
-        "text" // This is text-only processing
-      );
-
-      console.log(
-        `💰 Job Description (short) processing cost: $${processingCost.totalCost.toFixed(
-          6
-        )}`,
-        {
-          inputTokens,
-          outputTokens,
-          totalCost: processingCost.totalCost,
-        }
-      );
-    }
-
-    // --- Credit System Integration ---
-    try {
-      const clientId = req.body.clientId;
-      const tempId = req.body.tempId || req.body.temp_id;
-      if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
-        const referenceId = `jd_short_${Date.now()}`;
-        await CreditServiceClient.deductAiUsage({
-          clientId,
-          modelId: "gemini-2.0-flash",
-          referenceId,
-          inputTokens,
-          outputTokens,
-          meta: {
-            type: "jd_overview_generation",
-            jobTitle: jobDetails.jobTitle,
-            serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
-          },
-          channelId,
-          jobId: null,
-          tempId,
-        });
-      }
-    } catch (creditError) {
-      console.error(
-        `❌ AI Credit deduction failed (Non-blocking):`,
-        creditError.message
-      );
-    }
-    // ---------------------------------
-
-    return res.status(200).json({
-      message: "Job description generated successfully",
-      jobDescription, // This contains only the required sections
-      ...(processingCost && { processingCost }),
-    });
+    return res.status(200).json({ jobDescription });
   } catch (error) {
-    console.error("❌ Error in generateJobDescriptionForJobOverview:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
@@ -247,7 +262,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
       const clientId = req.body.clientId;
       const tempId = req.body.tempId || req.body.temp_id;
       console.log(
-        `🔍 JD Skills Debug: clientId="${clientId}", tempId="${tempId}"`
+        `🔍 JD Skills Debug: clientId="${clientId}", tempId="${tempId}"`,
       );
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
@@ -270,7 +285,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
     } catch (creditError) {
       console.error(
         `❌ AI Credit deduction failed (Non-blocking):`,
-        creditError.message
+        creditError.message,
       );
     }
     // ---------------------------------
@@ -299,26 +314,165 @@ const generateJobDescriptionFormFile = async (req, res) => {
     const extractedText = pdfData.text.trim();
 
     if (withAi) {
-      const prompt = `
-      Analyze the following document and structure the extracted content into a clean, well-formatted response. 
-      
-      1. Identify the **type of document** (Resume, Job Description, Business Report, or Other).
-      2. Extract and format key sections dynamically. Use headings, bullet points, and indentation where necessary.
-      3. Ensure clarity and proper structure based on document type.
-      4. Remove unnecessary artifacts like page numbers or random line breaks.
-      5. Don't add Document Type.
+      const officialSkills = req.body.officialSkills
+        ? JSON.parse(req.body.officialSkills)
+        : [];
+      const jobRole = req.body.jobRole || "Specified Role";
 
-      ---- Document Content ----
-      ${extractedText}
-      ---------------------------------
-      
-      Return only the structured content without extra explanations.
-      `;
+      // Helper for fuzzy matching
+      const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const findMatchedSkill = (name) => {
+        if (!name) return null;
+        const normName = normalize(name);
+        let match = officialSkills.find((s) => normalize(s.name) === normName);
+        if (match) return match;
+        match = officialSkills.find((s) => {
+          const normS = normalize(s.name);
+          return normName.includes(normS) || normS.includes(normName);
+        });
+        return match || null;
+      };
+
+      const prompt = `
+Analyze the provided text and generate a Job Description.
+**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT USE <html>, <head>, or <body> TAGS. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+
+**STRICT LAYOUT RULES:**
+1. <p><strong>Job Title:</strong> ${jobRole}</p>
+2. <h3><strong>SUMMARY :</strong></h3> (2 informative paragraphs wrapped in <p> tags)
+3. <h3><strong>KEY ROLES & RESPONSIBILITIES :**</h3> (A SINGLE <ul> list with multiple <li> items)
+4. <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :**</h3>
+   - <p><strong>Required Experience, Skills and Qualifications</strong></p>
+   - A SINGLE <ul> with items in format: "<strong>Skill Name</strong>: Professional One-Liner Description"
+   - (If Education is found): <p><strong>Education</strong></p> (followed by a SINGLE <ul>)
+5. <h3><strong>Good to have skills :**</h3> (A SINGLE <ul> if data exists)
+6. <h3><strong>Other Requirements :**</h3> (A SINGLE <ul> if data exists)
+
+**AI INSTRUCTION:**
+- **Extraction**: Thoroughly scan the content. Map section "THE CORE REQUIREMENTS" and "ENGINEERING PHILOSOPHY" to 'required'. Map "BEYOND THE CORE" to 'goodToHave'. Map "CULTURAL/OPERATIONAL" to 'aptitude'.
+- **Enrichment**: For EVERY skill, you MUST generate a high-quality 1-line description even if missing in the source.
+- **Normalization**: If you see "Express.js" but the mapping list has "Express", categorize it correctly.
+
+7. **Skill List**: Match against this list: ${JSON.stringify(officialSkills)}.
+
+**METADATA EXTRACTION (CRITICAL INSTRUCTIONS):**
+Carefully scan the entire document for the following information. ONLY extract data that is EXPLICITLY mentioned. Do NOT guess or infer.
+
+1. **Experience Requirements**:
+   - Look for phrases like: "5+ years", "3-5 years", "minimum 2 years", "8+ years experience", "fresher", "0-2 years", etc.
+   - Common patterns to detect:
+     * "X-Y years" → experienceFrom: X, experienceTo: Y
+     * "X+ years" or "X or more years" → experienceFrom: X, experienceTo: X+3
+     * "Minimum X years" → experienceFrom: X, experienceTo: X+5
+     * "Up to X years" or "Below X years" → experienceFrom: 0, experienceTo: X
+     * "Fresher" or "Entry level" → experienceFrom: 0, experienceTo: 2
+   - If NO experience is mentioned anywhere, return: experienceFrom: null, experienceTo: null
+
+2. **Job Category (jobFor)**:
+   - If experienceFrom is 0 or 1 or document mentions "fresher"/"entry level" → "Fresher"
+   - If experienceFrom is 2 or more → "Experienced"
+   - If no experience data found → "Experienced" (default)
+
+3. **Total Positions**:
+   - Look for: "X positions", "X vacancies", "X openings", "hiring X", "X roles", etc.
+   - Extract the number only
+   - If NOT found, return: null (do NOT default to 1)
+
+4. **Location**:
+   - Look for: "Location:", "Based in", "Office in", city names, "Remote", "Hybrid", etc.
+   - Extract the primary location (city/region)
+   - If multiple locations, pick the first one mentioned
+   - If "Remote" only, return: "Remote"
+   - If NOT found, return: "" (empty string)
+
+**DATA EXTRACTION REQUEST:**
+After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by this JSON block:
+
+[SKILL_DATA]
+{
+  "required": [ { "name": "...", "description": "..." } ],
+  "goodToHave": [ ... ],
+  "aptitude": [ ... ]
+}
+
+[META_DATA]
+{
+  "experienceFrom": number or null,
+  "experienceTo": number or null,
+  "jobFor": "Fresher" | "Experienced",
+  "totalPositions": number or null,
+  "location": "string or empty"
+}
+
+**SOURCE TEXT:**
+${extractedText}
+
+Generate the JD now.
+`;
 
       const result = await model.generateContent(prompt);
-      const formattedText =
-        result.response.candidates[0]?.content?.parts[0]?.text ||
-        "AI formatting failed.";
+      const fullText =
+        result.response.candidates[0]?.content?.parts[0]?.text || "";
+
+      // Split text from data blocks
+      const skillParts = fullText.split("[SKILL_DATA]");
+      const metaParts = (skillParts[1] || "").split("[META_DATA]");
+
+      const formattedText = skillParts[0].replace(/```html|```/gi, "").trim();
+      let rawSkillData = null;
+      let metaData = null;
+
+      if (metaParts[0]) {
+        try {
+          const jsonStr = metaParts[0].replace(/```json|```/gi, "").trim();
+          rawSkillData = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Failed to parse skill data JSON:", e);
+        }
+      }
+
+      if (metaParts[1]) {
+        try {
+          const jsonStr = metaParts[1].replace(/```json|```/gi, "").trim();
+          metaData = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Failed to parse meta data JSON:", e);
+        }
+      }
+
+      // Post-process skills with fuzzy matching
+      const skillData = {
+        required: [],
+        goodToHave: [],
+        aptitude: [],
+      };
+
+      if (rawSkillData) {
+        ["required", "goodToHave", "aptitude"].forEach((category) => {
+          if (Array.isArray(rawSkillData[category])) {
+            rawSkillData[category].forEach((skill) => {
+              const match = findMatchedSkill(skill.name);
+              if (match) {
+                skillData[category].push({
+                  id: match.id || match._id,
+                  name: match.name,
+                  description:
+                    skill.description ||
+                    `${match.name}: Professional proficiency.`,
+                });
+              } else {
+                skillData[category].push({
+                  id: null,
+                  name: skill.name,
+                  description:
+                    skill.description ||
+                    `${skill.name}: Professional proficiency.`,
+                });
+              }
+            });
+          }
+        });
+      }
 
       // Extract token usage and calculate cost
       const usageMetadata = result.response?.usageMetadata || {};
@@ -330,29 +484,15 @@ const generateJobDescriptionFormFile = async (req, res) => {
         processingCost = calculateProcessingCost(
           inputTokens,
           outputTokens,
-          "text" // Text processing (PDF content is extracted as text)
-        );
-
-        console.log(
-          `💰 Job Description (from file) processing cost: $${processingCost.totalCost.toFixed(
-            6
-          )}`,
-          {
-            fileName: req.file.originalname,
-            numPages: pdfData.numpages,
-            inputTokens,
-            outputTokens,
-            totalCost: processingCost.totalCost,
-          }
+          "text",
         );
 
         // --- Credit System Integration ---
         try {
           const clientId = req.body.clientId;
           const channelId = req.body.channelId;
-          const tempId = req.body.tempId || req.body.temp_id;
+          const tempId = req.body.tempId;
           if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-            // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
             const referenceId = `jd_file_${Date.now()}`;
             await CreditServiceClient.deductAiUsage({
               clientId,
@@ -370,19 +510,26 @@ const generateJobDescriptionFormFile = async (req, res) => {
             });
           }
         } catch (creditError) {
-          console.error(
-            `❌ AI Credit deduction failed (Non-blocking):`,
-            creditError.message
-          );
+          console.error(`❌ AI Credit deduction failed:`, creditError.message);
         }
-        // ---------------------------------
       }
+
+      // Clean metaData: remove null values
+      const cleanedMetaData = metaData
+        ? Object.fromEntries(
+            Object.entries(metaData).filter(([_, value]) => value !== null),
+          )
+        : null;
 
       return res.json({
         formattedText,
+        skillData,
+        ...(cleanedMetaData &&
+          Object.keys(cleanedMetaData).length > 0 && {
+            metaData: cleanedMetaData,
+          }),
         documentType: "Analyzed by AI",
         numPages: pdfData.numpages,
-        metadata: pdfData.metadata,
         ...(processingCost && { processingCost }),
       });
     } else {
