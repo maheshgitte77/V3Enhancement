@@ -250,6 +250,8 @@ const processProgrammingResponse = async (responseData) => {
       analysis: {
         logicalCorrectness: aiAnalysis.logicalCorrectness,
         codeQuality: aiAnalysis.codeQuality,
+        analyticalThinking: aiAnalysis.analyticalThinking,
+        problemSolvingAbility: aiAnalysis.problemSolvingAbility,
         overallAssessment: aiAnalysis.overallAssessment,
       },
       tokenUsage,
