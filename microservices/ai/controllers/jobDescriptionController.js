@@ -46,20 +46,24 @@ Generate a professional, structured Job Description.
    - 2 descriptive paragraphs wrapped in <p> tags.
 
 3. **KEY ROLES & RESPONSIBILITIES :** 
+   - <hr> (Only if next section is generated)
    - <h3><strong>KEY ROLES & RESPONSIBILITIES :</strong></h3>
    - Use a SINGLE <ul> containing multiple <li> items.
 
 4. **KNOWLEDGE/ SKILLS/ATTRIBUTES :**
+   - <hr> (Only if next section is generated)
    - <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :</strong></h3>
    - <p><strong>Required Experience, Skills and Qualifications</strong></p>
    - SINGLE <ul> with items as "<strong>Skill Name</strong>: Description".
-   - (If Education exists): <p><strong>Education</strong></p><ul><li>(Qualification)</li></ul>
+   - DO NOT include Education section in direct JD generation.
 
 5. **Good to have skills :** (If applicable)
+   - <hr> (Only if next section is generated)
    - <h3><strong>Good to have skills :</strong></h3>
    - SINGLE <ul> with "Skill: Description" format.
 
 6. **Other Requirements :** (If applicable)
+   - <hr> (Only if next section is generated)
    - <h3><strong>Other Requirements :</strong></h3>
    - SINGLE <ul> with "Requirement: Description" format.
 
@@ -67,6 +71,7 @@ Generate a professional, structured Job Description.
 - **Skill Enrichment**: For EVERY skill mentioned, you MUST provide a professional 1-line description (e.g., "Skill Name: Expert-level proficiency in..."). If the description isn't in the input, **create a high-quality one based on the Job Role and Seniority**.
 - **Empty Sections**: Skip header if no data.
 - **Single List**: Wrap all points of a section in ONE <ul>.
+- **NO Education Section**: Do not generate Education section for direct JD creation.
 
 7. **Skill Mapping**: 
    - Categorize skills into 'required', 'goodToHave', and 'aptitude'.
@@ -102,7 +107,13 @@ Generate HTML now.
 
     // Split text from skill data
     const parts = fullText.split("[SKILL_DATA]");
-    const jobDescription = parts[0].replace(/```html|```/gi, "").trim();
+    let jobDescription = parts[0].replace(/```html|```/gi, "").trim();
+
+    // Remove trailing <hr> tags to prevent orphaned dividers
+    jobDescription = jobDescription
+      .replace(/(<hr\s*\/?>[\s\r\n]*)+$/gi, "")
+      .trim();
+
     let rawSkillData = null;
 
     if (parts[1]) {
@@ -183,6 +194,7 @@ Generate HTML now.
       message: "Job description generated successfully",
       jobDescription,
       skillData,
+      noticePeriod: "0-30", // Default notice period
       totalTokenCount: inputTokens + outputTokens,
     });
   } catch (error) {
@@ -303,8 +315,13 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
 };
 
 const generateJobDescriptionFormFile = async (req, res) => {
+  console.log("📄 JD File Upload Request Received");
+  console.log("Request body:", req.body);
+  console.log("File present:", !!req.file);
+
   try {
     if (!req.file) {
+      console.log("❌ No file uploaded");
       return res.status(400).json({ error: "No file uploaded" });
     }
 
@@ -340,13 +357,17 @@ Analyze the provided text and generate a Job Description.
 **STRICT LAYOUT RULES:**
 1. <p><strong>Job Title:</strong> ${jobRole}</p>
 2. <h3><strong>SUMMARY :</strong></h3> (2 informative paragraphs wrapped in <p> tags)
-3. <h3><strong>KEY ROLES & RESPONSIBILITIES :**</h3> (A SINGLE <ul> list with multiple <li> items)
-4. <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :**</h3>
+3. <hr> (Only if next section is generated)
+4. <h3><strong>KEY ROLES & RESPONSIBILITIES :**</h3> (A SINGLE <ul> list)
+5. <hr> (Only if next section is generated)
+6. <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :**</h3>
    - <p><strong>Required Experience, Skills and Qualifications</strong></p>
    - A SINGLE <ul> with items in format: "<strong>Skill Name</strong>: Professional One-Liner Description"
    - (If Education is found): <p><strong>Education</strong></p> (followed by a SINGLE <ul>)
-5. <h3><strong>Good to have skills :**</h3> (A SINGLE <ul> if data exists)
-6. <h3><strong>Other Requirements :**</h3> (A SINGLE <ul> if data exists)
+7. <hr> (Only if next section is generated)
+8. <h3><strong>Good to have skills :**</h3> (ONLY if data exists, followed by <ul>)
+9. <hr> (Only if next section is generated)
+10. <h3><strong>Other Requirements :**</h3> (ONLY if data exists, followed by <ul>)
 
 **AI INSTRUCTION:**
 - **Extraction**: Thoroughly scan the content. Map section "THE CORE REQUIREMENTS" and "ENGINEERING PHILOSOPHY" to 'required'. Map "BEYOND THE CORE" to 'goodToHave'. Map "CULTURAL/OPERATIONAL" to 'aptitude'.
@@ -418,7 +439,13 @@ Generate the JD now.
       const skillParts = fullText.split("[SKILL_DATA]");
       const metaParts = (skillParts[1] || "").split("[META_DATA]");
 
-      const formattedText = skillParts[0].replace(/```html|```/gi, "").trim();
+      let formattedText = skillParts[0].replace(/```html|```/gi, "").trim();
+
+      // Remove trailing <hr> tags to prevent orphaned dividers
+      formattedText = formattedText
+        .replace(/(<hr\s*\/?>[\s\r\n]*)+$/gi, "")
+        .trim();
+
       let rawSkillData = null;
       let metaData = null;
 
@@ -530,6 +557,7 @@ Generate the JD now.
           }),
         documentType: "Analyzed by AI",
         numPages: pdfData.numpages,
+        noticePeriod: "0-30", // Default notice period
         ...(processingCost && { processingCost }),
       });
     } else {
@@ -537,6 +565,7 @@ Generate the JD now.
         formattedText: extractedText,
         documentType: "Raw Parsed Text",
         numPages: pdfData.numpages,
+        noticePeriod: "0-30", // Default notice period
         metadata: pdfData.metadata,
       });
     }
