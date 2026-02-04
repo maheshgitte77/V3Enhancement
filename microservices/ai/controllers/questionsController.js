@@ -221,11 +221,11 @@ ${JSON.stringify(testCases, null, 2)}
 
 For each of the following languages, generate appropriate boilerplate code:
 ${languages
-  .map(
-    (lang) =>
-      `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`,
-  )
-  .join("\n")}
+        .map(
+          (lang) =>
+            `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`,
+        )
+        .join("\n")}
 
 CRITICAL BOILERPLATE CODE REQUIREMENTS:
 1. DO NOT include any solution code, even if commented out
@@ -234,8 +234,15 @@ CRITICAL BOILERPLATE CODE REQUIREMENTS:
    - Required imports/headers
    - Input reading code (e.g., Scanner, readline, input())
    - Basic structure (main function, class definition)
+   - A separate empty logic function/method (e.g., solve(), compute(), or class method) with a TODO comment
    - A TODO comment indicating where candidates should implement their solution (e.g., '// TODO: Implement the solution here' or '# TODO: Implement the solution here')
-   - A placeholder print/output statement that calls the solution function
+   - A placeholder print/output statement in main that calls the separate logic function
+4. **MANDATORY STRUCTURE**:
+   - main() must ONLY handle input/output and call the separate logic function/method
+   - DO NOT place any solution logic in main() or input parsing
+5. **ABSOLUTE BAN**:
+   - No loops, no conditionals, no algorithm steps, no data structure logic in the logic function body
+   - The logic function body must be EMPTY except for a TODO comment (and optional return or throw statements)
 
 CRITICAL FORMATTING REQUIREMENTS:
 1. Use actual newline characters (\\n) NOT <br/> tags
@@ -249,12 +256,10 @@ CRITICAL FORMATTING REQUIREMENTS:
 Return ONLY a valid JSON object in this exact format:
 {
   "boilerplateCode": {
-    "${
-      languages[0].languageName || languages[0].name
-    }": "generated code here with \\n for newlines",
-    "${
-      languages.length > 1 ? languages[1].languageName || languages[1].name : ""
-    }": "generated code here with \\n for newlines"
+    "${languages[0].languageName || languages[0].name
+      }": "generated code here with \\n for newlines",
+    "${languages.length > 1 ? languages[1].languageName || languages[1].name : ""
+      }": "generated code here with \\n for newlines"
   }
 }
 
