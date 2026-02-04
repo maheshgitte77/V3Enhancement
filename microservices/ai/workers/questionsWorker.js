@@ -314,6 +314,7 @@ const generateProgrammingTitlesPrompt = (
   CandidateResumeData,
   questionsArray,
   usedCategoriesFromServer = [], // Server-side tracked categories (preferred over parsing questionsArray)
+  options = {},
 ) => {
   const skillName = category.category;
   const skillType = category.skills || "unknown";
@@ -327,7 +328,11 @@ const generateProgrammingTitlesPrompt = (
     ? questionConfig.complexity
     : "Easy";
   const isScenarioBased = questionConfig.isScenarioBased !== false; // Default to true if not provided
-
+  const {
+    bannedTitles = [],
+    bannedLogicCategories = [],
+    requiredLogicCategories = [],
+  } = options;
 
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
   let usedCategories =
@@ -493,10 +498,11 @@ ${isScenarioBased
       : `6. **POPULAR INTERVIEW/ASSESSMENT QUESTIONS (MANDATORY)**
    - Generate titles for the MOST POPULAR and FREQUENTLY ASKED programming questions in interviews and assessments
    - Focus on classic coding interview problems that are commonly used across tech companies
-   - Examples: "Two Sum", "Reverse Linked List", "Valid Parentheses", "Merge Two Sorted Arrays", "Find Maximum Element in Array"
-   - These should be well-known problems that candidates typically encounter in coding interviews
    - Keep titles concise and direct - no need for scenario-based formatting
-   - Prioritize problems that test fundamental programming concepts, algorithms, and data structures`}
+   - Prioritize problems that test fundamental programming concepts, algorithms, and data structures
+   - **CRITICAL UNIQUENESS**: Do NOT repeat overused basics (palindrome, reverse string, find max/min in array) - at most ONE such problem per assessment batch
+   - For string problems: PREFER anagram, first non-repeating character, string rotation, longest word, count vowels - AVOID multiple palindrome or reverse string titles
+   - Ensure each title uses a DIFFERENT logic approach/algorithm category`}
 
 Ensure all generated questions strictly follow the above constraints.
 
@@ -605,6 +611,45 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 `;
   }
 
+  if (requiredLogicCategories.length > 0) {
+    prompt += `
+✅ REQUIRED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
+${requiredLogicCategories.map((cat) => `- ${cat}`).join("\n")}
+
+🧩 TITLE FORMAT RULE (MANDATORY):
+- Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
+- The category prefix MUST match one of the required categories above
+- The problem description (text after the bracket) must be UNIQUE across all titles - do NOT use the same problem (e.g. find min, find max, palindrome, sum of array, reverse string) for more than one title
+`;
+  } else if (unusedCategories.length > 0) {
+    prompt += `
+✅ ALLOWED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
+${unusedCategories
+        .slice(0, Math.min(number, unusedCategories.length))
+        .map((cat) => `- ${cat.name}`)
+        .join("\n")}
+
+🧩 TITLE FORMAT RULE (MANDATORY):
+- Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
+- The category prefix MUST match one of the allowed categories above
+- The problem description (text after the bracket) must be UNIQUE across all titles - do NOT use the same problem (e.g. find min, find max, palindrome, sum of array, reverse string) for more than one title
+`;
+  }
+
+  if (bannedLogicCategories.length > 0) {
+    prompt += `
+❌ DO NOT USE THESE LOGIC CATEGORIES (already used/duplicate):
+${bannedLogicCategories.map((cat) => `- ${cat}`).join("\n")}
+`;
+  }
+
+  if (bannedTitles.length > 0) {
+    prompt += `
+❌ DO NOT REUSE THESE TITLES OR CLOSE VARIATIONS:
+${bannedTitles.map((title) => `- ${title}`).join("\n")}
+`;
+  }
+
   prompt += `
 Return ONLY valid JSON in this format:
 {
@@ -636,6 +681,7 @@ CRITICAL JSON RULES:
         : "Use any categories"
     }
 - Ensure titles cover different logic categories for maximum uniqueness across the entire assessment
+- CONCEPT UNIQUENESS: Across the batch, use each problem concept at most once (e.g. only one "find duplicate", one "pair sum", one "Fibonacci", one "prime check", one "binary search", one "count vowels", one "anagram") - each title must describe a different problem concept, not the same concept under different categories
 - ${isCategoryExhausted
       ? "CRITICAL: Even if reusing a category, the problem must be UNIQUE - different constraints, different approach, different scenario"
       : ""
@@ -643,6 +689,237 @@ CRITICAL JSON RULES:
 `;
 
   return prompt;
+};
+
+const TITLE_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "the",
+  "to",
+  "of",
+  "in",
+  "for",
+  "with",
+  "on",
+  "from",
+  "by",
+  "at",
+  "is",
+  "are",
+  "be",
+  "given",
+  "find",
+  "check",
+  "determine",
+  "calculate",
+  "compute",
+  "return",
+]);
+
+const normalizeTitle = (title) =>
+  String(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const titleSignature = (title) => {
+  const tokens = normalizeTitle(title)
+    .split(" ")
+    .filter((token) => token && !TITLE_STOPWORDS.has(token));
+  return tokens.sort().join(" ");
+};
+
+const extractCategoryPrefix = (title) => {
+  const match = String(title).match(/^\s*\[([^\]]+)\]\s*/);
+  return match ? match[1].trim() : null;
+};
+
+/** Normalized problem body (title without [Category] prefix) for uniqueness - same problem under different categories is still duplicate */
+const problemBodySignature = (title) => {
+  const t = String(title).trim();
+  const prefixMatch = t.match(/^\s*\[[^\]]+\]\s*/);
+  const body = prefixMatch ? t.slice(prefixMatch[0].length).trim() : t;
+  return normalizeTitle(body)
+    .split(" ")
+    .filter((token) => token && !TITLE_STOPWORDS.has(token))
+    .sort()
+    .join(" ");
+};
+
+const inferLogicCategoryFromTitle = (title) => {
+  const titleLower = normalizeTitle(title);
+
+  for (const cat of PROGRAMMING_LOGIC_CATEGORIES) {
+    if (
+      Array.isArray(cat.examples) &&
+      cat.examples.some((ex) => titleLower.includes(ex.toLowerCase()))
+    ) {
+      return cat.name;
+    }
+  }
+
+  for (const cat of PROGRAMMING_LOGIC_CATEGORIES) {
+    const categoryKeywords = cat.name
+      .toLowerCase()
+      .split(/[\s&/]/)
+      .filter((k) => k.length > 3);
+    if (categoryKeywords.some((kw) => titleLower.includes(kw))) {
+      return cat.name;
+    }
+
+    const descriptionKeywords = cat.description
+      .toLowerCase()
+      .split(/[,\s()]+/)
+      .filter((word) => word.length > 4);
+    if (descriptionKeywords.some((kw) => titleLower.includes(kw))) {
+      return cat.name;
+    }
+  }
+
+  return null;
+};
+
+const validateProgrammingTitles = ({
+  titles,
+  logicCategories,
+  number,
+  questionsArray,
+  isCategoryExhausted,
+  usedCategories,
+  requiredLogicCategories,
+}) => {
+  const errors = [];
+  const duplicateLogicCategories = [];
+
+  if (!Array.isArray(titles) || titles.length !== number) {
+    errors.push(`Expected ${number} titles, got ${titles?.length || 0}`);
+  }
+
+  const normalizedTitles = titles.map((t) => normalizeTitle(t));
+  const normalizedSet = new Set(normalizedTitles);
+  if (normalizedSet.size !== titles.length) {
+    errors.push("Duplicate titles detected (normalized match)");
+  }
+
+  const signatureSet = new Set(titles.map((t) => titleSignature(t)));
+  if (signatureSet.size !== titles.length) {
+    errors.push("Duplicate titles detected (logic signature match)");
+  }
+
+  const problemBodySignatures = titles.map((t) => problemBodySignature(t));
+  const problemBodySet = new Set(problemBodySignatures);
+  if (problemBodySet.size !== titles.length) {
+    errors.push(
+      "Duplicate problem detected: same problem description under different categories (e.g. two 'find min/max' or two 'palindrome' titles)",
+    );
+  }
+
+  if (
+    Array.isArray(requiredLogicCategories) &&
+    requiredLogicCategories.length > 0
+  ) {
+    const missingPrefix = titles.filter(
+      (title) => !extractCategoryPrefix(title),
+    );
+    if (missingPrefix.length > 0) {
+      errors.push("Missing logic category prefix in titles");
+    }
+  }
+
+  if (Array.isArray(questionsArray) && questionsArray.length > 0) {
+    const previousTitleSet = new Set(
+      questionsArray.map((q) => normalizeTitle(q)),
+    );
+    const overlaps = titles.filter((t) =>
+      previousTitleSet.has(normalizeTitle(t)),
+    );
+    if (overlaps.length > 0) {
+      errors.push(`Titles overlap with previous questions: ${overlaps.join(", ")}`);
+    }
+  }
+
+  let categoriesToValidate = Array.isArray(logicCategories)
+    ? logicCategories
+    : [];
+
+  if (categoriesToValidate.length !== titles.length) {
+    const inferred = titles.map((t) => {
+      const prefix = extractCategoryPrefix(t);
+      return prefix || inferLogicCategoryFromTitle(t);
+    });
+    categoriesToValidate = inferred.filter(Boolean);
+  }
+
+  if (categoriesToValidate.length > 0) {
+    const categoryCounts = categoriesToValidate.reduce((acc, cat) => {
+      if (!cat) {
+        return acc;
+      }
+      acc[cat] = (acc[cat] || 0) + 1;
+      return acc;
+    }, {});
+    const categorySet = new Set(Object.keys(categoryCounts));
+    const duplicates = Object.keys(categoryCounts).filter(
+      (cat) => categoryCounts[cat] > 1,
+    );
+    if (!isCategoryExhausted && duplicates.length > 0) {
+      errors.push("Duplicate logic categories detected");
+      duplicateLogicCategories.push(...duplicates);
+    }
+
+    if (
+      Array.isArray(requiredLogicCategories) &&
+      requiredLogicCategories.length > 0
+    ) {
+      const missingRequired = requiredLogicCategories.filter(
+        (reqCat) => !categorySet.has(reqCat),
+      );
+      if (missingRequired.length > 0) {
+        errors.push(
+          `Missing required logic categories: ${missingRequired.join(", ")}`,
+        );
+      }
+
+      const invalidPrefixes = titles
+        .map((title) => extractCategoryPrefix(title))
+        .filter(
+          (prefix) => prefix && !requiredLogicCategories.includes(prefix),
+        );
+      if (invalidPrefixes.length > 0) {
+        errors.push(
+          `Invalid category prefixes in titles: ${[
+            ...new Set(invalidPrefixes),
+          ].join(", ")}`,
+        );
+      }
+    }
+
+    if (
+      !isCategoryExhausted &&
+      Array.isArray(usedCategories) &&
+      usedCategories.length > 0 &&
+      Array.isArray(requiredLogicCategories) &&
+      requiredLogicCategories.length > 0
+    ) {
+      const usedOverlap = categoriesToValidate.filter((cat) =>
+        usedCategories.includes(cat),
+      );
+      if (usedOverlap.length > 0) {
+        errors.push(
+          `Used logic categories detected (avoid when unused available): ${[
+            ...new Set(usedOverlap),
+          ].join(", ")}`,
+        );
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    duplicateLogicCategories: [...new Set(duplicateLogicCategories)],
+  };
 };
 
 // Helper function to generate combined Audio/Video/Subjective prompt
@@ -1469,6 +1746,9 @@ ${isScenarioBased
 - Supported Languages: ${supportedLanguageNames.join(", ")}
 - **CRITICAL BOILERPLATE CODE REQUIREMENTS - STRICTLY ENFORCED**:
   * Boilerplate MUST include ONLY: imports/headers, input reading code, basic structure (main function/class), TODO comment
+  * **MANDATORY STRUCTURE**: Keep solution logic in a SEPARATE function/method (e.g., solve(), compute(), or class method)
+  * main() must ONLY handle input/output and call the separate logic function/method
+  * **DO NOT** place any solution logic in main() or input parsing
   * **WHAT TO INCLUDE**: Only input reading (Scanner, readline, input()), empty function/class structure, TODO comment like "// TODO: Implement the solution here"
   * **EXAMPLE OF CORRECT BOILERPLATE**: 
     - C++: #include headers, main() with input reading, empty function with TODO, placeholder count
@@ -1485,6 +1765,7 @@ If titles are provided, you MUST:
 - Use each provided title as the "questionTitle" without changing its core meaning (minor wording tweaks are allowed)
 - Implement the logic category indicated by the title from the ${totalCategories} available categories
 - Ensure each question uses a DIFFERENT logic category/approach to maintain uniqueness across the entire assessment
+- Do not implement the same problem concept twice (e.g. two palindrome checks, two "find max", two "sum of array") - each question must be a distinct problem
 - **CRITICAL**: Adjust the complexity of the problem to match the maxTime (${maxTime} minutes) - if the title suggests a complex problem but maxTime is short, simplify it while keeping the core logic category
 ${isScenarioBased
           ? `- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
@@ -2072,88 +2353,187 @@ const createConsumer = async (id) => {
         // Special flow for Programming when more than 2 questions are requested:
         // 1) Generate titles, 2) Generate questions in batches of 2 titles
         if (questionType === "Programming" && questionConfig.number > 2) {
-          const titlesPrompt = generateProgrammingTitlesPrompt(
-            category,
-            questionConfig,
-            experience,
-            jobRole,
-            tailorMade,
-            proposedSeniority,
-            JD,
-            CandidateResumeData,
-            questionsArray,
-            usedCategories, // Server-side tracked categories (preferred)
+          const totalCategories = PROGRAMMING_LOGIC_CATEGORIES.length;
+          const unusedCategories = PROGRAMMING_LOGIC_CATEGORIES.filter(
+            (cat) => !usedCategories.includes(cat.name),
           );
+          const usedCount = usedCategories.length;
+          const usagePercentage = (usedCount / totalCategories) * 100;
+          const isCategoryExhausted =
+            usagePercentage >= 90 || unusedCategories.length < questionConfig.number;
+          const requiredLogicCategories =
+            !isCategoryExhausted && unusedCategories.length >= questionConfig.number
+              ? unusedCategories
+                .slice(0, questionConfig.number)
+                .map((cat) => cat.name)
+              : [];
 
-          let titlesResult, titlesResponse, titlesCandidate;
-          try {
-            titlesResult = await retryGeminiCall(
-              () => model.generateContent(titlesPrompt),
-              3,
-              1000,
-              id,
+          const maxTitleAttempts = 3;
+          const titleGenerationOptions = {
+            bannedTitles: [],
+            bannedLogicCategories: [],
+            requiredLogicCategories,
+          };
+
+          let titles = [];
+          let titlesJson = null;
+          let generatedLogicCategories = [];
+          let lastValidation = null;
+          let lastTitleError = null;
+
+          for (let attempt = 1; attempt <= maxTitleAttempts; attempt++) {
+            const titlesPrompt = generateProgrammingTitlesPrompt(
+              category,
+              questionConfig,
+              experience,
+              jobRole,
+              tailorMade,
+              proposedSeniority,
+              JD,
+              CandidateResumeData,
+              questionsArray,
+              usedCategories, // Server-side tracked categories (preferred)
+              titleGenerationOptions,
             );
-            titlesResponse = titlesResult.response;
-            titlesCandidate = titlesResponse.candidates?.[0]?.content;
 
-            // Track token usage for titles generation
-            const titlesTokenUsage = extractTokenUsage(titlesResponse);
-            tokenUsage.promptTokens += titlesTokenUsage.promptTokens;
-            tokenUsage.completionTokens += titlesTokenUsage.completionTokens;
-            tokenUsage.totalTokens += titlesTokenUsage.totalTokens;
+            let titlesResult, titlesResponse, titlesCandidate;
+            try {
+              titlesResult = await retryGeminiCall(
+                () => model.generateContent(titlesPrompt),
+                3,
+                1000,
+                id,
+              );
+              titlesResponse = titlesResult.response;
+              titlesCandidate = titlesResponse.candidates?.[0]?.content;
 
-            const reqBody = {
-              clientId,
-              modelId: "gemini-2.0-flash",
-              referenceId: `ai_question_gen_${Date.now()}`,
-              inputTokens: titlesTokenUsage.promptTokens,
-              outputTokens: titlesTokenUsage.completionTokens,
-              meta: {
-                type: "question_generation",
-                serviceKey: "AI_QUESTION_GENERATION",
-              },
-              channelId,
-              jobId,
-              tempId,
-            };
+              // Track token usage for titles generation
+              const titlesTokenUsage = extractTokenUsage(titlesResponse);
+              tokenUsage.promptTokens += titlesTokenUsage.promptTokens;
+              tokenUsage.completionTokens += titlesTokenUsage.completionTokens;
+              tokenUsage.totalTokens += titlesTokenUsage.totalTokens;
 
-            if (screeningAssessmentId) {
-              reqBody.screeningAssessmentId = screeningAssessmentId;
+              const reqBody = {
+                clientId,
+                modelId: "gemini-2.0-flash",
+                referenceId: `ai_question_gen_${Date.now()}`,
+                inputTokens: titlesTokenUsage.promptTokens,
+                outputTokens: titlesTokenUsage.completionTokens,
+                meta: {
+                  type: "question_generation",
+                  serviceKey: "AI_QUESTION_GENERATION",
+                },
+                channelId,
+                jobId,
+                tempId,
+              };
+
+              if (screeningAssessmentId) {
+                reqBody.screeningAssessmentId = screeningAssessmentId;
+              }
+
+              if (tempId) {
+                reqBody.tempId = tempId;
+              }
+
+              await CreditServiceClient.deductAiUsage(reqBody);
+            } catch (geminiError) {
+              console.error(
+                `❌ Error calling Gemini API for titles in Consumer ${id}:`,
+                geminiError,
+              );
+              lastTitleError = new Error(
+                `Gemini API error (titles): ${geminiError.message || "Unknown error"
+                }`,
+              );
+              if (attempt < maxTitleAttempts) {
+                continue;
+              }
+              throw lastTitleError;
             }
 
-            if (tempId) {
-              reqBody.tempId = tempId;
+            const titlesText = titlesCandidate?.parts?.[0]?.text || "";
+            try {
+              titlesJson = extractJsonFromGeminiText(titlesText, id);
+            } catch (parseError) {
+              lastTitleError = parseError;
+              if (attempt < maxTitleAttempts) {
+                continue;
+              }
+              throw parseError;
             }
 
-            await CreditServiceClient.deductAiUsage(reqBody);
-          } catch (geminiError) {
-            console.error(
-              `❌ Error calling Gemini API for titles in Consumer ${id}:`,
-              geminiError,
-            );
+            titles =
+              Array.isArray(titlesJson.titles) && titlesJson.titles.length > 0
+                ? titlesJson.titles.slice(0, questionConfig.number)
+                : [];
+
+            if (titles.length < questionConfig.number) {
+              lastTitleError = new Error(
+                `Expected ${questionConfig.number} programming titles, got ${titles.length}`,
+              );
+              if (attempt < maxTitleAttempts) {
+                titleGenerationOptions.bannedTitles = [
+                  ...new Set([...titleGenerationOptions.bannedTitles, ...titles]),
+                ];
+                continue;
+              }
+              throw lastTitleError;
+            }
+
+            const validation = validateProgrammingTitles({
+              titles,
+              logicCategories: titlesJson.logicCategories,
+              number: questionConfig.number,
+              questionsArray,
+              isCategoryExhausted,
+              usedCategories,
+              requiredLogicCategories,
+            });
+
+            if (validation.valid) {
+              lastValidation = null;
+              break;
+            }
+
+            lastValidation = validation;
+            titleGenerationOptions.bannedTitles = [
+              ...new Set([...titleGenerationOptions.bannedTitles, ...titles]),
+            ];
+            if (validation.duplicateLogicCategories.length > 0) {
+              titleGenerationOptions.bannedLogicCategories = [
+                ...new Set([
+                  ...titleGenerationOptions.bannedLogicCategories,
+                  ...validation.duplicateLogicCategories,
+                ]),
+              ];
+            }
+
+            if (attempt === maxTitleAttempts) {
+              break;
+            }
+          }
+
+          if (lastTitleError) {
+            throw lastTitleError;
+          }
+
+          if (lastValidation && !lastValidation.valid) {
             throw new Error(
-              `Gemini API error (titles): ${geminiError.message || "Unknown error"
-              }`,
+              `Failed to generate unique programming titles: ${lastValidation.errors.join(
+                "; ",
+              )}`,
             );
           }
 
-          const titlesText = titlesCandidate?.parts?.[0]?.text || "";
-          const titlesJson = extractJsonFromGeminiText(titlesText, id);
-          const titles =
-            Array.isArray(titlesJson.titles) && titlesJson.titles.length > 0
-              ? titlesJson.titles.slice(0, questionConfig.number)
-              : [];
-
-          if (titles.length < questionConfig.number) {
+          if (!Array.isArray(titles) || titles.length < questionConfig.number) {
             throw new Error(
               `Expected ${questionConfig.number} programming titles, got ${titles.length}`,
             );
           }
 
           // Extract and log logic categories if provided
-          const generatedLogicCategories = Array.isArray(
-            titlesJson.logicCategories,
-          )
+          generatedLogicCategories = Array.isArray(titlesJson?.logicCategories)
             ? titlesJson.logicCategories.slice(0, titles.length)
             : [];
 

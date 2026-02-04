@@ -1,13 +1,25 @@
 // Shared Programming Logic Categories - Judge0 compatible only
 // Used for category tracking and identification
 // FOR-Loop categories are interspersed throughout to avoid clustering
+//
+// DUPLICATE-RISK OVERLAPS (keep examples/keywords distinct per category):
+// - String Logic vs String Traversal Using FOR: prefer anagram/rotation in String; toggle/consecutive duplicates in String Traversal
+// - Number-Based vs Mathematical FOR-Loop vs Recursion: prime/fibonacci/factorial in multiple; prefer one concept per category
+// - Array Logic vs Frequency & Hash-Like vs Constraint-Driven: missing number, duplicate, frequency; assign to one primary category
+// - Nested FOR (pair sum all pairs) vs Two-Pointer (pair sum sorted array): same "pair sum" phrase; descriptions must differ
+// - Sorting & Searching (use algorithms) vs Sorting Logic Using FOR (implement sort): both have sort names; one is "implement", one is "search"
+// - Loop + Counter vs Run-Length: run-length encoding in both; keep in Run-Length only
+// - Logical/Brain Teaser vs Constraint-Driven: "duplicate without extra space" in both; keep in Brain Teaser only
+// - Algorithm Identification vs Competitive/Greedy/Two-Pointer: Kadane, pair sum, sliding window; Algorithm ID = pattern recognition, not solve
+// - Prefix vs Array Traversal: "prefix sum", "running sum"; Prefix = precompute/range query, Traversal = single-pass in loop
+// - Validation & Rule-Engine vs Security-Aware vs Real-World: "validate input" in multiple; differentiate by context
 
 const PROGRAMMING_LOGIC_CATEGORIES = [
     {
         name: "Number-Based Logic",
-        description: "Math + loops + conditions (Prime, Palindrome, Armstrong, Fibonacci, Factorial, GCD/LCM, Sum of digits, Reverse number, Count digits, Power, Binary conversions)",
-        examples: ["Prime number check", "Palindrome number", "Armstrong number", "Fibonacci series", "Factorial", "GCD/LCM", "Sum of digits", "Reverse a number", "Count digits", "Power of a number", "Binary to Decimal", "Decimal to Binary"],
-        keywords: ["prime", "palindrome", "armstrong", "fibonacci", "factorial", "gcd", "lcm", "sum of digits", "reverse number", "count digits", "power", "binary", "decimal"]
+        description: "Math + loops + conditions. PREFER: Prime, Armstrong, Fibonacci, Factorial, GCD/LCM, Sum of digits, Power, Binary conversions. Use Palindrome number or Reverse number only if no other option (avoid duplicates).",
+        examples: ["Prime number check", "Armstrong number", "Fibonacci series", "Factorial", "GCD or LCM", "Sum of digits", "Count digits", "Power of a number", "Binary to Decimal", "Decimal to Binary", "Perfect number", "Strong number"],
+        keywords: ["prime", "armstrong", "fibonacci", "factorial", "gcd", "lcm", "sum of digits", "count digits", "power", "binary", "decimal", "perfect number"]
     },
     {
         name: "Basic FOR-Loop Control",
@@ -17,21 +29,21 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Array Logic",
-        description: "Indexing, loops, time complexity (Find largest/smallest, Remove duplicates, Find missing number, Rotate array, Reverse array, Merge arrays, Intersection/Union, Frequency, Subarray sum)",
-        examples: ["Find largest element", "Remove duplicates", "Find missing number", "Rotate array", "Reverse array", "Merge two arrays", "Subarray sum", "Second largest", "Frequency count"],
-        keywords: ["array", "largest", "smallest", "duplicate", "missing", "rotate", "merge", "intersection", "union", "frequency", "subarray"]
+        description: "Indexing, loops (Find missing number, Remove duplicates, Merge arrays, Intersection/Union, Frequency, Subarray sum, Mode, Second largest). Prefer missing number, merge, frequency over generic find max/min.",
+        examples: ["Find missing number in sequence", "Remove duplicates", "Merge two sorted arrays", "Intersection of two arrays", "Frequency count", "Subarray sum", "Find mode (most frequent)", "Second largest", "Find largest element"],
+        keywords: ["array", "missing", "duplicate", "merge", "intersection", "union", "frequency", "subarray", "mode", "largest"]
     },
     {
         name: "Conditional Logic Inside FOR Loop",
-        description: "Branching in iteration (Count even/odd in array, Count positive/negative, Sum only primes, Skip multiples)",
-        examples: ["Count even/odd", "Count positive/negative", "Sum primes", "Skip multiples", "Conditional counting"],
-        keywords: ["conditional", "for loop", "count", "sum", "skip", "if inside loop"]
+        description: "Branching in iteration - one distinct problem per question (Count even/odd, Count positive/negative, Sum until condition, Skip multiples of K, Conditional accumulation)",
+        examples: ["Count even and odd in array", "Count positive and negative numbers", "Sum elements until first negative", "Print numbers skipping multiples of 5", "Sum only elements satisfying condition"],
+        keywords: ["conditional", "for loop", "count", "sum", "skip", "if inside loop", "until condition"]
     },
     {
         name: "String Logic",
-        description: "Manipulation, ASCII, memory (Reverse string, Palindrome, Count vowels/consonants, Anagram, Remove duplicates, First non-repeating, String rotation, Longest word)",
-        examples: ["Reverse string", "Palindrome string", "Anagram check", "Remove duplicate characters", "First non-repeating character", "String rotation", "Count vowels/consonants", "Longest word"],
-        keywords: ["string", "reverse", "palindrome", "anagram", "vowel", "consonant", "duplicate", "non-repeating", "rotation", "longest word"]
+        description: "Manipulation, ASCII, memory. PREFER: Anagram, First non-repeating, Remove duplicates, String rotation, Longest word, Count vowels/consonants. Use Reverse string or Palindrome only if no other option (avoid duplicates).",
+        examples: ["Anagram check", "First non-repeating character", "Remove duplicate characters", "String rotation", "Longest word in sentence", "Count vowels and consonants", "Check if two strings are rotations of each other", "Word count or tokenize"],
+        keywords: ["string", "anagram", "vowel", "consonant", "duplicate", "non-repeating", "rotation", "longest word", "tokenize"]
     },
     {
         name: "Greedy Decision Logic",
@@ -47,15 +59,15 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Nested FOR-Loop Logic",
-        description: "Nested iteration (Pattern printing, Compare every element, Duplicate detection O(n²), Pair sum, Subarray generation)",
-        examples: ["Nested loop patterns", "Compare all elements", "Duplicate detection", "Pair sum", "Subarray generation"],
-        keywords: ["nested loop", "nested for", "pattern", "compare all", "pair", "subarray"]
+        description: "Nested iteration - two loops (All pairs that sum to target, Compare every pair, Duplicate detection O(n²), Generate all subarrays). Use 'all pairs' or 'every pair' to distinguish from Two-Pointer pair sum in sorted array.",
+        examples: ["Find all pairs in array that sum to target", "Compare every element with every other", "Duplicate detection with two loops", "Generate all subarrays", "Two-sum brute force with nested loops"],
+        keywords: ["nested loop", "nested for", "all pairs", "compare all", "every pair", "subarray", "brute force"]
     },
     {
         name: "Pattern Printing",
-        description: "Loop control & visualization (Star patterns, Number patterns, Pyramid patterns)",
-        examples: ["Star pyramid", "Number triangle", "Diamond pattern", "Spiral pattern", "Number patterns", "Character patterns"],
-        keywords: ["pattern", "star", "pyramid", "triangle", "diamond", "spiral", "print pattern"]
+        description: "Loop control & visualization - each pattern type only once (Star pyramid OR number pyramid OR diamond OR spiral - pick one type per question)",
+        examples: ["Star pyramid (asterisks)", "Number pyramid (1 12 123)", "Diamond pattern", "Spiral number pattern", "Hollow square pattern", "Alternating character pattern"],
+        keywords: ["pattern", "star", "pyramid", "triangle", "diamond", "spiral", "hollow", "alternating"]
     },
     {
         name: "Prefix Computation Logic",
@@ -71,15 +83,15 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Mathematical FOR-Loop Logic",
-        description: "Math + iteration (Prime check, Print primes in range, Fibonacci, Factorial, Perfect number, Armstrong, Loop till √n)",
-        examples: ["Prime in range", "Fibonacci series", "Perfect number", "Armstrong number", "Optimized prime check"],
-        keywords: ["for loop", "prime", "fibonacci", "factorial", "perfect", "armstrong", "math"]
+        description: "Math + iteration with loop (Print primes in range, Optimized prime check, Sum of divisors, Loop till √n). Avoid repeating Number-Based: use prime-in-range / optimized-prime, not single-number Fibonacci/Armstrong/Factorial.",
+        examples: ["Print all primes in range", "Optimized prime check using √n", "Sum of divisors of N", "Check perfect number using loop", "Prime factorization"],
+        keywords: ["for loop", "prime in range", "optimized prime", "divisors", "factorization", "math"]
     },
     {
         name: "Recursion-Based",
-        description: "Stack & base conditions (Factorial, Fibonacci, Reverse string/number, Power, Tower of Hanoi)",
-        examples: ["Factorial using recursion", "Fibonacci using recursion", "Reverse string using recursion", "Tower of Hanoi", "Power using recursion"],
-        keywords: ["recursion", "recursive", "tower", "hanoi", "factorial", "fibonacci"]
+        description: "Stack & base conditions (Factorial, Fibonacci, Power, Tower of Hanoi, Tree traversal, Generate permutations). Prefer Tower of Hanoi, Power, tree/grid recursion over Reverse string.",
+        examples: ["Tower of Hanoi", "Factorial using recursion", "Fibonacci using recursion", "Power using recursion", "Generate all permutations", "Binary tree height or sum", "Flood fill or grid recursion"],
+        keywords: ["recursion", "recursive", "tower", "hanoi", "factorial", "fibonacci", "permutation", "tree"]
     },
     {
         name: "Suffix Computation Logic",
@@ -95,9 +107,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Array Traversal Using FOR",
-        description: "Array iteration (Reverse array, Find max/min, Second largest, Move zeros, Rotate array, Frequency, Prefix sum, Sliding window)",
-        examples: ["Reverse array", "Find max/min", "Move zeros", "Rotate array", "Sliding window", "Prefix sum"],
-        keywords: ["for loop", "array", "traverse", "reverse", "max", "min", "rotate", "frequency"]
+        description: "Single-pass array iteration (Move zeros to end, Rotate array by K, Sliding window max, Frequency count in one pass, Partition array by condition, Trailing sum)",
+        examples: ["Move zeros to end", "Rotate array by K steps", "Sliding window maximum", "Frequency count single pass", "Partition array by condition", "Trailing sum or product"],
+        keywords: ["for loop", "array", "traverse", "move zeros", "rotate", "sliding window", "partition", "single pass"]
     },
     {
         name: "Time & Space Complexity",
@@ -107,9 +119,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "In-Place Transformation Logic",
-        description: "Modify data without using extra space",
-        examples: ["Reverse array in-place", "Rotate array in-place", "Replace elements based on condition", "Mark visited using same array"],
-        keywords: ["in-place", "no extra space", "modify array"]
+        description: "Modify data without extra space. Prefer rotate, replace, partition over reverse to avoid duplicate problems.",
+        examples: ["Rotate array in-place by K", "Replace elements based on condition", "Move zeros in-place", "Partition array in-place", "Mark visited using same array"],
+        keywords: ["in-place", "no extra space", "modify array", "rotate", "partition", "replace"]
     },
     {
         name: "Core Logic Construction",
@@ -119,15 +131,15 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "String Traversal Using FOR",
-        description: "Character-level logic (Reverse string, Count vowels/consonants, Character frequency, First repeating/non-repeating, Toggle case)",
-        examples: ["Reverse string", "Count vowels", "Character frequency", "First non-repeating", "Toggle case"],
-        keywords: ["for loop", "string", "traverse", "character", "vowel", "frequency", "toggle"]
+        description: "Character-level single-pass in one loop. PREFER: Toggle case, Remove consecutive duplicates, Character frequency. Avoid reusing String Logic examples (no first non-repeating, no count vowels - use those in String Logic only).",
+        examples: ["Toggle case of letters", "Remove consecutive duplicate characters", "Character frequency in string", "Replace character at positions", "Count uppercase vs lowercase"],
+        keywords: ["for loop", "string", "traverse", "toggle", "consecutive", "character frequency", "uppercase", "lowercase"]
     },
     {
         name: "Constraint-Driven Logic",
-        description: "Think within rules (No extra space, Single loop only, O(n) time required, No sorting, No recursion)",
-        examples: ["Find duplicate without extra array", "Missing number in 1..N", "Majority element in O(n)", "Single loop solutions"],
-        keywords: ["no extra space", "single loop", "o(n)", "no sorting", "no recursion", "constraint"]
+        description: "Think within strict rules (Single loop only, O(n) time, No sorting, No recursion). Prefer missing number, majority element, single-loop. Avoid 'duplicate without extra space' - use Logical/Brain Teaser for that.",
+        examples: ["Missing number in 1..N using single loop", "Majority element in O(n) time", "Single loop solution with O(1) space", "Find two repeated numbers with constraints"],
+        keywords: ["single loop", "o(n)", "no sorting", "no recursion", "constraint", "missing number", "majority"]
     },
     {
         name: "Counting & Bucketing Logic",
@@ -143,9 +155,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Two-Pointer FOR-Loop Logic",
-        description: "Optimization logic (Palindrome check, Reverse in-place, Pair sum in sorted, Remove duplicates from sorted)",
-        examples: ["Palindrome check", "Reverse in-place", "Pair sum sorted", "Remove duplicates sorted"],
-        keywords: ["two pointer", "for loop", "palindrome", "in-place", "sorted", "optimize"]
+        description: "Optimization with two indices (Pair sum in sorted array, Remove duplicates from sorted, Merge two sorted arrays, Partition around pivot). Avoid reusing Palindrome/Reverse - prefer pair sum, merge, partition.",
+        examples: ["Pair sum in sorted array", "Remove duplicates from sorted array", "Merge two sorted arrays", "Partition array around pivot", "Container with most water", "Triplet sum in sorted array"],
+        keywords: ["two pointer", "for loop", "sorted", "pair sum", "merge sorted", "partition", "optimize"]
     },
     {
         name: "Input Parsing & Data Handling",
@@ -161,15 +173,15 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Multiple-Solution Problems",
-        description: "Same problem, different logic approaches (Loop-based, Math-based, Two-pointer, Hashing, Recursion)",
-        examples: ["Palindrome check multiple ways", "Duplicate detection multiple ways", "Same problem different logic"],
+        description: "Same problem, different logic approaches (Loop-based, Math-based, Two-pointer, Hashing, Recursion). Prefer duplicate detection, factorial, or search - avoid palindrome.",
+        examples: ["Duplicate detection multiple ways", "Factorial via loop vs recursion", "Search multiple approaches", "Same problem different logic"],
         keywords: ["multiple ways", "different approach", "loop-based", "math-based", "two-pointer", "hashing"]
     },
     {
         name: "Loop + Counter Logic",
-        description: "Counter tracking (Longest consecutive sequence, Count frequency without map, Majority element, Run-length encoding)",
-        examples: ["Longest consecutive", "Count frequency", "Majority element", "Run-length encoding"],
-        keywords: ["loop", "counter", "consecutive", "frequency", "majority", "run-length"]
+        description: "Counter tracking in single pass (Longest consecutive sequence, Majority element, Count frequency without map). Do not use run-length encoding here - that is Run-Length & Compression Logic.",
+        examples: ["Longest consecutive sequence in array", "Majority element in array", "Count frequency without map", "Leader in array (elements greater than all on right)"],
+        keywords: ["loop", "counter", "consecutive", "majority", "frequency", "leader"]
     },
     {
         name: "Optimization & Refactoring Logic",
@@ -185,9 +197,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Algorithm Identification",
-        description: "Recognize patterns (Sliding window, Two pointers, Prefix sum, Greedy, Divide & conquer, Kadane's algorithm)",
-        examples: ["Max sum subarray (Kadane)", "Pair sum (Two pointer)", "Sliding window problems", "Prefix sum logic"],
-        keywords: ["sliding window", "two pointer", "prefix sum", "greedy", "divide conquer", "kadane", "algorithm pattern"]
+        description: "Recognize which algorithm pattern fits a problem (meta: identify sliding window vs two pointer vs prefix sum). Do not duplicate 'solve Kadane' or 'solve pair sum' - use for pattern recognition only.",
+        examples: ["Identify if problem needs sliding window", "Recognize two-pointer pattern", "Choose prefix sum vs brute force", "Algorithm pattern matching"],
+        keywords: ["algorithm pattern", "identify", "recognize", "sliding window", "two pointer", "prefix sum", "pattern fit"]
     },
     {
         name: "Sorting Logic Using FOR",
@@ -239,9 +251,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Frequency & Hash-Like Logic Using FOR",
-        description: "Without maps (Count duplicates, Find unique element, Missing number, Frequency using array index, Space optimization)",
-        examples: ["Count duplicates", "Find unique", "Missing number", "Frequency array", "Space optimized"],
-        keywords: ["for loop", "frequency", "hash", "duplicate", "unique", "missing", "array index"]
+        description: "Without maps: use array index as key (Find unique element in 2N+1 array, Frequency using index, Count using fixed array). Do not repeat 'missing number' or 'remove duplicates' from Array Logic - use unique/frequency only.",
+        examples: ["Find unique element in array where others appear twice", "Frequency count using array index", "Count occurrences using fixed-size array", "Space-optimized duplicate check"],
+        keywords: ["for loop", "frequency", "array index", "unique", "fixed array", "space optimized"]
     },
     {
         name: "Validation & Rule-Engine Logic",
@@ -251,9 +263,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Segment Processing Logic",
-        description: "Process array or string in fixed or variable segments",
-        examples: ["Reverse array in chunks", "Process string in groups of K", "Batch processing logic"],
-        keywords: ["segment", "chunk", "group processing"]
+        description: "Process array or string in fixed or variable segments (chunks of K, batch processing). Avoid 'reverse' - use process in chunks, group by K.",
+        examples: ["Process array in chunks of K", "Process string in groups of K", "Batch processing logic", "Apply operation to each segment"],
+        keywords: ["segment", "chunk", "group processing", "batch", "groups of K"]
     },
     {
         name: "Error-Handling Logic",
@@ -263,9 +275,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "Index Manipulation Logic",
-        description: "Bug-prone area (Swap adjacent elements, Reverse words, Rotate by K steps, Zig-zag array, Off-by-one errors)",
-        examples: ["Swap adjacent", "Reverse words", "Rotate by K", "Zig-zag array", "Index manipulation"],
-        keywords: ["index", "manipulation", "swap", "rotate", "zig-zag", "off-by-one"]
+        description: "Bug-prone area (Swap adjacent elements, Rotate by K steps, Zig-zag array, Off-by-one errors, Index bounds)",
+        examples: ["Swap adjacent elements", "Rotate array by K steps", "Zig-zag array", "Index bounds check", "Off-by-one in loop"],
+        keywords: ["index", "manipulation", "swap", "rotate", "zig-zag", "off-by-one", "bounds"]
     },
     {
         name: "Code Output Prediction",
@@ -359,9 +371,9 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     },
     {
         name: "FOR vs WHILE vs RECURSION",
-        description: "Same problem different approaches (Factorial, Reverse, Fibonacci - compare FOR, WHILE, Recursion approaches)",
-        examples: ["Factorial comparison", "Reverse comparison", "Fibonacci comparison", "Approach comparison"],
-        keywords: ["for vs while", "for vs recursion", "compare", "approach", "factorial", "reverse"]
+        description: "Same problem different approaches (Factorial, Fibonacci, Sum - compare FOR, WHILE, Recursion). Prefer factorial/fibonacci over reverse.",
+        examples: ["Factorial comparison", "Fibonacci comparison", "Sum of array comparison", "Approach comparison"],
+        keywords: ["for vs while", "for vs recursion", "compare", "approach", "factorial", "fibonacci"]
     },
     {
         name: "Security-Aware Logic",
@@ -462,7 +474,7 @@ const PROGRAMMING_LOGIC_CATEGORIES = [
     {
         name: "Mirror & Symmetry Logic",
         description: "Symmetry and mirror comparison logic",
-        examples: ["Mirror array check", "Symmetric string check", "Palindrome-like symmetry logic"],
+        examples: ["Mirror array check", "Symmetric matrix check", "Check if array is symmetric about center", "Left-right symmetry logic"],
         keywords: ["mirror", "symmetry", "reflect"]
     },
     {
