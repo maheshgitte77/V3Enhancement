@@ -500,7 +500,8 @@ ${isScenarioBased
    - Focus on classic coding interview problems that are commonly used across tech companies
    - Keep titles concise and direct - no need for scenario-based formatting
    - Prioritize problems that test fundamental programming concepts, algorithms, and data structures
-   - **CRITICAL UNIQUENESS**: Do NOT repeat overused basics (palindrome, reverse string, max in array) unless absolutely required by time limit
+   - **CRITICAL UNIQUENESS**: Do NOT repeat overused basics (palindrome, reverse string, find max/min in array) - at most ONE such problem per assessment batch
+   - For string problems: PREFER anagram, first non-repeating character, string rotation, longest word, count vowels - AVOID multiple palindrome or reverse string titles
    - Ensure each title uses a DIFFERENT logic approach/algorithm category`}
 
 Ensure all generated questions strictly follow the above constraints.
@@ -618,6 +619,7 @@ ${requiredLogicCategories.map((cat) => `- ${cat}`).join("\n")}
 🧩 TITLE FORMAT RULE (MANDATORY):
 - Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
 - The category prefix MUST match one of the required categories above
+- The problem description (text after the bracket) must be UNIQUE across all titles - do NOT use the same problem (e.g. find min, find max, palindrome, sum of array, reverse string) for more than one title
 `;
   } else if (unusedCategories.length > 0) {
     prompt += `
@@ -630,6 +632,7 @@ ${unusedCategories
 🧩 TITLE FORMAT RULE (MANDATORY):
 - Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
 - The category prefix MUST match one of the allowed categories above
+- The problem description (text after the bracket) must be UNIQUE across all titles - do NOT use the same problem (e.g. find min, find max, palindrome, sum of array, reverse string) for more than one title
 `;
   }
 
@@ -678,6 +681,7 @@ CRITICAL JSON RULES:
         : "Use any categories"
     }
 - Ensure titles cover different logic categories for maximum uniqueness across the entire assessment
+- CONCEPT UNIQUENESS: Across the batch, use each problem concept at most once (e.g. only one "find duplicate", one "pair sum", one "Fibonacci", one "prime check", one "binary search", one "count vowels", one "anagram") - each title must describe a different problem concept, not the same concept under different categories
 - ${isCategoryExhausted
       ? "CRITICAL: Even if reusing a category, the problem must be UNIQUE - different constraints, different approach, different scenario"
       : ""
@@ -729,6 +733,18 @@ const titleSignature = (title) => {
 const extractCategoryPrefix = (title) => {
   const match = String(title).match(/^\s*\[([^\]]+)\]\s*/);
   return match ? match[1].trim() : null;
+};
+
+/** Normalized problem body (title without [Category] prefix) for uniqueness - same problem under different categories is still duplicate */
+const problemBodySignature = (title) => {
+  const t = String(title).trim();
+  const prefixMatch = t.match(/^\s*\[[^\]]+\]\s*/);
+  const body = prefixMatch ? t.slice(prefixMatch[0].length).trim() : t;
+  return normalizeTitle(body)
+    .split(" ")
+    .filter((token) => token && !TITLE_STOPWORDS.has(token))
+    .sort()
+    .join(" ");
 };
 
 const inferLogicCategoryFromTitle = (title) => {
@@ -789,6 +805,14 @@ const validateProgrammingTitles = ({
   const signatureSet = new Set(titles.map((t) => titleSignature(t)));
   if (signatureSet.size !== titles.length) {
     errors.push("Duplicate titles detected (logic signature match)");
+  }
+
+  const problemBodySignatures = titles.map((t) => problemBodySignature(t));
+  const problemBodySet = new Set(problemBodySignatures);
+  if (problemBodySet.size !== titles.length) {
+    errors.push(
+      "Duplicate problem detected: same problem description under different categories (e.g. two 'find min/max' or two 'palindrome' titles)",
+    );
   }
 
   if (
@@ -1741,6 +1765,7 @@ If titles are provided, you MUST:
 - Use each provided title as the "questionTitle" without changing its core meaning (minor wording tweaks are allowed)
 - Implement the logic category indicated by the title from the ${totalCategories} available categories
 - Ensure each question uses a DIFFERENT logic category/approach to maintain uniqueness across the entire assessment
+- Do not implement the same problem concept twice (e.g. two palindrome checks, two "find max", two "sum of array") - each question must be a distinct problem
 - **CRITICAL**: Adjust the complexity of the problem to match the maxTime (${maxTime} minutes) - if the title suggests a complex problem but maxTime is short, simplify it while keeping the core logic category
 ${isScenarioBased
           ? `- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
