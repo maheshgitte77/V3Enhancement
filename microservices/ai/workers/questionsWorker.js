@@ -334,7 +334,6 @@ const generateProgrammingTitlesPrompt = (
     requiredLogicCategories = [],
   } = options;
 
-
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
   let usedCategories =
     Array.isArray(usedCategoriesFromServer) &&
@@ -615,6 +614,22 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
     prompt += `
 ✅ REQUIRED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
 ${requiredLogicCategories.map((cat) => `- ${cat}`).join("\n")}
+
+🧩 TITLE FORMAT RULE (MANDATORY):
+- Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
+- The category prefix MUST match one of the required categories above
+`;
+  } else if (unusedCategories.length > 0) {
+    prompt += `
+✅ ALLOWED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
+${unusedCategories
+        .slice(0, Math.min(number, unusedCategories.length))
+        .map((cat) => `- ${cat.name}`)
+        .join("\n")}
+
+🧩 TITLE FORMAT RULE (MANDATORY):
+- Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
+- The category prefix MUST match one of the allowed categories above
 `;
   }
 
@@ -711,6 +726,11 @@ const titleSignature = (title) => {
   return tokens.sort().join(" ");
 };
 
+const extractCategoryPrefix = (title) => {
+  const match = String(title).match(/^\s*\[([^\]]+)\]\s*/);
+  return match ? match[1].trim() : null;
+};
+
 const inferLogicCategoryFromTitle = (title) => {
   const titleLower = normalizeTitle(title);
 
@@ -771,6 +791,18 @@ const validateProgrammingTitles = ({
     errors.push("Duplicate titles detected (logic signature match)");
   }
 
+  if (
+    Array.isArray(requiredLogicCategories) &&
+    requiredLogicCategories.length > 0
+  ) {
+    const missingPrefix = titles.filter(
+      (title) => !extractCategoryPrefix(title),
+    );
+    if (missingPrefix.length > 0) {
+      errors.push("Missing logic category prefix in titles");
+    }
+  }
+
   if (Array.isArray(questionsArray) && questionsArray.length > 0) {
     const previousTitleSet = new Set(
       questionsArray.map((q) => normalizeTitle(q)),
@@ -788,7 +820,10 @@ const validateProgrammingTitles = ({
     : [];
 
   if (categoriesToValidate.length !== titles.length) {
-    const inferred = titles.map((t) => inferLogicCategoryFromTitle(t));
+    const inferred = titles.map((t) => {
+      const prefix = extractCategoryPrefix(t);
+      return prefix || inferLogicCategoryFromTitle(t);
+    });
     categoriesToValidate = inferred.filter(Boolean);
   }
 
@@ -819,6 +854,19 @@ const validateProgrammingTitles = ({
       if (missingRequired.length > 0) {
         errors.push(
           `Missing required logic categories: ${missingRequired.join(", ")}`,
+        );
+      }
+
+      const invalidPrefixes = titles
+        .map((title) => extractCategoryPrefix(title))
+        .filter(
+          (prefix) => prefix && !requiredLogicCategories.includes(prefix),
+        );
+      if (invalidPrefixes.length > 0) {
+        errors.push(
+          `Invalid category prefixes in titles: ${[
+            ...new Set(invalidPrefixes),
+          ].join(", ")}`,
         );
       }
     }
