@@ -3,6 +3,7 @@ const multer = require("multer");
 const pdfParse = require("pdf-parse");
 const { calculateProcessingCost } = require("../utils/costCalculator");
 const CreditServiceClient = require("../utils/creditServiceClient");
+const { getPromptGenerator } = require("../prompts");
 
 // Configure multer to handle file uploads
 const storage = multer.memoryStorage();
@@ -34,72 +35,13 @@ const generateJobDescription = async (req, res) => {
       return match || null;
     };
 
-    const prompt = `
-Generate a professional, structured Job Description.
-**OUTPUT MUST BE RAW HTML ONLY. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
-
-**STRICT LAYOUT RULES:**
-1. **Job Title**: <p><strong>Job Title:</strong> ${jobDetails.jobRole || jobDetails.jobTitle}</p>
-
-2. **SUMMARY :** 
-   - <h3><strong>SUMMARY :</strong></h3>
-   - 2 descriptive paragraphs wrapped in <p> tags.
-
-3. **KEY ROLES & RESPONSIBILITIES :** 
-   - <hr> (Only if next section is generated)
-   - <h3><strong>KEY ROLES & RESPONSIBILITIES :</strong></h3>
-   - Use a SINGLE <ul> containing multiple <li> items.
-
-4. **KNOWLEDGE/ SKILLS/ATTRIBUTES :**
-   - <hr> (Only if next section is generated)
-   - <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :</strong></h3>
-   - <p><strong>Required Experience, Skills and Qualifications</strong></p>
-   - SINGLE <ul> with items as "<strong>Skill Name</strong>: Description".
-   - DO NOT include Education section in direct JD generation.
-
-5. **Good to have skills :** (If applicable)
-   - <hr> (Only if next section is generated)
-   - <h3><strong>Good to have skills :</strong></h3>
-   - SINGLE <ul> with "Skill: Description" format.
-
-6. **Other Requirements :** (If applicable)
-   - <hr> (Only if next section is generated)
-   - <h3><strong>Other Requirements :</strong></h3>
-   - SINGLE <ul> with "Requirement: Description" format.
-
-**CRITICAL RULES:**
-- **Skill Enrichment**: For EVERY skill mentioned, you MUST provide a professional 1-line description (e.g., "Skill Name: Expert-level proficiency in..."). If the description isn't in the input, **create a high-quality one based on the Job Role and Seniority**.
-- **Empty Sections**: Skip header if no data.
-- **Single List**: Wrap all points of a section in ONE <ul>.
-- **NO Education Section**: Do not generate Education section for direct JD creation.
-
-7. **Skill Mapping**: 
-   - Categorize skills into 'required', 'goodToHave', and 'aptitude'.
-   - Match against: ${JSON.stringify(officialSkills)}.
-
-**MATCHING DATA REQUEST:**
-At the very end, provide JSON tagged [SKILL_DATA] containing the FULL list of skills found/mapped:
-{
-  "required": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
-  ],
-  "goodToHave": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
-  ],
-  "aptitude": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
-  ]
-}
-
-**DETAILS:**
-- Job Title: ${jobDetails.jobRole || jobDetails.jobTitle}
-- Seniority: ${jobDetails.seniority?.join(", ")}
-- Required: ${jobDetails.requiredSkill.join(", ")}
-- Good to Have: ${jobDetails.goodToHaveSkill.join(", ")}
-- Aptitude: ${jobDetails.aptitudeSkill.join(", ")}
-
-Generate HTML now.
-`;
+    const { category, evaluationIntent } = jobDetails;
+    const promptGenerator = getPromptGenerator(
+      category,
+      evaluationIntent,
+      false,
+    );
+    const prompt = promptGenerator(jobDetails, officialSkills);
 
     const result = await model.generateContent(prompt);
     const fullText =
@@ -350,86 +292,14 @@ const generateJobDescriptionFormFile = async (req, res) => {
         return match || null;
       };
 
-      const prompt = `
-Analyze the provided text and generate a Job Description.
-**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT USE <html>, <head>, or <body> TAGS. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
-
-**STRICT LAYOUT RULES:**
-1. <p><strong>Job Title:</strong> ${jobRole}</p>
-2. <h3><strong>SUMMARY :</strong></h3> (2 informative paragraphs wrapped in <p> tags)
-3. <hr> (Only if next section is generated)
-4. <h3><strong>KEY ROLES & RESPONSIBILITIES :**</h3> (A SINGLE <ul> list)
-5. <hr> (Only if next section is generated)
-6. <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :**</h3>
-   - <p><strong>Required Experience, Skills and Qualifications</strong></p>
-   - A SINGLE <ul> with items in format: "<strong>Skill Name</strong>: Professional One-Liner Description"
-   - (If Education is found): <p><strong>Education</strong></p> (followed by a SINGLE <ul>)
-7. <hr> (Only if next section is generated)
-8. <h3><strong>Good to have skills :**</h3> (ONLY if data exists, followed by <ul>)
-9. <hr> (Only if next section is generated)
-10. <h3><strong>Other Requirements :**</h3> (ONLY if data exists, followed by <ul>)
-
-**AI INSTRUCTION:**
-- **Extraction**: Thoroughly scan the content. Map section "THE CORE REQUIREMENTS" and "ENGINEERING PHILOSOPHY" to 'required'. Map "BEYOND THE CORE" to 'goodToHave'. Map "CULTURAL/OPERATIONAL" to 'aptitude'.
-- **Enrichment**: For EVERY skill, you MUST generate a high-quality 1-line description even if missing in the source.
-- **Normalization**: If you see "Express.js" but the mapping list has "Express", categorize it correctly.
-
-7. **Skill List**: Match against this list: ${JSON.stringify(officialSkills)}.
-
-**METADATA EXTRACTION (CRITICAL INSTRUCTIONS):**
-Carefully scan the entire document for the following information. ONLY extract data that is EXPLICITLY mentioned. Do NOT guess or infer.
-
-1. **Experience Requirements**:
-   - Look for phrases like: "5+ years", "3-5 years", "minimum 2 years", "8+ years experience", "fresher", "0-2 years", etc.
-   - Common patterns to detect:
-     * "X-Y years" → experienceFrom: X, experienceTo: Y
-     * "X+ years" or "X or more years" → experienceFrom: X, experienceTo: X+3
-     * "Minimum X years" → experienceFrom: X, experienceTo: X+5
-     * "Up to X years" or "Below X years" → experienceFrom: 0, experienceTo: X
-     * "Fresher" or "Entry level" → experienceFrom: 0, experienceTo: 2
-   - If NO experience is mentioned anywhere, return: experienceFrom: null, experienceTo: null
-
-2. **Job Category (jobFor)**:
-   - If experienceFrom is 0 or 1 or document mentions "fresher"/"entry level" → "Fresher"
-   - If experienceFrom is 2 or more → "Experienced"
-   - If no experience data found → "Experienced" (default)
-
-3. **Total Positions**:
-   - Look for: "X positions", "X vacancies", "X openings", "hiring X", "X roles", etc.
-   - Extract the number only
-   - If NOT found, return: null (do NOT default to 1)
-
-4. **Location**:
-   - Look for: "Location:", "Based in", "Office in", city names, "Remote", "Hybrid", etc.
-   - Extract the primary location (city/region)
-   - If multiple locations, pick the first one mentioned
-   - If "Remote" only, return: "Remote"
-   - If NOT found, return: "" (empty string)
-
-**DATA EXTRACTION REQUEST:**
-After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by this JSON block:
-
-[SKILL_DATA]
-{
-  "required": [ { "name": "...", "description": "..." } ],
-  "goodToHave": [ ... ],
-  "aptitude": [ ... ]
-}
-
-[META_DATA]
-{
-  "experienceFrom": number or null,
-  "experienceTo": number or null,
-  "jobFor": "Fresher" | "Experienced",
-  "totalPositions": number or null,
-  "location": "string or empty"
-}
-
-**SOURCE TEXT:**
-${extractedText}
-
-Generate the JD now.
-`;
+      const category = req.body.category || "Hiring";
+      const evaluationIntent = req.body.evaluationIntent;
+      const promptGenerator = getPromptGenerator(
+        category,
+        evaluationIntent,
+        true,
+      );
+      const prompt = promptGenerator(extractedText, jobRole, officialSkills);
 
       const result = await model.generateContent(prompt);
       const fullText =
