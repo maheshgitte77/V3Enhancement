@@ -8,59 +8,60 @@ const generateSkillEvaluationFromFilePrompt = (
   officialSkills,
 ) => {
   return `
-Analyze the provided text and generate Skill Evaluation Requirements for internal employee assessment.
-**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT USE <html>, <head>, or <body> TAGS. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+Analyze the provided source text and generate a precise Skill Evaluation & Competency Framework document for internal player assessment.
+**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT WRAP IN ANY TAGS LIKE <code>, <pre>, OR MARKDOWN BLOCKS (\`\`\`html). NO MARKDOWN (like ** or #).**
 
-**CONTEXT**: This is for evaluating and upskilling internal employees based on skill gaps and competency requirements.
+**CONTEXT**: This is for assessing andEvaluating the specific technical and behavioral competencies of an internal employee.
 
-**STRICT LAYOUT RULES:**
-1. <p><strong>Skill Evaluation:</strong> ${jobRole}</p>
-2. <h3><strong>EVALUATION OVERVIEW :</strong></h3> (2 informative paragraphs explaining evaluation purpose wrapped in <p> tags)
-3. <hr> (Only if next section is generated)
-4. <h3><strong>COMPETENCIES TO BE ASSESSED :**</h3> (A SINGLE <ul> list)
-5. <hr> (Only if next section is generated)
-6. <h3><strong>CORE SKILLS & KNOWLEDGE AREAS :**</h3>
-   - <p><strong>Technical Skills and Knowledge to be Evaluated</strong></p>
-   - A SINGLE <ul> with items in format: "<strong>Skill Name</strong>: Proficiency level expected and evaluation criteria"
-7. <hr> (Only if next section is generated)
-8. <h3><strong>Advanced Skills (For Higher Proficiency) :**</h3> (ONLY if data exists, followed by <ul>)
-9. <hr> (Only if next section is generated)
-10. <h3><strong>Soft Skills & Behavioral Competencies :**</h3> (ONLY if data exists, followed by <ul>)
+**STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-**AI INSTRUCTION:**
-- **Learning-Focused Language**: Use terminology like "competency assessment", "skill proficiency", "evaluation criteria" instead of "hiring requirements".
-- **Extraction**: Thoroughly scan the content for skills and competencies to be evaluated.
-- **Enrichment**: For EVERY skill, generate a description of PROFICIENCY LEVEL and EVALUATION CRITERIA.
-- **Normalization**: Match skills correctly against the official list.
+1. <h3><strong>Target Evaluation Role:</strong></h3><p> ${jobRole}</p>
 
-**Skill List**: Match against this list: ${JSON.stringify(officialSkills)}.
+2. <h3><strong>EVALUATION OBJECTIVE :</strong></h3> 
+   - 1-2 objective paragraphs wrapped in <p> tags.
+   - Describe the required readiness or proficiency standards based on the text.
 
-**METADATA EXTRACTION (CRITICAL INSTRUCTIONS):**
-Carefully scan the entire document for the following information. ONLY extract data that is EXPLICITLY mentioned.
+3. <hr>
 
-1. **Experience/Proficiency Level**:
-   - Look for phrases like: "beginner level", "intermediate", "advanced", "expert", "5+ years experience", etc.
-   - Map to experience range if mentioned
-   - If NO experience is mentioned, return: experienceFrom: null, experienceTo: null
+4. <h3><strong>KEY ASSESSMENT AREAS :</strong></h3> 
+   - A SINGLE <ul> containing multiple <li> items on themes like mastery, leadership, or execution.
 
-2. **Evaluation Type**:
-   - Look for: "skill gap analysis", "competency assessment", "certification preparation", "upskilling program", etc.
-   - If NOT found, return: null
+5. <hr>
 
-3. **Target Proficiency**:
-   - Look for: "basic proficiency", "intermediate level", "advanced mastery", etc.
-   - If NOT found, return: "" (empty string)
+6. <h3><strong>TECHNICAL COMPETENCIES & BENCHMARKS :</strong></h3>
+   - A SINGLE <ul> containing:
+     - **Experience Benchmark**: "<strong>Experience Base</strong>: [X]+ years..." (only if found).
+     - **Assignment Context**: "<strong>Location & Mode</strong>: [Location/Mode]" (only if found).
+     - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency being evaluated."
+   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Full Stack Developer", "Rest Api").
 
-4. **Assessment Duration**:
-   - Look for: "X weeks", "X months", "ongoing", etc.
-   - If NOT found, return: null
+7. <hr> (Include only if extraction finds Good to Have data)
+
+8. <h3><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Advanced indicators."
+
+9. <hr> (Include only if extraction finds Aptitude data)
+
+10. <h3><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
+    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
+
+**CRITICAL RULES:**
+- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO WRAPPERS**: No <code>, <pre>, or markdown boxes. Just raw HTML (h3, p, ul, li, hr, strong).
+- **Internal Language**: Use "employee", "assessed", "competency".
+- **Normalization**: Match extracted skills against: ${JSON.stringify(officialSkills)}.
+- **CRITICAL**: Do NOT generate Duration, Allocation %, or Notice Period in the HTML.
+
+**METADATA EXTRACTION (STRICT):**
+Extract into [META_DATA] JSON block:
+1. experienceFrom/To (numbers), location, clientName, billability.
 
 **DATA EXTRACTION REQUEST:**
-After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by this JSON block:
+After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by the metadata JSON.
 
 [SKILL_DATA]
 {
-  "required": [ { "name": "...", "description": "Proficiency level and evaluation criteria" } ],
+  "required": [ { "id": "matched_id", "name": "Skill Name", "description": "Benchmark requirement" } ],
   "goodToHave": [ ... ],
   "aptitude": [ ... ]
 }
@@ -69,15 +70,15 @@ After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_
 {
   "experienceFrom": number or null,
   "experienceTo": number or null,
-  "evaluationType": "string or null",
-  "targetProficiency": "string or empty",
-  "assessmentDuration": "string or null"
+  "location": "string or empty",
+  "clientName": "string or null",
+  "billability": "string or null"
 }
 
 **SOURCE TEXT:**
 ${extractedText}
 
-Generate the Skill Evaluation Requirements now.
+Generate the Skill Evaluation HTML now.
 `;
 };
 

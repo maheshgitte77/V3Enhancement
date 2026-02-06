@@ -8,62 +8,60 @@ const generateProjectStaffingFromFilePrompt = (
   officialSkills,
 ) => {
   return `
-Analyze the provided text and generate Project Requirements for internal project staffing.
-**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT USE <html>, <head>, or <body> TAGS. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+Analyze the provided source text and generate a precise Staffing Requirement document for internal resource selection.
+**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT WRAP IN ANY TAGS LIKE <code>, <pre>, OR MARKDOWN BLOCKS (\`\`\`html). NO MARKDOWN (like ** or #).**
 
-**CONTEXT**: This is for allocating internal employees to a specific project based on required skills and experience.
+**CONTEXT**: This is for assessing and allocating the best-suited internal employees to a specific project.
 
-**STRICT LAYOUT RULES:**
-1. <p><strong>Project:</strong> ${jobRole}</p>
-2. <h3><strong>PROJECT OVERVIEW :</strong></h3> (2 informative paragraphs explaining project scope wrapped in <p> tags)
-3. <hr> (Only if next section is generated)
-4. <h3><strong>KEY RESPONSIBILITIES & DELIVERABLES :**</h3> (A SINGLE <ul> list)
-5. <hr> (Only if next section is generated)
-6. <h3><strong>REQUIRED SKILLS & EXPERTISE :**</h3>
-   - <p><strong>Technical Skills and Experience Required</strong></p>
-   - A SINGLE <ul> with items in format: "<strong>Skill Name</strong>: How it will be used in the project"
-7. <hr> (Only if next section is generated)
-8. <h3><strong>Additional Skills (Nice to Have) :**</h3> (ONLY if data exists, followed by <ul>)
-9. <hr> (Only if next section is generated)
-10. <h3><strong>Project Requirements :**</h3> (ONLY if data exists, followed by <ul>)
+**STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-**AI INSTRUCTION:**
-- **Project-Focused Language**: Use terminology like "project allocation", "team member", "deliverables" instead of "hiring", "candidate".
-- **Extraction**: Thoroughly scan the content for project-specific requirements.
-- **Enrichment**: For EVERY skill, generate a description of how it applies to THIS PROJECT.
-- **Normalization**: Match skills correctly against the official list.
+1. <h3><strong>Assigned Role:</strong></h3><p> ${jobRole}</p>
 
-**Skill List**: Match against this list: ${JSON.stringify(officialSkills)}.
+2. <h3><strong>STAFFING OBJECTIVE :</strong></h3> 
+   - 1-2 objective paragraphs wrapped in <p> tags.
+   - Describe the Technical Profile and Maturity required based on the text.
 
-**METADATA EXTRACTION (CRITICAL INSTRUCTIONS):**
-Carefully scan the entire document for the following information. ONLY extract data that is EXPLICITLY mentioned.
+3. <hr>
 
-1. **Experience Requirements**:
-   - Look for phrases like: "5+ years", "3-5 years", "minimum 2 years", etc.
-   - Common patterns to detect:
-     * "X-Y years" → experienceFrom: X, experienceTo: Y
-     * "X+ years" → experienceFrom: X, experienceTo: X+3
-     * "Minimum X years" → experienceFrom: X, experienceTo: X+5
-   - If NO experience is mentioned, return: experienceFrom: null, experienceTo: null
+4. <h3><strong>KEY RESPONSIBILITIES & DELIVERABLES :</strong></h3> 
+   - A SINGLE <ul> containing multiple <li> items based on the text.
 
-2. **Project Duration/Allocation**:
-   - Look for: "X months", "X weeks", "long-term", "short-term", etc.
-   - If NOT found, return: null
+5. <hr>
 
-3. **Team Size**:
-   - Look for: "X team members needed", "X resources", etc.
-   - If NOT found, return: null
+6. <h3><strong>TECHNICAL COMPETENCIES & EXPERTISE :</strong></h3>
+   - A SINGLE <ul> containing:
+     - **Experience Required**: "<strong>Experience</strong>: [X]+ years..." (only if found).
+     - **Context**: "<strong>Work Mode & Location</strong>: [Location/Mode]" (only if found).
+     - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Proficiency level required."
+   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Full Stack Developer", "Rest Api").
 
-4. **Location/Work Mode**:
-   - Look for: "Remote", "Hybrid", "On-site", specific office locations
-   - If NOT found, return: "" (empty string)
+7. <hr> (Include only if Good to Have data exists)
+
+8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+
+9. <hr> (Include only if Aptitude data exists)
+
+10. <h3><strong>SOFT SKILLS & APTITUDE :</strong></h3> 
+    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+
+**CRITICAL RULES:**
+- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO WRAPPERS**: Do not use <code>, <pre>, or code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
+- **Consolidated Layout**: Merge logistics into Technical list to avoid tiny sections.
+- **Normalization**: Match extracted skills against: ${JSON.stringify(officialSkills)}.
+- **CRITICAL**: Do NOT generate Duration, Allocation %, or Notice Period in the HTML.
+
+**METADATA EXTRACTION (STRICT):**
+Extract into [META_DATA] JSON block:
+1. experienceFrom/To (numbers), location, clientName, billability.
 
 **DATA EXTRACTION REQUEST:**
-After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by this JSON block:
+After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by the metadata JSON.
 
 [SKILL_DATA]
 {
-  "required": [ { "name": "...", "description": "Project-specific description" } ],
+  "required": [ { "id": "matched_id", "name": "Skill Name", "description": "Competency requirement" } ],
   "goodToHave": [ ... ],
   "aptitude": [ ... ]
 }
@@ -72,15 +70,15 @@ After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_
 {
   "experienceFrom": number or null,
   "experienceTo": number or null,
-  "projectDuration": "string or null",
-  "teamSize": number or null,
-  "location": "string or empty"
+  "location": "string or empty",
+  "clientName": "string or null",
+  "billability": "string or null"
 }
 
 **SOURCE TEXT:**
 ${extractedText}
 
-Generate the Project Requirements now.
+Generate the Staffing Requirement HTML now.
 `;
 };
 

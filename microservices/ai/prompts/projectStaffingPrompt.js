@@ -5,73 +5,61 @@
 
 const generateProjectStaffingPrompt = (jobDetails, officialSkills) => {
   return `
-Generate a professional, structured Project Requirements document for internal project staffing.
-**OUTPUT MUST BE RAW HTML ONLY. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+Analyze the following details and generate a professional Staffing Requirement document for internal resource allocation.
+**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT WRAP IN ANY TAGS LIKE <code>, <pre>, OR MARKDOWN BLOCKS (\`\`\`html). NO MARKDOWN (like ** or #).**
 
-**CONTEXT**: This is for allocating internal employees to a specific project based on required skills and experience.
+**CONTEXT**: This is for identifying and allocating the best-suited internal employee for a specific project. The tone MUST be professional and collaboration-focused.
 
-**STRICT LAYOUT RULES:**
-1. **Project Title**: <p><strong>Project:</strong> ${jobDetails.jobRole || jobDetails.jobTitle}</p>
+**STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-2. **PROJECT OVERVIEW :** 
-   - <h3><strong>PROJECT OVERVIEW :</strong></h3>
-   - 2 descriptive paragraphs explaining the project scope, objectives, and context wrapped in <p> tags.
+1. <h3><strong>Project Name:</strong></h3><p> ${jobDetails.jobTitle}</p>
+   <h3><strong>Assigned Role:</strong></h3><p> ${jobDetails.jobRole}</p>
 
-3. **KEY RESPONSIBILITIES & DELIVERABLES :** 
-   - <hr> (Only if next section is generated)
-   - <h3><strong>KEY RESPONSIBILITIES & DELIVERABLES :</strong></h3>
-   - Use a SINGLE <ul> containing multiple <li> items describing what the team member will work on.
+2. <h3><strong>STAFFING OBJECTIVE :</strong></h3> 
+   - 1-2 concise, professional paragraphs wrapped in <p> tags.
+   - Describe the ideal profile required for this assignment (Seniority: **${jobDetails.seniority?.join(", ")}**, Domain: **${jobDetails.domain}**).
 
-4. **REQUIRED SKILLS & EXPERTISE :**
-   - <hr> (Only if next section is generated)
-   - <h3><strong>REQUIRED SKILLS & EXPERTISE :</strong></h3>
-   - <p><strong>Technical Skills and Experience Required</strong></p>
-   - SINGLE <ul> with items as "<strong>Skill Name</strong>: Description of how it will be used in the project".
-   - Focus on practical application in the project context.
+3. <hr>
 
-5. **Additional Skills (Nice to Have) :** (If applicable)
-   - <hr> (Only if next section is generated)
-   - <h3><strong>Additional Skills (Nice to Have) :</strong></h3>
-   - SINGLE <ul> with "Skill: Description" format.
+4. <h3><strong>KEY RESPONSIBILITIES & DELIVERABLES :</strong></h3> 
+   - A SINGLE <ul> containing multiple <li> items focusing on technical ownership.
 
-6. **Project Requirements :** (If applicable)
-   - <hr> (Only if next section is generated)
-   - <h3><strong>Project Requirements :</strong></h3>
-   - SINGLE <ul> with project-specific requirements like availability, duration, collaboration needs, etc.
+5. <hr>
+
+6. <h3><strong>TECHNICAL COMPETENCIES & EXPERTISE :</strong></h3>
+   - A SINGLE <ul> containing:
+     - **Experience Required**: "<strong>Experience</strong>: ${jobDetails.experience} years in ${jobDetails.domain} environment."
+     - **Location & Mode**: "<strong>Work Mode</strong>: ${jobDetails.jobStyle || "Not Specified"} (${jobDetails.jobLocation?.join(", ") || "Not Specified"})."
+     - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Professional description of expected competency."
+   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Responsive Design", "Rest Api").
+
+7. <hr> (Include only if Good to Have data exists)
+
+8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+
+9. <hr> (Include only if Aptitude data exists)
+
+10. <h3><strong>SOFT SKILLS & APTITUDE :</strong></h3> 
+    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
 **CRITICAL RULES:**
-- **Project-Focused Language**: Use terminology like "project allocation", "team member", "deliverables", "project duration" instead of "hiring", "candidate", "employment".
-- **Skill Enrichment**: For EVERY skill mentioned, provide a 1-line description of how it applies to THIS PROJECT.
-- **Empty Sections**: Skip header if no data.
+- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO WRAPPERS**: Do not use <code>, <pre>, or code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
+- **Staffing Language**: Use "internal resource", "team member", "allocation". NEVER "hiring" or "candidate".
 - **Single List**: Wrap all points of a section in ONE <ul>.
-- **Internal Focus**: Remember this is for internal staffing, not external hiring.
-
-7. **Skill Mapping**: 
-   - Categorize skills into 'required', 'goodToHave', and 'aptitude'.
-   - Match against: ${JSON.stringify(officialSkills)}.
-
-**MATCHING DATA REQUEST:**
-At the very end, provide JSON tagged [SKILL_DATA] containing the FULL list of skills found/mapped:
-{
-  "required": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Project-specific description" }
-  ],
-  "goodToHave": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Project-specific description" }
-  ],
-  "aptitude": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Project-specific description" }
-  ]
-}
 
 **DETAILS:**
-- Project: ${jobDetails.jobRole || jobDetails.jobTitle}
-- Seniority Level: ${jobDetails.seniority?.join(", ")}
+- Project Name: ${jobDetails.jobTitle}
+- Role: ${jobDetails.jobRole}
+- Domain: ${jobDetails.domain}
+- Seniority: ${jobDetails.seniority?.join(", ")}
+- Experience: ${jobDetails.experience}
 - Required Skills: ${jobDetails.requiredSkill.join(", ")}
-- Good to Have Skills: ${jobDetails.goodToHaveSkill.join(", ")}
-- Soft Skills/Aptitude: ${jobDetails.aptitudeSkill.join(", ")}
+- Good to Have: ${jobDetails.goodToHaveSkill.join(", ")}
+- Aptitude/Soft Skills: ${jobDetails.aptitudeSkill.join(", ")}
 
-Generate HTML now.
+Generate the Staffing Requirement HTML now.
 `;
 };
 

@@ -5,70 +5,65 @@
 
 const generateHiringJobDescriptionPrompt = (jobDetails, officialSkills) => {
   return `
-Generate a professional, structured Job Description for external hiring.
-**OUTPUT MUST BE RAW HTML ONLY. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+Analyze the following details and generate a professional, high-quality Job Description for external hiring.
+**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT WRAP IN ANY TAGS LIKE <code>, <pre>, OR MARKDOWN BLOCKS (\`\`\`html). NO MARKDOWN (like ** or #).**
 
-**STRICT LAYOUT RULES:**
-1. **Job Title**: <p><strong>Job Title:</strong> ${jobDetails.jobRole || jobDetails.jobTitle}</p>
+**STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-2. **SUMMARY :** 
-   - <h3><strong>SUMMARY :</strong></h3>
-   - 2 descriptive paragraphs wrapped in <p> tags.
+1. <h3><strong>Role:</strong></h3><p> ${jobDetails.jobRole}</p>
 
-3. **KEY ROLES & RESPONSIBILITIES :** 
-   - <hr> (Only if next section is generated)
-   - <h3><strong>KEY ROLES & RESPONSIBILITIES :</strong></h3>
-   - Use a SINGLE <ul> containing multiple <li> items.
+2. <h3><strong>SUMMARY :</strong></h3> 
+   - 2-3 engaging, descriptive paragraphs wrapped in <p> tags.
+   - **Best-in-Class Rules**: 
+     - Explain why a candidate should join this specific organization and team.
+     - Naturally incorporate **Domain (${jobDetails.domain})**, **Job Style (${jobDetails.jobStyle})**, and **Location (${jobDetails.jobLocation?.join(", ")})**.
+     - Focus on the "Purpose"—what impact the candidate will have in their first 6-12 months.
 
-4. **KNOWLEDGE/ SKILLS/ATTRIBUTES :**
-   - <hr> (Only if next section is generated)
-   - <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :</strong></h3>
-   - <p><strong>Required Experience, Skills and Qualifications</strong></p>
-   - SINGLE <ul> with items as "<strong>Skill Name</strong>: Description".
-   - DO NOT include Education section in direct JD generation.
+3. <hr>
 
-5. **Good to have skills :** (If applicable)
-   - <hr> (Only if next section is generated)
-   - <h3><strong>Good to have skills :</strong></h3>
-   - SINGLE <ul> with "Skill: Description" format.
+4. <h3><strong>KEY RESPONSIBILITIES :</strong></h3> 
+   - A SINGLE <ul> containing multiple <li> items.
+   - Use "Outcome-oriented" bullets. Describe the "Value Delivered" (e.g., "Developing optimized React components... to increase user engagement by 20%").
 
-6. **Other Requirements :** (If applicable)
-   - <hr> (Only if next section is generated)
-   - <h3><strong>Other Requirements :</strong></h3>
-   - SINGLE <ul> with "Requirement: Description" format.
+5. <hr>
+
+6.  **Dynamic Skills Section**:
+    - **Experience-First Rule**: The first bullet point MUST be the years of experience requirement based on Seniority (${jobDetails.seniority?.join(", ")} level, ${jobDetails.experience} years).
+    - **Header**: 
+      - If Experience + Skills: <h3><strong>REQUIRED EXPERIENCE & TECHNICAL SKILLS :</strong></h3>
+      - If Skills Only: <h3><strong>TECHNICAL SKILLS & COMPETENCIES :</strong></h3>
+    - **Skills**: A SINGLE <ul> in format: "<strong>Skill Name (Title Case)</strong>: Professional description."
+    - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "React Native", "Rest Api").
+
+7. <hr> (Include only if Good to Have data exists)
+
+8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+
+9. <hr> (Include only if Aptitude data exists)
+
+10. <h3><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
+    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
 **CRITICAL RULES:**
-- **Skill Enrichment**: For EVERY skill mentioned, you MUST provide a professional 1-line description (e.g., "Skill Name: Expert-level proficiency in..."). If the description isn't in the input, **create a high-quality one based on the Job Role and Seniority**.
-- **Empty Sections**: Skip header if no data.
+- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO WRAPPERS**: Do not use <code>, <pre>, or any code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
+- **Skill Enrichment**: For EVERY skill provided, generate a professional 1-line description.
 - **Single List**: Wrap all points of a section in ONE <ul>.
-- **NO Education Section**: Do not generate Education section for direct JD creation.
-
-7. **Skill Mapping**: 
-   - Categorize skills into 'required', 'goodToHave', and 'aptitude'.
-   - Match against: ${JSON.stringify(officialSkills)}.
-
-**MATCHING DATA REQUEST:**
-At the very end, provide JSON tagged [SKILL_DATA] containing the FULL list of skills found/mapped:
-{
-  "required": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
-  ],
-  "goodToHave": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
-  ],
-  "aptitude": [
-    { "id": "matched_id_if_exists", "name": "Skill Name", "description": "Skill: Description" }
-  ]
-}
 
 **DETAILS:**
-- Job Title: ${jobDetails.jobRole || jobDetails.jobTitle}
+- Job Role: ${jobDetails.jobRole}
+- Domain: ${jobDetails.domain}
 - Seniority: ${jobDetails.seniority?.join(", ")}
-- Required: ${jobDetails.requiredSkill.join(", ")}
+- Experience: ${jobDetails.experience}
+- Location: ${jobDetails.jobLocation?.join(", ")}
+- Job Style: ${jobDetails.jobStyle}
+- Notice Period: ${jobDetails.noticePeriod}
+- Required Skills: ${jobDetails.requiredSkill.join(", ")}
 - Good to Have: ${jobDetails.goodToHaveSkill.join(", ")}
-- Aptitude: ${jobDetails.aptitudeSkill.join(", ")}
+- Soft Skills/Aptitude: ${jobDetails.aptitudeSkill.join(", ")}
 
-Generate HTML now.
+Generate the Best-in-Class Job Description HTML now.
 `;
 };
 

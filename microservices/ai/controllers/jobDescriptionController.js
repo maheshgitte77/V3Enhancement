@@ -47,59 +47,13 @@ const generateJobDescription = async (req, res) => {
     const fullText =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
-    // Split text from skill data
-    const parts = fullText.split("[SKILL_DATA]");
-    let jobDescription = parts[0].replace(/```html|```/gi, "").trim();
+    // Clean the HTML output
+    let jobDescription = fullText.replace(/```html|```/gi, "").trim();
 
     // Remove trailing <hr> tags to prevent orphaned dividers
     jobDescription = jobDescription
       .replace(/(<hr\s*\/?>[\s\r\n]*)+$/gi, "")
       .trim();
-
-    let rawSkillData = null;
-
-    if (parts[1]) {
-      try {
-        const jsonStr = parts[1].replace(/```json|```/gi, "").trim();
-        rawSkillData = JSON.parse(jsonStr);
-      } catch (e) {
-        console.error("Failed to parse skill data JSON:", e);
-      }
-    }
-
-    // Post-process skills with fuzzy matching
-    const skillData = {
-      required: [],
-      goodToHave: [],
-      aptitude: [],
-    };
-
-    if (rawSkillData) {
-      ["required", "goodToHave", "aptitude"].forEach((category) => {
-        if (Array.isArray(rawSkillData[category])) {
-          rawSkillData[category].forEach((skill) => {
-            const match = findMatchedSkill(skill.name);
-            if (match) {
-              skillData[category].push({
-                id: match.id || match._id,
-                name: match.name,
-                description:
-                  skill.description ||
-                  `${match.name}: Professional proficiency.`,
-              });
-            } else {
-              skillData[category].push({
-                id: null,
-                name: skill.name,
-                description:
-                  skill.description ||
-                  `${skill.name}: Professional proficiency.`,
-              });
-            }
-          });
-        }
-      });
-    }
 
     const usageMetadata = result.response?.usageMetadata || {};
     const inputTokens = usageMetadata.promptTokenCount || 0;
@@ -132,13 +86,18 @@ const generateJobDescription = async (req, res) => {
       console.error(`❌ AI Credit deduction failed:`, creditError.message);
     }
 
-    return res.status(200).json({
+    const response = {
       message: "Job description generated successfully",
       jobDescription,
-      skillData,
       noticePeriod: "0-30", // Default notice period
       totalTokenCount: inputTokens + outputTokens,
-    });
+    };
+
+    // Only include skillData if it's not empty (usually for file upload, but let's be safe)
+    // Actually, for regular generation, the user wants NO skillData or metaData fields.
+    // So we just return the basic response.
+
+    return res.status(200).json(response);
   } catch (error) {
     console.error("❌ Error in generateJobDescription:", error);
     return res.status(500).json({ message: "Internal Server Error" });
@@ -337,17 +296,26 @@ const generateJobDescriptionFormFile = async (req, res) => {
         }
       }
 
-      // Post-process skills with fuzzy matching
+      // Post-process skills with fuzzy matching and deduplication
       const skillData = {
         required: [],
         goodToHave: [],
         aptitude: [],
       };
 
+      const seenSkillNames = new Set();
+
       if (rawSkillData) {
         ["required", "goodToHave", "aptitude"].forEach((category) => {
           if (Array.isArray(rawSkillData[category])) {
             rawSkillData[category].forEach((skill) => {
+              if (!skill.name) return;
+
+              const normalizedName = skill.name
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
+              if (seenSkillNames.has(normalizedName)) return;
+
               const match = findMatchedSkill(skill.name);
               if (match) {
                 skillData[category].push({
@@ -357,6 +325,10 @@ const generateJobDescriptionFormFile = async (req, res) => {
                     skill.description ||
                     `${match.name}: Professional proficiency.`,
                 });
+                seenSkillNames.add(normalizedName);
+                seenSkillNames.add(
+                  match.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+                );
               } else {
                 skillData[category].push({
                   id: null,
@@ -365,6 +337,7 @@ const generateJobDescriptionFormFile = async (req, res) => {
                     skill.description ||
                     `${skill.name}: Professional proficiency.`,
                 });
+                seenSkillNames.add(normalizedName);
               }
             });
           }

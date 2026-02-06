@@ -8,67 +8,56 @@ const generateHiringJobDescriptionFromFilePrompt = (
   officialSkills,
 ) => {
   return `
-Analyze the provided text and generate a Job Description for external hiring.
-**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT USE <html>, <head>, or <body> TAGS. DO NOT USE MARKDOWN (like ** or #). DO NOT WRAP IN \`\`\`html BLOCKS.**
+Analyze the provided source text and generate a professional, high-quality Job Description for external hiring.
+**CRITICAL: OUTPUT MUST BE RAW HTML ONLY. DO NOT WRAP IN ANY TAGS LIKE <code>, <pre>, OR MARKDOWN BLOCKS (\`\`\`html). NO MARKDOWN (like ** or #).**
 
-**STRICT LAYOUT RULES:**
-1. <p><strong>Job Title:</strong> ${jobRole}</p>
-2. <h3><strong>SUMMARY :</strong></h3> (2 informative paragraphs wrapped in <p> tags)
-3. <hr> (Only if next section is generated)
-4. <h3><strong>KEY ROLES & RESPONSIBILITIES :**</h3> (A SINGLE <ul> list)
-5. <hr> (Only if next section is generated)
-6. <h3><strong>KNOWLEDGE/ SKILLS/ATTRIBUTES :**</h3>
-   - <p><strong>Required Experience, Skills and Qualifications</strong></p>
-   - A SINGLE <ul> with items in format: "<strong>Skill Name</strong>: Professional One-Liner Description"
-   - (If Education is found): <p><strong>Education</strong></p> (followed by a SINGLE <ul>)
-7. <hr> (Only if next section is generated)
-8. <h3><strong>Good to have skills :**</h3> (ONLY if data exists, followed by <ul>)
-9. <hr> (Only if next section is generated)
-10. <h3><strong>Other Requirements :**</h3> (ONLY if data exists, followed by <ul>)
+**STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-**AI INSTRUCTION:**
-- **Extraction**: Thoroughly scan the content. Map section "THE CORE REQUIREMENTS" and "ENGINEERING PHILOSOPHY" to 'required'. Map "BEYOND THE CORE" to 'goodToHave'. Map "CULTURAL/OPERATIONAL" to 'aptitude'.
-- **Enrichment**: For EVERY skill, you MUST generate a high-quality 1-line description even if missing in the source.
-- **Normalization**: If you see "Express.js" but the mapping list has "Express", categorize it correctly.
+1. <h3><strong>Role:</strong></h3><p> ${jobRole}</p>
 
-7. **Skill List**: Match against this list: ${JSON.stringify(officialSkills)}.
+2. <h3><strong>SUMMARY :</strong></h3> 
+   - 2-3 engaging, descriptive paragraphs wrapped in <p> tags.
+   - Summarize the role's scope and impact based on the extracted text.
 
-**METADATA EXTRACTION (CRITICAL INSTRUCTIONS):**
-Carefully scan the entire document for the following information. ONLY extract data that is EXPLICITLY mentioned. Do NOT guess or infer.
+3. <hr>
 
-1. **Experience Requirements**:
-   - Look for phrases like: "5+ years", "3-5 years", "minimum 2 years", "8+ years experience", "fresher", "0-2 years", etc.
-   - Common patterns to detect:
-     * "X-Y years" → experienceFrom: X, experienceTo: Y
-     * "X+ years" or "X or more years" → experienceFrom: X, experienceTo: X+3
-     * "Minimum X years" → experienceFrom: X, experienceTo: X+5
-     * "Up to X years" or "Below X years" → experienceFrom: 0, experienceTo: X
-     * "Fresher" or "Entry level" → experienceFrom: 0, experienceTo: 2
-   - If NO experience is mentioned anywhere, return: experienceFrom: null, experienceTo: null
+4. <h3><strong>KEY RESPONSIBILITIES :</strong></h3> 
+   - A SINGLE <ul> containing multiple <li> items based on the provided text.
 
-2. **Job Category (jobFor)**:
-   - If experienceFrom is 0 or 1 or document mentions "fresher"/"entry level" → "Fresher"
-   - If experienceFrom is 2 or more → "Experienced"
-   - If no experience data found → "Experienced" (default)
+5. <hr>
 
-3. **Total Positions**:
-   - Look for: "X positions", "X vacancies", "X openings", "hiring X", "X roles", etc.
-   - Extract the number only
-   - If NOT found, return: null (do NOT default to 1)
+6. <h3><strong>REQUIRED EXPERIENCE & TECHNICAL SKILLS :</strong></h3>
+   - A SINGLE <ul> containing:
+     - **Experience**: "<strong>Experience</strong>: [X]+ years..." (only if found).
+     - **Skills**: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency required."
+   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Full Stack Developer", "Rest Api").
 
-4. **Location**:
-   - Look for: "Location:", "Based in", "Office in", city names, "Remote", "Hybrid", etc.
-   - Extract the primary location (city/region)
-   - If multiple locations, pick the first one mentioned
-   - If "Remote" only, return: "Remote"
-   - If NOT found, return: "" (empty string)
+7. <hr> (Include only if extraction finds Good to Have data)
+
+8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+
+9. <hr> (Include only if extraction finds Aptitude data)
+
+10. <h3><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
+    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+
+**CRITICAL RULES:**
+- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO WRAPPERS**: Do not use <code>, <pre>, or any code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
+- **Extraction**: Thoroughly scan for hidden details but NEVER make up stuff that isn't there.
+- **Normalization**: Match extracted skills against: ${JSON.stringify(officialSkills)}.
+
+**METADATA EXTRACTION (STRICT):**
+Extract into [META_DATA] JSON block:
+1. experienceFrom/To (numbers), location, noticePeriod (number).
 
 **DATA EXTRACTION REQUEST:**
-After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by this JSON block:
+After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by the metadata JSON.
 
 [SKILL_DATA]
 {
-  "required": [ { "name": "...", "description": "..." } ],
+  "required": [ { "id": "matched_id", "name": "Skill Name", "description": "Professional depth description" } ],
   "goodToHave": [ ... ],
   "aptitude": [ ... ]
 }
@@ -77,15 +66,14 @@ After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_
 {
   "experienceFrom": number or null,
   "experienceTo": number or null,
-  "jobFor": "Fresher" | "Experienced",
-  "totalPositions": number or null,
-  "location": "string or empty"
+  "location": "string or empty",
+  "noticePeriod": number or null
 }
 
 **SOURCE TEXT:**
 ${extractedText}
 
-Generate the JD now.
+Generate the Best-in-Class Job Description HTML now.
 `;
 };
 
