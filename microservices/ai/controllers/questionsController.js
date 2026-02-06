@@ -40,20 +40,20 @@ const generateScreeningQuestion = async (req, res) => {
     let messageIndex = 0;
     let totalExpectedResponses = 0; // Count actual responses, not messages
 
-    data.forEach((category) => {
+    for (const category of data) {
       if (category.questions && Array.isArray(category.questions)) {
         // Separate question types into groups
         const audioVideoSubjective = [];
         const otherTypes = [];
 
-        category.questions.forEach((questionConfig) => {
+        for (const questionConfig of category.questions) {
           const type = questionConfig.type;
           if (type === "Audio" || type === "Video" || type === "Subjective") {
             audioVideoSubjective.push(questionConfig);
           } else {
             otherTypes.push(questionConfig);
           }
-        });
+        }
 
         // Group Audio/Video/Subjective together for combined generation
         if (audioVideoSubjective.length > 0) {
@@ -94,7 +94,7 @@ const generateScreeningQuestion = async (req, res) => {
         }
 
         // Handle other types (MCQ, Programming) separately
-        otherTypes.forEach((questionConfig) => {
+        for (const questionConfig of otherTypes) {
           const typeSpecificQuestionsArray =
             questionConfig.questionsArray || questionsArray || [];
           console.log(
@@ -102,16 +102,16 @@ const generateScreeningQuestion = async (req, res) => {
             typeSpecificQuestionsArray.length,
           );
 
-          // Get server-side tracked used categories for Programming questions
+          // Get server-side tracked used categories for Programming questions (Redis or in-memory)
           let usedCategories = [];
           if (questionConfig.type === "Programming" && clientId) {
-            usedCategories = categoryTracker.getAllUsedCategories(
+            usedCategories = await categoryTracker.getAllUsedCategories(
               clientId,
               category.category,
             );
             // Refresh tracking timestamp to extend expiration (auto-refreshes on get, but explicit for clarity)
             if (usedCategories.length > 0) {
-              categoryTracker.refreshTracking(clientId, category.category);
+              await categoryTracker.refreshTracking(clientId, category.category);
             }
             console.log(
               `📊 Server-side used categories for ${category.category}:`,
@@ -147,9 +147,9 @@ const generateScreeningQuestion = async (req, res) => {
 
           // Count expected responses: 1 message = 1 response
           totalExpectedResponses += 1;
-        });
+        }
       }
-    });
+    }
 
     if (producerMessages.length === 0) {
       return res.status(400).json({ message: "No questions to generate" });

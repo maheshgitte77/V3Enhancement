@@ -228,14 +228,14 @@ const ensureTopics = async () => {
                   generatedCategories = Array.from(identifiedCategoriesSet);
                 }
 
-                // Store tracked categories and refresh timestamp
+                // Store tracked categories and refresh timestamp (Redis or in-memory)
                 if (generatedCategories.length > 0) {
-                  categoryTracker.addUsedCategories(
+                  await categoryTracker.addUsedCategories(
                     clientId,
                     categoryName,
                     generatedCategories
                   );
-                  categoryTracker.refreshTracking(clientId, categoryName); // Refresh timestamp
+                  await categoryTracker.refreshTracking(clientId, categoryName); // Refresh timestamp
                   console.log(
                     `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(
                       ", "
@@ -243,7 +243,7 @@ const ensureTopics = async () => {
                   );
                 } else {
                   // Even if no categories identified, refresh tracking to extend expiration
-                  categoryTracker.refreshTracking(clientId, categoryName);
+                  await categoryTracker.refreshTracking(clientId, categoryName);
                 }
               }
             }
