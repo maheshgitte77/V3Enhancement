@@ -29,7 +29,7 @@ Analyze the following details and generate a professional Staffing Requirement d
 6. <h3><strong>TECHNICAL COMPETENCIES & EXPERTISE :</strong></h3>
    - A SINGLE <ul> containing:
      - **Experience Required**: "<strong>Experience</strong>: ${jobDetails.experience} years in ${jobDetails.domain} environment."
-     - **Location & Mode**: "<strong>Work Mode</strong>: ${jobDetails.jobStyle || "Not Specified"} (${jobDetails.jobLocation?.join(", ") || "Not Specified"})."
+     - **Location & Mode**: "<strong>Work Mode</strong>: ${jobDetails.jobStyle || "Not Specified"} (extract city names from: ${jobDetails.jobLocation?.join(", ") || "Not Specified"})."
      - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Professional description of expected competency."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Responsive Design", "Rest Api").
 

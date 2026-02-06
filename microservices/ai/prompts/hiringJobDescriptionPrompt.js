@@ -16,7 +16,7 @@ Analyze the following details and generate a professional, high-quality Job Desc
    - 2-3 engaging, descriptive paragraphs wrapped in <p> tags.
    - **Best-in-Class Rules**: 
      - Explain why a candidate should join this specific organization and team.
-     - Naturally incorporate **Domain (${jobDetails.domain})**, **Job Style (${jobDetails.jobStyle})**, and **Location (${jobDetails.jobLocation?.join(", ")})**.
+     - Naturally incorporate **Domain (${jobDetails.domain})**, **Job Style (${jobDetails.jobStyle})**, and **Location** (extract city names from: ${jobDetails.jobLocation?.join(", ")}).
      - Focus on the "Purpose"—what impact the candidate will have in their first 6-12 months.
 
 3. <hr>
@@ -58,7 +58,7 @@ Analyze the following details and generate a professional, high-quality Job Desc
 - Domain: ${jobDetails.domain}
 - Seniority: ${jobDetails.seniority?.join(", ")}
 - Experience: ${jobDetails.experience}
-- Location: ${jobDetails.jobLocation?.join(", ")}
+- Location: ${jobDetails.jobLocation?.join(", ")} (if format is "City, State, Country", extract just the city and country)
 - Job Style: ${jobDetails.jobStyle}
 - Notice Period: ${jobDetails.noticePeriod}
 - Required Skills: ${jobDetails.requiredSkill.join(", ")}

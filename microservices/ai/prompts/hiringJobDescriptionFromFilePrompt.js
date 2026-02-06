@@ -30,7 +30,7 @@ Analyze the provided source text and generate a professional, high-quality Job D
    - A SINGLE <ul> containing:
      - **Experience**: "<strong>Experience</strong>: [X]+ years..." (only if found).
      - **Skills**: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency required."
-   - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Full Stack Developer", "Rest Api").
+   - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
 7. <hr> (Include only if extraction finds Good to Have data)
 
@@ -42,22 +42,26 @@ Analyze the provided source text and generate a professional, high-quality Job D
 10. <h3><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
     - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
-**CRITICAL RULES:**
-- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
-- **NO WRAPPERS**: Do not use <code>, <pre>, or any code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
-- **Extraction**: Thoroughly scan for hidden details but NEVER make up stuff that isn't there.
-- **Normalization**: Match extracted skills against: ${JSON.stringify(officialSkills)}.
-
 **METADATA EXTRACTION (STRICT):**
 Extract into [META_DATA] JSON block:
 1. experienceFrom/To (numbers), location, noticePeriod (number).
+2. **LOCATION EXTRACTION RULES**:
+   - Extract ONLY the actual city name(s), not work mode (Remote/Hybrid/Onsite).
+   - If format is "City / Remote" or "City/Remote", extract just "City".
+   - If format is "City, Country", keep as "City, Country".
+   - If format is "Remote" only, set location to empty string "".
+   - Examples:
+     - "Pune / Remote" → "Pune"
+     - "Bangalore, India" → "Bangalore, India"
+     - "Remote" → ""
+     - "New York / Hybrid" → "New York"
 
 **DATA EXTRACTION REQUEST:**
 After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_DATA]" followed by the metadata JSON.
 
 [SKILL_DATA]
 {
-  "required": [ { "id": "matched_id", "name": "Skill Name", "description": "Professional depth description" } ],
+  "required": [ { "id": "matched_id_or_null", "name": "Extracted Skill Name", "description": "1-line description" } ],
   "goodToHave": [ ... ],
   "aptitude": [ ... ]
 }
@@ -66,14 +70,14 @@ After the HTML, add "[SKILL_DATA]" followed by the skills JSON, then add "[META_
 {
   "experienceFrom": number or null,
   "experienceTo": number or null,
-  "location": "string or empty",
+  "location": "string (city name only, without work mode keywords)",
   "noticePeriod": number or null
 }
 
 **SOURCE TEXT:**
 ${extractedText}
 
-Generate the Best-in-Class Job Description HTML now.
+Generate the Best-in-Class Job Description HTML and JSON data now.
 `;
 };
 

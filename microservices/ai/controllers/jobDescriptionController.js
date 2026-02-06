@@ -15,38 +15,9 @@ const toTitleCase = (str) => {
     .join(" ");
 };
 
-// Robust retry mechanism for AI generation (handles 429 Too Many Requests)
-const generateWithRetry = async (prompt, maxRetries = 3) => {
-  let lastError;
-  for (let i = 0; i <= maxRetries; i++) {
-    try {
-      if (i > 0) {
-        const delay = Math.pow(2, i - 1) * 1000;
-        console.log(`⏳ Retry attempt ${i}/${maxRetries} after ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-      return await model.generateContent(prompt);
-    } catch (error) {
-      lastError = error;
-      if (
-        error.status === 429 ||
-        (error.message && error.message.includes("429"))
-      ) {
-        console.warn(`⚠️ AI Rate Limit (429) hit at attempt ${i + 1}`);
-        continue;
-      }
-      throw error; // If it's not a 429, fail immediately
-    }
-  }
-  throw lastError;
-};
-
 // Configure multer to handle file uploads
 const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
-});
+const upload = multer({ storage });
 
 const generateJobDescription = async (req, res) => {
   try {
@@ -82,7 +53,7 @@ const generateJobDescription = async (req, res) => {
     );
     const prompt = promptGenerator(jobDetails, officialSkills);
 
-    const result = await generateWithRetry(prompt);
+    const result = await model.generateContent(prompt);
     const fullText =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
@@ -159,7 +130,7 @@ Sections:
 **Details**: ${JSON.stringify(jobDetails)}
 `;
 
-    const result = await generateWithRetry(prompt);
+    const result = await model.generateContent(prompt);
     const jobDescription =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
@@ -199,7 +170,7 @@ const tableSkills = [
 Ensure **no duplication** from the given skills. Only extract meaningful and job-relevant skills.
     `;
 
-    const result = await generateWithRetry(prompt);
+    const result = await model.generateContent(prompt);
     const aiResponse =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
     const usageMetadata = result.response?.usageMetadata || {};
@@ -317,17 +288,20 @@ const generateJobDescriptionFormFile = async (req, res) => {
       );
       const prompt = promptGenerator(extractedText, jobRole, officialSkills);
 
-      const result = await generateWithRetry(prompt);
+      const result = await model.generateContent(prompt);
       const fullText =
         result.response.candidates[0]?.content?.parts[0]?.text || "";
 
-      // Split text from data blocks
-      const skillParts = fullText.split("[SKILL_DATA]");
-      const metaParts = (skillParts[1] || "").split("[META_DATA]");
+      console.log("--- AI FULL RESPONSE START ---");
+      console.log(fullText);
+      console.log("--- AI FULL RESPONSE END ---");
 
-      let formattedText = skillParts[0].replace(/```html|```/gi, "").trim();
+      // Robust extraction by splitting
+      const parts = fullText.split(/\[SKILL_DATA\]/i);
+      const htmlContent = parts[0] || "";
+      let formattedText = htmlContent.replace(/```html|```/gi, "").trim();
 
-      // Remove trailing <hr> tags to prevent orphaned dividers
+      // Remove trailing <hr> tags
       formattedText = formattedText
         .replace(/(<hr\s*\/?>[\s\r\n]*)+$/gi, "")
         .trim();
@@ -335,21 +309,38 @@ const generateJobDescriptionFormFile = async (req, res) => {
       let rawSkillData = null;
       let metaData = null;
 
-      if (metaParts[0]) {
-        try {
-          const jsonStr = metaParts[0].replace(/```json|```/gi, "").trim();
-          rawSkillData = JSON.parse(jsonStr);
-        } catch (e) {
-          console.error("Failed to parse skill data JSON:", e);
-        }
-      }
+      if (parts[1]) {
+        const skillAndMeta = parts[1].split(/\[META_DATA\]/i);
+        const skillJsonStr = skillAndMeta[0]
+          .replace(/```json|```/gi, "")
+          .trim();
+        const metaJsonStr = (skillAndMeta[1] || "")
+          .replace(/```json|```/gi, "")
+          .trim();
 
-      if (metaParts[1]) {
-        try {
-          const jsonStr = metaParts[1].replace(/```json|```/gi, "").trim();
-          metaData = JSON.parse(jsonStr);
-        } catch (e) {
-          console.error("Failed to parse meta data JSON:", e);
+        if (skillJsonStr) {
+          try {
+            rawSkillData = JSON.parse(skillJsonStr);
+          } catch (e) {
+            console.error("❌ Failed to parse skill data JSON:", e.message);
+            // Try to fix common AI JSON errors (like trailing commas)
+            try {
+              const patchedJson = skillJsonStr
+                .replace(/,[\s\r\n]*}/g, "}")
+                .replace(/,[\s\r\n]*\]/g, "]");
+              rawSkillData = JSON.parse(patchedJson);
+            } catch (e2) {
+              console.error("❌ Even patched JSON failed:", e2.message);
+            }
+          }
+        }
+
+        if (metaJsonStr) {
+          try {
+            metaData = JSON.parse(metaJsonStr);
+          } catch (e) {
+            console.error("❌ Failed to parse meta data JSON:", e.message);
+          }
         }
       }
 
