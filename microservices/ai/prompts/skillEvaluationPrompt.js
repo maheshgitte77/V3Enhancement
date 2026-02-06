@@ -31,7 +31,7 @@ Analyze the following details and generate a professional Skill Evaluation & Com
      - **Experience Benchmark**: "<strong>Experience Base</strong>: ${jobDetails.experience} years in ${jobDetails.domain}."
      - **Location Context**: "<strong>Current Work Mode</strong>: ${jobDetails.jobStyle || "Not Specified"} (${jobDetails.jobLocation?.join(", ") || "Not Specified"})."
      - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Description of proficiency standards."
-   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Full Stack Developer", "Rest Api").
+   - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Full Stack Developer", "Rest Api").
 
 7. <hr> (Include only if Advanced Skills exist)
 

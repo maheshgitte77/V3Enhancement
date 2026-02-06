@@ -33,7 +33,7 @@ Analyze the provided source text and generate a precise Skill Evaluation & Compe
      - **Experience Benchmark**: "<strong>Experience Base</strong>: [X]+ years..." (only if found).
      - **Assignment Context**: "<strong>Location & Mode</strong>: [Location/Mode]" (only if found).
      - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency being evaluated."
-   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Full Stack Developer", "Rest Api").
+   - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Full Stack Developer", "Rest Api").
 
 7. <hr> (Include only if extraction finds Good to Have data)
 

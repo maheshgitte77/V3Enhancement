@@ -5,9 +5,48 @@ const { calculateProcessingCost } = require("../utils/costCalculator");
 const CreditServiceClient = require("../utils/creditServiceClient");
 const { getPromptGenerator } = require("../prompts");
 
+// Utility to convert string to Title Case (e.g., "react native" -> "React Native")
+const toTitleCase = (str) => {
+  if (!str) return str;
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
+// Robust retry mechanism for AI generation (handles 429 Too Many Requests)
+const generateWithRetry = async (prompt, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      if (i > 0) {
+        const delay = Math.pow(2, i - 1) * 1000;
+        console.log(`⏳ Retry attempt ${i}/${maxRetries} after ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      return await model.generateContent(prompt);
+    } catch (error) {
+      lastError = error;
+      if (
+        error.status === 429 ||
+        (error.message && error.message.includes("429"))
+      ) {
+        console.warn(`⚠️ AI Rate Limit (429) hit at attempt ${i + 1}`);
+        continue;
+      }
+      throw error; // If it's not a 429, fail immediately
+    }
+  }
+  throw lastError;
+};
+
 // Configure multer to handle file uploads
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
+});
 
 const generateJobDescription = async (req, res) => {
   try {
@@ -43,7 +82,7 @@ const generateJobDescription = async (req, res) => {
     );
     const prompt = promptGenerator(jobDetails, officialSkills);
 
-    const result = await model.generateContent(prompt);
+    const result = await generateWithRetry(prompt);
     const fullText =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
@@ -120,7 +159,7 @@ Sections:
 **Details**: ${JSON.stringify(jobDetails)}
 `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateWithRetry(prompt);
     const jobDescription =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
 
@@ -160,7 +199,7 @@ const tableSkills = [
 Ensure **no duplication** from the given skills. Only extract meaningful and job-relevant skills.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateWithRetry(prompt);
     const aiResponse =
       result.response.candidates[0]?.content?.parts[0]?.text || "";
     const usageMetadata = result.response?.usageMetadata || {};
@@ -228,7 +267,25 @@ const generateJobDescriptionFormFile = async (req, res) => {
 
     const withAi = req.body.withAi;
     const dataBuffer = req.file.buffer;
-    const pdfData = await pdfParse(dataBuffer);
+
+    // Debug: Check if buffer starts with %PDF-
+    const header = dataBuffer.slice(0, 5).toString();
+    console.log(
+      `📄 File header: "${header}", size: ${dataBuffer.length} bytes`,
+    );
+
+    let pdfData;
+    try {
+      pdfData = await pdfParse(dataBuffer);
+    } catch (parseError) {
+      console.error("❌ PDF Parsing Failed (Raw):", parseError);
+      return res.status(400).json({
+        error:
+          "Malformed PDF file (bad XRef entry). Please try a different PDF or copy-paste the text manually.",
+        details: parseError.message,
+      });
+    }
+
     const extractedText = pdfData.text.trim();
 
     if (withAi) {
@@ -260,7 +317,7 @@ const generateJobDescriptionFormFile = async (req, res) => {
       );
       const prompt = promptGenerator(extractedText, jobRole, officialSkills);
 
-      const result = await model.generateContent(prompt);
+      const result = await generateWithRetry(prompt);
       const fullText =
         result.response.candidates[0]?.content?.parts[0]?.text || "";
 
@@ -320,10 +377,10 @@ const generateJobDescriptionFormFile = async (req, res) => {
               if (match) {
                 skillData[category].push({
                   id: match.id || match._id,
-                  name: match.name,
+                  name: toTitleCase(match.name), // Enforce Title Case
                   description:
                     skill.description ||
-                    `${match.name}: Professional proficiency.`,
+                    `${toTitleCase(match.name)}: Professional proficiency.`,
                 });
                 seenSkillNames.add(normalizedName);
                 seenSkillNames.add(
@@ -332,10 +389,10 @@ const generateJobDescriptionFormFile = async (req, res) => {
               } else {
                 skillData[category].push({
                   id: null,
-                  name: skill.name,
+                  name: toTitleCase(skill.name), // Enforce Title Case
                   description:
                     skill.description ||
-                    `${skill.name}: Professional proficiency.`,
+                    `${toTitleCase(skill.name)}: Professional proficiency.`,
                 });
                 seenSkillNames.add(normalizedName);
               }

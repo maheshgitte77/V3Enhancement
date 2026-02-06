@@ -33,17 +33,19 @@ Analyze the following details and generate a professional, high-quality Job Desc
       - If Experience + Skills: <h3><strong>REQUIRED EXPERIENCE & TECHNICAL SKILLS :</strong></h3>
       - If Skills Only: <h3><strong>TECHNICAL SKILLS & COMPETENCIES :</strong></h3>
     - **Skills**: A SINGLE <ul> in format: "<strong>Skill Name (Title Case)</strong>: Professional description."
-    - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "React Native", "Rest Api").
+    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word). 
+      - Correct: **React Native**, **Rest Api**, **Java Script**.
+      - Incorrect: REACT NATIVE, react native.
 
 7. <hr> (Include only if Good to Have data exists)
 
 8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format. (Apply **Title Case** to skill names).
 
 9. <hr> (Include only if Aptitude data exists)
 
 10. <h3><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
-    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format. (Apply **Title Case** to skill names).
 
 **CRITICAL RULES:**
 - **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.

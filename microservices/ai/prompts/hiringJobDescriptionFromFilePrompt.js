@@ -30,7 +30,7 @@ Analyze the provided source text and generate a professional, high-quality Job D
    - A SINGLE <ul> containing:
      - **Experience**: "<strong>Experience</strong>: [X]+ years..." (only if found).
      - **Skills**: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency required."
-   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Full Stack Developer", "Rest Api").
+   - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Full Stack Developer", "Rest Api").
 
 7. <hr> (Include only if extraction finds Good to Have data)
 

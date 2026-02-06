@@ -31,7 +31,7 @@ Analyze the following details and generate a professional Staffing Requirement d
      - **Experience Required**: "<strong>Experience</strong>: ${jobDetails.experience} years in ${jobDetails.domain} environment."
      - **Location & Mode**: "<strong>Work Mode</strong>: ${jobDetails.jobStyle || "Not Specified"} (${jobDetails.jobLocation?.join(", ") || "Not Specified"})."
      - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Professional description of expected competency."
-   - **CRITICAL**: Use real skill names in **Title Case** (Capitalize the first letter of every word, e.g., "Responsive Design", "Rest Api").
+   - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Responsive Design", "Rest Api").
 
 7. <hr> (Include only if Good to Have data exists)
 
