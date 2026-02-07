@@ -7,6 +7,16 @@ const {
   PROGRAMMING_LOGIC_CATEGORIES,
 } = require("../utils/programmingCategories");
 const CreditServiceClient = require("../utils/creditServiceClient");
+const categoryTracker = require("../utils/categoryTracker");
+const {
+  normalizeProgrammingContext,
+  validateTitlesAgainstExisting,
+  truncateToWords,
+  conceptSignatureFromTitle,
+  tokenSet: tokenSetFromModule,
+  jaccard: jaccardFromModule,
+  TITLE_SIMILARITY_THRESHOLD: BODY_SIMILARITY_THRESHOLD,
+} = require("../utils/programmingDuplicateAvoidance");
 
 require("dotenv").config();
 
@@ -332,7 +342,12 @@ const generateProgrammingTitlesPrompt = (
     bannedTitles = [],
     bannedLogicCategories = [],
     requiredLogicCategories = [],
+    seedPlan = [],
   } = options;
+
+  // Single source of truth: questionsArray (items with deleted: true = user removed)
+  const { existingForPrompt, deletedForPrompt } =
+    normalizeProgrammingContext(questionsArray);
 
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
   let usedCategories =
@@ -343,13 +358,15 @@ const generateProgrammingTitlesPrompt = (
   const usedCategoryIndices = new Set();
 
   // If no server-side categories, try to parse from questionsArray (fallback)
-  if (
-    usedCategories.length === 0 &&
-    Array.isArray(questionsArray) &&
-    questionsArray.length > 0
-  ) {
+  const titleStringsForCategoryFallback =
+    existingForPrompt.length > 0
+      ? existingForPrompt.map((p) => p.title)
+      : Array.isArray(questionsArray)
+        ? questionsArray.map((q) => (typeof q === "string" ? q : (q && q.questionTitle) || (q && q.title) || String(q)))
+        : [];
+  if (usedCategories.length === 0 && titleStringsForCategoryFallback.length > 0) {
     // Enhanced matching: check question title against all category examples and keywords
-    questionsArray.forEach((q) => {
+    titleStringsForCategoryFallback.forEach((q) => {
       const questionLower = String(q).toLowerCase();
 
       PROGRAMMING_LOGIC_CATEGORIES.forEach((cat, index) => {
@@ -424,6 +441,8 @@ const generateProgrammingTitlesPrompt = (
     }
   }
 
+  const hasUserPrompt = typeof promptText === "string" && promptText.length > 0;
+
   let prompt = `Generate EXACTLY ${number} unique programming problem titles (one-line titles only) for the following skill:
 skillName: "${skillName}"
 skillType: "${skillType}"
@@ -433,6 +452,20 @@ maxTime: ${maxTime} minutes
 - Job Role: ${jobRole}
 - Job Seniority Level: ${proposedSeniority}
 - Job Description: ${JD}
+${hasUserPrompt
+      ? `
+
+### 🎯 USER REQUEST (HIGHEST PRIORITY - STRICT - OVERRIDES ALL OTHER TITLE RULES):
+The user has specified exactly what they want. Generate titles ONLY for this topic. IGNORE any requirement to "distribute across different logic categories" or "use unused categories"—when the user gives a prompt, ALL titles must be about the user's topic only.
+**User prompt:** "${promptText.replace(/"/g, '\\"')}"
+
+- Generate titles that describe programming problems STRICTLY and ONLY aligned with this request.
+- Examples: "queues (FIFO) in array" → ONLY queue/FIFO problems (e.g. implement queue using array, enqueue/dequeue, circular queue, FIFO simulation). Do NOT generate "Print numbers 1 to N", "skip multiples of 5", "count vowels", "palindrome", "find max", or any unrelated topic.
+- "Fibonacci" → ONLY Fibonacci-related titles. "prime number" → ONLY prime-related. "stack" → ONLY stack-related. Do NOT mix in other concepts.
+- Use the logic category prefix that fits the user's topic (e.g. [Queue/Deque Logic] or [Array Logic] for queues/FIFO; [Number-Based Logic] for Fibonacci/prime; [Stack-Based Logic] for stack).
+- FORBIDDEN when user prompt is set: generating any title that is not clearly about the user's stated concept.
+`
+      : ""}
 
 ### 🔴 CRITICAL & IMPORTANT RULES (MUST FOLLOW STRICTLY):
 
@@ -505,7 +538,18 @@ ${isScenarioBased
    - Ensure each title uses a DIFFERENT logic approach/algorithm category`}
 
 Ensure all generated questions strictly follow the above constraints.
+${hasUserPrompt
+      ? `
+**PROMPT-ONLY MODE (no categories):** The user provided a specific prompt. Do NOT use or reference any logic category list. Generate EXACTLY ${number} unique one-line titles that are ALL variations of the user's topic only. Each title = one distinct problem under the same theme (e.g. for "queues (FIFO) in array": "Implement queue using circular array", "Enqueue/Dequeue with fixed-size array", "FIFO simulation with array"). Use a short topic prefix in brackets if helpful (e.g. [Queue], [Array]). Do NOT generate titles about unrelated topics (no "print 1 to N", "skip multiples of 5", "palindrome", etc.).**
 
+Each title must:
+- Be a single, concise line (no line breaks)
+- Describe a distinct programming problem under the user's topic only
+- Be suitable for coding interview questions
+- Avoid mentioning specific implementation details (focus on problem goal)
+- NOT duplicate any previous question in this assessment
+`
+      : `
 CRITICAL UNIQUENESS REQUIREMENTS - ASSESSMENT-WIDE:
 - This is part of an ONGOING ASSESSMENT - previous questions have already been generated
 - Each title must represent a DIFFERENT logic category/type from the following ${totalCategories} categories:
@@ -526,15 +570,17 @@ Each title must:
 - Avoid mentioning specific implementation details (focus on problem goal)
 - Represent a unique logic category from the list above
 - NOT duplicate any logic approach from previous questions in this assessment
+`}
 `;
 
-  if (usedCategories.length > 0) {
-    if (isCategoryExhausted) {
-      // Category rotation mode: allow reuse but ensure different problem variations
-      prompt += `
+  if (!hasUserPrompt) {
+    if (usedCategories.length > 0) {
+      if (isCategoryExhausted) {
+        // Category rotation mode: allow reuse but ensure different problem variations
+        prompt += `
 🔄 CATEGORY ROTATION MODE (${usedCount}/${totalCategories} categories used - ${usagePercentage.toFixed(
-        1,
-      )}%):
+          1,
+        )}%):
 - Most categories have been used in this assessment
 - You may REUSE categories, but MUST generate COMPLETELY DIFFERENT problem variations
 - Each reused category must have a UNIQUE problem statement, constraints, and approach
@@ -543,58 +589,59 @@ Each title must:
 
 PREVIOUSLY USED CATEGORIES (${usedCount}):
 ${usedCategories
-          .slice(0, 20)
-          .map((cat) => `- ${cat}`)
-          .join("\n")}${usedCategories.length > 20
-            ? `\n... and ${usedCategories.length - 20} more`
-            : ""
-        }
+            .slice(0, 20)
+            .map((cat) => `- ${cat}`)
+            .join("\n")}${usedCategories.length > 20
+              ? `\n... and ${usedCategories.length - 20} more`
+              : ""
+          }
 
 UNUSED CATEGORIES (${unusedCategories.length
-        } remaining - prioritize these first):
+          } remaining - prioritize these first):
 ${unusedCategories.length > 0
-          ? unusedCategories
-            .slice(0, Math.min(number, unusedCategories.length))
-            .map((cat) => `- ${cat.name}`)
-            .join("\n")
-          : "None - all categories have been used"
-        }
+            ? unusedCategories
+              .slice(0, Math.min(number, unusedCategories.length))
+              .map((cat) => `- ${cat.name}`)
+              .join("\n")
+            : "None - all categories have been used"
+          }
 
 STRATEGY:
 1. First, use any remaining unused categories (${unusedCategories.length
-        } available)
+          } available)
 2. If more questions needed, reuse categories but with COMPLETELY DIFFERENT problem variations
 3. Ensure each question has unique logic, constraints, and problem statement
 `;
-    } else {
-      // Normal mode: avoid used categories
-      prompt += `
+      } else {
+        // Normal mode: avoid used categories
+        prompt += `
 ⚠️ PREVIOUSLY USED LOGIC CATEGORIES IN THIS ASSESSMENT (${usedCount}/${totalCategories} - ${usagePercentage.toFixed(
-        1,
-      )}% used):
+          1,
+        )}% used):
 ${usedCategories.map((cat) => `- ${cat}`).join("\n")}
 
 PRIORITY: Use categories NOT in the above list. Only use previously used categories if you've exhausted all ${totalCategories} categories.
 `;
-    }
-  } else {
-    prompt += `
+      }
+    } else {
+      prompt += `
 ✅ No previous questions detected - you can use any of the ${totalCategories} logic categories.
 `;
-  }
+    }
 
-  if (
-    !isCategoryExhausted &&
-    unusedCategories.length > 0 &&
-    unusedCategories.length < totalCategories
-  ) {
-    prompt += `
+    if (
+      !isCategoryExhausted &&
+      unusedCategories.length > 0 &&
+      unusedCategories.length < totalCategories
+    ) {
+      prompt += `
 📋 RECOMMENDED UNUSED CATEGORIES (prioritize these):
 ${unusedCategories
-        .slice(0, Math.min(number, unusedCategories.length))
-        .map((cat) => `- ${cat.name}`)
-        .join("\n")}
+          .slice(0, Math.min(number, unusedCategories.length))
+          .map((cat) => `- ${cat.name}`)
+          .join("\n")}
 `;
+    }
   }
 
   if (tailorMade === "true") {
@@ -604,15 +651,32 @@ Tailor titles to the candidate context:
 `;
   }
 
-  if (Array.isArray(questionsArray) && questionsArray.length > 0) {
+  if (existingForPrompt.length > 0) {
     prompt += `
-Previously Asked Questions (ensure new titles are unique and use different logic):
-${questionsArray.map((q) => `- ${q}`).join("\n")}
+**Questions already in this screening (do NOT duplicate - use different title and logic):**
+${existingForPrompt
+        .map(
+          (p) =>
+            `- Title: ${p.title}${p.description ? `\n  Short description (up to 100 words): ${p.description}` : ""}`,
+        )
+        .join("\n")}
+`;
+  }
+  if (deletedForPrompt.length > 0) {
+    prompt += `
+**Questions the user removed (generate DIFFERENT logic and topics - do not reuse these):**
+${deletedForPrompt
+        .map(
+          (p) =>
+            `- Title: ${p.title}${p.description ? `\n  Short description: ${p.description}` : ""}`,
+        )
+        .join("\n")}
 `;
   }
 
-  if (requiredLogicCategories.length > 0) {
-    prompt += `
+  if (!hasUserPrompt) {
+    if (requiredLogicCategories.length > 0) {
+      prompt += `
 ✅ REQUIRED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
 ${requiredLogicCategories.map((cat) => `- ${cat}`).join("\n")}
 
@@ -621,18 +685,40 @@ ${requiredLogicCategories.map((cat) => `- ${cat}`).join("\n")}
 - The category prefix MUST match one of the required categories above
 - The problem description (text after the bracket) must be UNIQUE across all titles - do NOT use the same problem (e.g. find min, find max, palindrome, sum of array, reverse string) for more than one title
 `;
-  } else if (unusedCategories.length > 0) {
-    prompt += `
+    } else if (unusedCategories.length > 0) {
+      prompt += `
 ✅ ALLOWED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
 ${unusedCategories
-        .slice(0, Math.min(number, unusedCategories.length))
-        .map((cat) => `- ${cat.name}`)
-        .join("\n")}
+          .slice(0, Math.min(number, unusedCategories.length))
+          .map((cat) => `- ${cat.name}`)
+          .join("\n")}
 
 🧩 TITLE FORMAT RULE (MANDATORY):
 - Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
 - The category prefix MUST match one of the allowed categories above
 - The problem description (text after the bracket) must be UNIQUE across all titles - do NOT use the same problem (e.g. find min, find max, palindrome, sum of array, reverse string) for more than one title
+`;
+    }
+  }
+
+  if (Array.isArray(seedPlan) && seedPlan.length > 0) {
+    prompt += `
+🧩 SEED PLAN (MANDATORY - ensures example rotation and uniqueness):
+- You MUST generate EXACTLY ${number} titles, ONE per seed item below, in the SAME ORDER.
+- Each title MUST start with the exact logic category in square brackets from the seed item.
+- The core concept MUST match the seed example (do NOT switch to a different concept like palindrome/min/max unless the seed example is about that).
+- Do NOT repeat the same concept across seed items.
+
+Seed items:
+${seedPlan
+        .map(
+          (s, idx) =>
+            `${idx + 1}. [${s.category}] Seed example: "${s.example}"` +
+            (s.keywords && s.keywords.length > 0
+              ? ` | Keywords: ${s.keywords.join(", ")}`
+              : ""),
+        )
+        .join("\n")}
 `;
   }
 
@@ -735,11 +821,16 @@ const extractCategoryPrefix = (title) => {
   return match ? match[1].trim() : null;
 };
 
-/** Normalized problem body (title without [Category] prefix) for uniqueness - same problem under different categories is still duplicate */
-const problemBodySignature = (title) => {
+/** Get raw problem body text (title without [Category] prefix) for similarity checks */
+const getProblemBodyText = (title) => {
   const t = String(title).trim();
   const prefixMatch = t.match(/^\s*\[[^\]]+\]\s*/);
-  const body = prefixMatch ? t.slice(prefixMatch[0].length).trim() : t;
+  return prefixMatch ? t.slice(prefixMatch[0].length).trim() : t;
+};
+
+/** Normalized problem body (title without [Category] prefix) for uniqueness - same problem under different categories is still duplicate */
+const problemBodySignature = (title) => {
+  const body = getProblemBodyText(title);
   return normalizeTitle(body)
     .split(" ")
     .filter((token) => token && !TITLE_STOPWORDS.has(token))
@@ -788,6 +879,10 @@ const validateProgrammingTitles = ({
   isCategoryExhausted,
   usedCategories,
   requiredLogicCategories,
+  existingFingerprints = [],
+  deletedFingerprints = [],
+  usedConcepts = [],
+  promptTextOnly = false,
 }) => {
   const errors = [];
   const duplicateLogicCategories = [];
@@ -815,27 +910,77 @@ const validateProgrammingTitles = ({
     );
   }
 
+  // Pairwise similarity: block near-duplicate logic (e.g. "Determine if palindrome" vs "Check if palindrome")
+  if (typeof tokenSetFromModule === "function" && typeof jaccardFromModule === "function") {
+    const threshold = typeof BODY_SIMILARITY_THRESHOLD === "number" ? BODY_SIMILARITY_THRESHOLD : 0.65;
+    for (let i = 0; i < titles.length; i++) {
+      for (let j = i + 1; j < titles.length; j++) {
+        const bodyI = getProblemBodyText(titles[i]);
+        const bodyJ = getProblemBodyText(titles[j]);
+        const setI = tokenSetFromModule(bodyI);
+        const setJ = tokenSetFromModule(bodyJ);
+        const sim = jaccardFromModule(setI, setJ);
+        if (sim >= threshold) {
+          errors.push(
+            `Same or very similar problem logic: "${titles[i]}" and "${titles[j]}" (e.g. only one palindrome/ find-max style per batch)`,
+          );
+        }
+      }
+    }
+  }
+
+  // When promptTextOnly: category prefix is optional; no enforced [Category] or allowed-list check
   if (
-    Array.isArray(requiredLogicCategories) &&
-    requiredLogicCategories.length > 0
+    !promptTextOnly &&
+    Array.isArray(titles) &&
+    titles.length > 0
   ) {
-    const missingPrefix = titles.filter(
-      (title) => !extractCategoryPrefix(title),
-    );
+    const missingPrefix = titles.filter((title) => !extractCategoryPrefix(title));
     if (missingPrefix.length > 0) {
-      errors.push("Missing logic category prefix in titles");
+      errors.push("Missing logic category prefix in titles (each title must start with [Category])");
     }
   }
 
   if (Array.isArray(questionsArray) && questionsArray.length > 0) {
     const previousTitleSet = new Set(
-      questionsArray.map((q) => normalizeTitle(q)),
+      questionsArray.map((q) =>
+        normalizeTitle(typeof q === "string" ? q : (q && q.questionTitle) || (q && q.title) || ""),
+      ),
     );
     const overlaps = titles.filter((t) =>
       previousTitleSet.has(normalizeTitle(t)),
     );
     if (overlaps.length > 0) {
       errors.push(`Titles overlap with previous questions: ${overlaps.join(", ")}`);
+    }
+  }
+
+  // Block previously used concepts (signature-based). This catches duplicates even if wording changes.
+  if (Array.isArray(usedConcepts) && usedConcepts.length > 0) {
+    const usedConceptSet = new Set(usedConcepts.filter(Boolean));
+    const conceptOverlaps = titles.filter((t) =>
+      usedConceptSet.has(conceptSignatureFromTitle(t)),
+    );
+    if (conceptOverlaps.length > 0) {
+      errors.push(
+        `Titles duplicate previously used programming concepts: ${conceptOverlaps.join(", ")}`,
+      );
+    }
+  }
+
+  // Duplicate avoidance: title + description similarity (solid protection against same/similar logic)
+  if (
+    (existingFingerprints.length > 0 || deletedFingerprints.length > 0) &&
+    Array.isArray(titles) &&
+    titles.length > 0
+  ) {
+    const dupCheck = validateTitlesAgainstExisting(
+      titles,
+      existingFingerprints,
+      deletedFingerprints,
+    );
+    if (!dupCheck.valid) {
+      dupCheck.errors.forEach((e) => errors.push(e));
     }
   }
 
@@ -851,7 +996,12 @@ const validateProgrammingTitles = ({
     categoriesToValidate = inferred.filter(Boolean);
   }
 
-  if (categoriesToValidate.length > 0) {
+  const validCategoryNamesSet = new Set(
+    PROGRAMMING_LOGIC_CATEGORIES.map((c) => c.name),
+  );
+
+  // When promptTextOnly: skip category prefix allowed-list, duplicate-category, and used-category checks
+  if (!promptTextOnly && categoriesToValidate.length > 0) {
     const categoryCounts = categoriesToValidate.reduce((acc, cat) => {
       if (!cat) {
         return acc;
@@ -868,31 +1018,18 @@ const validateProgrammingTitles = ({
       duplicateLogicCategories.push(...duplicates);
     }
 
-    if (
-      Array.isArray(requiredLogicCategories) &&
-      requiredLogicCategories.length > 0
-    ) {
-      const missingRequired = requiredLogicCategories.filter(
-        (reqCat) => !categorySet.has(reqCat),
+    // Only reject prefixes that are not in the master category list (AI made up a category)
+    const invalidPrefixes = titles
+      .map((title) => extractCategoryPrefix(title))
+      .filter(
+        (prefix) => prefix && !validCategoryNamesSet.has(prefix),
       );
-      if (missingRequired.length > 0) {
-        errors.push(
-          `Missing required logic categories: ${missingRequired.join(", ")}`,
-        );
-      }
-
-      const invalidPrefixes = titles
-        .map((title) => extractCategoryPrefix(title))
-        .filter(
-          (prefix) => prefix && !requiredLogicCategories.includes(prefix),
-        );
-      if (invalidPrefixes.length > 0) {
-        errors.push(
-          `Invalid category prefixes in titles: ${[
-            ...new Set(invalidPrefixes),
-          ].join(", ")}`,
-        );
-      }
+    if (invalidPrefixes.length > 0) {
+      errors.push(
+        `Invalid category prefixes in titles (not in allowed list): ${[
+          ...new Set(invalidPrefixes),
+        ].join(", ")}`,
+      );
     }
 
     if (
@@ -1317,10 +1454,21 @@ Ensure questions are tailored to the candidate's specific skills, projects, and 
 `;
   }
 
-  // Add previously asked questions if any
+  // Add previously asked questions if any (support title + short description for Programming)
   if (Array.isArray(questionsArray) && questionsArray.length > 0) {
-    prompt += `\nPreviously Asked Questions (ensure uniqueness):
-${questionsArray.map((q) => `- ${q}`).join("\n")}
+    const lines = questionsArray.map((q) => {
+      if (typeof q === "string") return `- ${q}`;
+      const title = (q && q.questionTitle) || (q && q.title) || "";
+      const desc =
+        (q && q.questionSummary) ||
+        (q && q.question && truncateToWords(q.question, 100)) ||
+        "";
+      return desc
+        ? `- Title: ${title}\n  Short description (up to 100 words): ${desc}`
+        : `- ${title}`;
+    });
+    prompt += `\nPreviously Asked Questions (ensure uniqueness - do not duplicate logic):
+${lines.join("\n")}
 `;
   }
 
@@ -1456,10 +1604,17 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
       // Extract logic categories from titles if available (from title generation)
       const totalCategories = PROGRAMMING_LOGIC_CATEGORIES.length;
 
-      // Check if we're in category rotation mode (need to get used categories from context)
-      // This will be handled by the title generation, but we should still emphasize uniqueness
+      // When promptText is set: no categories; content depends ONLY on user prompt. Titles are labels only.
+      const hasUserPromptForContent = typeof promptText === "string" && promptText.length > 0;
       let logicCategoryInfo = "";
-      if (Array.isArray(titles) && titles.length > 0) {
+      if (hasUserPromptForContent && Array.isArray(titles) && titles.length > 0) {
+        logicCategoryInfo = `
+**PROMPT-ONLY MODE (no categories):** Do NOT use logic categories. The problem content (description, input/output, constraints, test cases) for EVERY question must be based ONLY on the user's prompt (see USER PROMPT section below). Use the titles below ONLY as the questionTitle label for each question; do NOT derive the problem from the title—derive it from the user's prompt. Each question = one distinct variation of the user's topic (e.g. for "queues (FIFO) in array": implement queue with array, circular queue, enqueue/dequeue simulation, etc.).
+
+**TITLES (use verbatim as questionTitle only):**
+${titles.map((t, idx) => `${idx + 1}. ${t}`).join("\n")}
+`;
+      } else if (Array.isArray(titles) && titles.length > 0) {
         logicCategoryInfo = `
 **LOGIC CATEGORY REQUIREMENTS** (for provided titles):
 - Each title represents a specific logic category from ${totalCategories} available types
@@ -1497,7 +1652,11 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
 `;
         }
 
-        // Add category list for reference (abbreviated if too many)
+        logicCategoryInfo += `
+**MANDATORY TITLES (use verbatim as questionTitle; implement the exact problem each title describes):**
+${titles.map((t, idx) => `${idx + 1}. ${t}`).join("\n")}
+- Output question i with "questionTitle" exactly as title i above, and the problem description must implement that exact problem (e.g. title "Find the intersection of two sorted arrays" → problem about intersection of two sorted arrays, not "find max element").
+`;
         if (titles.length <= 5) {
           logicCategoryInfo += `
 Available logic categories (${totalCategories} total):
@@ -1507,8 +1666,11 @@ ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 20)
 ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 `;
         }
+      } else if (hasUserPromptForContent) {
+        logicCategoryInfo = `
+**PROMPT-ONLY MODE (no categories):** Generate questions based ONLY on the user's prompt below. Do NOT use or distribute across logic categories. Each question must be a distinct variation of the user's topic only.
+`;
       } else {
-        // When generating without pre-generated titles, ensure logic diversity
         logicCategoryInfo = `
 **LOGIC CATEGORY DIVERSITY REQUIREMENT**:
 - Generate questions that cover DIFFERENT logic categories from ${totalCategories} available types
@@ -1526,10 +1688,14 @@ ${totalCategories > 25 ? `... and ${totalCategories - 25} more categories` : ""}
       }
 
       if (promptText) {
-        prompt += `\n**USER PROMPT (HIGHEST PRIORITY)**:
-${promptText}
-- Follow the user prompt strictly and treat it as the top priority for scenario, constraints, and focus.
-- If any user constraint conflicts with maxTime or feasibility, simplify while preserving the intent.
+        prompt += `\n**USER PROMPT (STRICT - HIGHEST PRIORITY - PROGRAMMING MUST MATCH THIS ONLY)**:
+The user has specified exactly what they want. Generate programming questions that implement ONLY this request.
+**User request:** "${promptText.replace(/"/g, '\\"')}"
+
+- The problem description, input/output, constraints, and test cases MUST be exclusively about the user's concept. Example: if the user asked for "queues (FIFO) in array", the problem MUST involve queue operations (enqueue/dequeue), FIFO order, or implementing a queue using an array—NOT "print numbers 1 to N", "skip multiples of 5", "count vowels", "palindrome", or any unrelated problem.
+- Do NOT substitute a different problem. If the user asked for FIFO/queues, the question must be about queues/FIFO (e.g. implement queue with array, simulate FIFO, circular queue). If the user asked for Fibonacci, the question must be about Fibonacci. Never output a problem that is off-topic.
+- If the provided title (from the list below) does not match the user's prompt, still implement the USER REQUEST concept for the problem content—the user's prompt overrides the title theme when they conflict.
+- If any detail conflicts with maxTime or feasibility, simplify while keeping the user's core topic.
 `;
       }
 
@@ -1760,13 +1926,12 @@ ${isScenarioBased
   * **IMPORTANT**: The boilerplate code must be a clean starting point where candidates write ALL solution logic themselves.
   * **IMPORTANT**: The boilerplate code does not include any solution logic or algorithm implementation.
 
-If titles are provided, you MUST:
-- Generate exactly one Programming question per title
-- Use each provided title as the "questionTitle" without changing its core meaning (minor wording tweaks are allowed)
-- Implement the logic category indicated by the title from the ${totalCategories} available categories
-- Ensure each question uses a DIFFERENT logic category/approach to maintain uniqueness across the entire assessment
-- Do not implement the same problem concept twice (e.g. two palindrome checks, two "find max", two "sum of array") - each question must be a distinct problem
-- **CRITICAL**: Adjust the complexity of the problem to match the maxTime (${maxTime} minutes) - if the title suggests a complex problem but maxTime is short, simplify it while keeping the core logic category
+If titles are provided, you MUST (NO EXCEPTIONS):
+- Generate exactly one Programming question per title, in the SAME ORDER as the list below.
+- Use each provided title VERBATIM as the "questionTitle" (copy the string exactly; do not replace with a different problem name).
+- Implement THE EXACT PROBLEM described by that title. For example: if the title is "Find the intersection of two sorted arrays", the problem description MUST be about finding the intersection of two sorted arrays—NOT "find maximum element" or "find minimum". If the title is "Determine if a number is an Armstrong number", the problem MUST be about Armstrong numbers—NOT "palindrome number". Do NOT substitute a different problem from the same category.
+- Each question's problem statement, input/output format, and test cases MUST match the title's problem (e.g. "Evaluate a postfix expression" → problem about postfix evaluation, not "Valid Parentheses").
+- **CRITICAL**: Adjust only complexity/detail to fit maxTime (${maxTime} minutes); do not change which problem you are implementing.
 ${isScenarioBased
           ? `- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
   * Create a real-world context where a ${jobRole} would encounter this problem
@@ -2001,6 +2166,7 @@ const createConsumer = async (id) => {
       let CandidateResumeData = null;
       let questionsArray = null;
       let usedCategories = null; // Server-side tracked categories for Programming
+      let usedConcepts = null; // Server-side tracked concept signatures for Programming
       let clientId = null;
       let channelId = null;
       let jobId = null;
@@ -2023,6 +2189,7 @@ const createConsumer = async (id) => {
         CandidateResumeData = parsedMessage.CandidateResumeData;
         questionsArray = parsedMessage.questionsArray;
         usedCategories = parsedMessage.usedCategories || []; // Server-side tracked categories
+        usedConcepts = parsedMessage.usedConcepts || []; // Server-side tracked concepts
         clientId = parsedMessage.clientId;
         channelId = parsedMessage.channelId;
         jobId = parsedMessage.jobId;
@@ -2352,7 +2519,11 @@ const createConsumer = async (id) => {
 
         // Special flow for Programming when more than 2 questions are requested:
         // 1) Generate titles, 2) Generate questions in batches of 2 titles
-        if (questionType === "Programming" && questionConfig.number > 2) {
+        // Programming: always use 2-step flow (titles -> questions) to guarantee uniqueness,
+        // even when number is 1 or 2.
+        if (questionType === "Programming") {
+          const programmingContext = normalizeProgrammingContext(questionsArray);
+
           const totalCategories = PROGRAMMING_LOGIC_CATEGORIES.length;
           const unusedCategories = PROGRAMMING_LOGIC_CATEGORIES.filter(
             (cat) => !usedCategories.includes(cat.name),
@@ -2369,10 +2540,65 @@ const createConsumer = async (id) => {
               : [];
 
           const maxTitleAttempts = 3;
+
+          // Example-rotation seed plan (Redis tracked): for each selected category, use next example
+          const trackingId = jobId || clientId;
+          let examplePointers = {};
+          if (trackingId) {
+            try {
+              examplePointers = await categoryTracker.getExamplePointers(
+                trackingId,
+                category.category,
+              );
+            } catch (e) {
+              console.error(
+                `⚠️ Failed to load example pointers (Consumer ${id}):`,
+                e?.message || e,
+              );
+              examplePointers = {};
+            }
+          }
+
+          const selectedCategoryNames = [
+            ...unusedCategories.map((c) => c.name),
+            ...PROGRAMMING_LOGIC_CATEGORIES.map((c) => c.name),
+          ]
+            .filter((v, i, arr) => arr.indexOf(v) === i)
+            .slice(0, questionConfig.number);
+
+          const seedPlan = [];
+          const nextExamplePointers = {};
+          const hasUserPrompt =
+            (questionConfig.promptText || questionConfig.customPrompt || "").trim().length > 0;
+          if (!hasUserPrompt) {
+            selectedCategoryNames.forEach((catName) => {
+              const catObj = PROGRAMMING_LOGIC_CATEGORIES.find(
+                (c) => c.name === catName,
+              );
+              const examples = Array.isArray(catObj?.examples) ? catObj.examples : [];
+              const keywords = Array.isArray(catObj?.keywords) ? catObj.keywords : [];
+              const currentPtr =
+                typeof examplePointers?.[catName] === "number"
+                  ? examplePointers[catName]
+                  : 0;
+              const example =
+                examples.length > 0
+                  ? examples[currentPtr % examples.length]
+                  : catName;
+              seedPlan.push({
+                category: catName,
+                example,
+                keywords: keywords.slice(0, 8),
+              });
+              nextExamplePointers[catName] = currentPtr + 1;
+            });
+          }
+
           const titleGenerationOptions = {
             bannedTitles: [],
             bannedLogicCategories: [],
-            requiredLogicCategories,
+            requiredLogicCategories: hasUserPrompt ? [] : requiredLogicCategories,
+            seedPlan,
           };
 
           let titles = [];
@@ -2489,10 +2715,30 @@ const createConsumer = async (id) => {
               isCategoryExhausted,
               usedCategories,
               requiredLogicCategories,
+              existingFingerprints: programmingContext.existingFingerprints,
+              deletedFingerprints: programmingContext.deletedFingerprints,
+              usedConcepts,
+              promptTextOnly: hasUserPrompt,
             });
 
             if (validation.valid) {
               lastValidation = null;
+
+              // Commit example pointer rotation ONLY after we have valid titles
+              if (trackingId && Object.keys(nextExamplePointers).length > 0) {
+                try {
+                  await categoryTracker.setExamplePointers(
+                    trackingId,
+                    category.category,
+                    nextExamplePointers,
+                  );
+                } catch (e) {
+                  console.error(
+                    `⚠️ Failed to persist example pointers (Consumer ${id}):`,
+                    e?.message || e,
+                  );
+                }
+              }
               break;
             }
 

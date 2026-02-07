@@ -40,20 +40,20 @@ const generateScreeningQuestion = async (req, res) => {
     let messageIndex = 0;
     let totalExpectedResponses = 0; // Count actual responses, not messages
 
-    data.forEach((category) => {
+    for (const category of data) {
       if (category.questions && Array.isArray(category.questions)) {
         // Separate question types into groups
         const audioVideoSubjective = [];
         const otherTypes = [];
 
-        category.questions.forEach((questionConfig) => {
+        for (const questionConfig of category.questions) {
           const type = questionConfig.type;
           if (type === "Audio" || type === "Video" || type === "Subjective") {
             audioVideoSubjective.push(questionConfig);
           } else {
             otherTypes.push(questionConfig);
           }
-        });
+        }
 
         // Group Audio/Video/Subjective together for combined generation
         if (audioVideoSubjective.length > 0) {
@@ -94,7 +94,7 @@ const generateScreeningQuestion = async (req, res) => {
         }
 
         // Handle other types (MCQ, Programming) separately
-        otherTypes.forEach((questionConfig) => {
+        for (const questionConfig of otherTypes) {
           const typeSpecificQuestionsArray =
             questionConfig.questionsArray || questionsArray || [];
           console.log(
@@ -102,16 +102,23 @@ const generateScreeningQuestion = async (req, res) => {
             typeSpecificQuestionsArray.length,
           );
 
-          // Get server-side tracked used categories for Programming questions
+          // Get server-side tracked used categories for Programming questions (Redis or in-memory)
+          // Tracking key: prefer jobId (requested), fallback to clientId
           let usedCategories = [];
-          if (questionConfig.type === "Programming" && clientId) {
-            usedCategories = categoryTracker.getAllUsedCategories(
-              clientId,
+          let usedConcepts = [];
+          if (questionConfig.type === "Programming" && (jobId || clientId)) {
+            const trackingId = jobId || clientId;
+            usedCategories = await categoryTracker.getAllUsedCategories(
+              trackingId,
+              category.category,
+            );
+            usedConcepts = await categoryTracker.getUsedConcepts(
+              trackingId,
               category.category,
             );
             // Refresh tracking timestamp to extend expiration (auto-refreshes on get, but explicit for clarity)
             if (usedCategories.length > 0) {
-              categoryTracker.refreshTracking(clientId, category.category);
+              await categoryTracker.refreshTracking(trackingId, category.category);
             }
             console.log(
               `📊 Server-side used categories for ${category.category}:`,
@@ -137,6 +144,7 @@ const generateScreeningQuestion = async (req, res) => {
               CandidateResumeData,
               questionsArray: typeSpecificQuestionsArray,
               usedCategories: usedCategories, // Server-side tracked categories (for Programming)
+              usedConcepts: usedConcepts, // Server-side tracked concepts (for Programming duplicate blocking)
               clientId,
               channelId,
               jobId,
@@ -147,9 +155,9 @@ const generateScreeningQuestion = async (req, res) => {
 
           // Count expected responses: 1 message = 1 response
           totalExpectedResponses += 1;
-        });
+        }
       }
-    });
+    }
 
     if (producerMessages.length === 0) {
       return res.status(400).json({ message: "No questions to generate" });
@@ -162,13 +170,33 @@ const generateScreeningQuestion = async (req, res) => {
 
     console.log("Question Generation Temp Id", tempId);
 
+    const REQUEST_TIMEOUT_MS = 90 * 1000; // 90 seconds
+    const timeoutId = setTimeout(() => {
+      const info = req.pendingRequests.get(requestId);
+      if (info) {
+        req.pendingRequests.delete(requestId);
+        if (req.responseCache) req.responseCache.delete(requestId);
+        if (info.timeoutId) clearTimeout(info.timeoutId);
+        info.res.status(504).json({
+          message: "Request timeout - question generation did not complete in time",
+          requestId,
+          errors: info.errors || [],
+        });
+      }
+    }, REQUEST_TIMEOUT_MS);
+
     req.pendingRequests.set(requestId, {
       res,
       expectedResponses: totalExpectedResponses,
+      // Store request context so server can track usage by jobId and respond with metadata
+      clientId,
+      channelId,
+      jobId,
       categories: data.map((cat) => ({
         category: cat.category,
         skills: cat.skills || "unknown",
       })),
+      timeoutId,
     });
   } catch (error) {
     console.error("❌ Error in generateScreeningQuestion:", error);

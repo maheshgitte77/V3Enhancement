@@ -207,6 +207,10 @@ services:
       OPEN_AI_KEY: ${OPEN_AI_KEY}
       CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
       CREDIT_SERVICE_KEY: ${CREDIT_SERVICE_KEY}
+      # Redis for categoryTracker (same as resume-service)
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     depends_on:
       kafka1:
         condition: service_healthy
