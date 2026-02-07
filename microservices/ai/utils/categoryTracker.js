@@ -1,6 +1,7 @@
-// Server-side tracking of used Programming logic categories per assessment.
+// Server-side tracking of used Programming logic categories per assessment/job.
 // Storage: Redis (preferred) or in-memory fallback when Redis is not configured.
-// Key: categoryTracker:${clientId}:${categoryName} (e.g. "categoryTracker:client123:Java")
+// Key: categoryTracker:${trackingId}:${categoryName} (e.g. "categoryTracker:job123:Java")
+// trackingId: Prefer jobId (requested), fallback to clientId.
 // Value (Redis): JSON { categories: string[], lastUpdated, createdAt }; TTL 2 days.
 //
 // CATEGORY EXHAUSTION HANDLING:
@@ -22,8 +23,8 @@ const CLEANUP_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 // In-memory fallback when Redis is not configured
 const usedCategoriesTracker = new Map();
 
-const redisKey = (clientId, categoryName) =>
-  `${REDIS_KEY_PREFIX}${clientId || "default"}:${categoryName}`;
+const redisKey = (trackingId, categoryName) =>
+  `${REDIS_KEY_PREFIX}${trackingId || "default"}:${categoryName}`;
 
 // --- Redis implementation ---
 const getEntryRedis = async (client, key) => {
@@ -33,6 +34,11 @@ const getEntryRedis = async (client, key) => {
     const data = JSON.parse(raw);
     return {
       categories: Array.isArray(data.categories) ? new Set(data.categories) : new Set(),
+      concepts: Array.isArray(data.concepts) ? new Set(data.concepts) : new Set(),
+      examplePointers:
+        data.examplePointers && typeof data.examplePointers === "object"
+          ? data.examplePointers
+          : {},
       lastUpdated: data.lastUpdated || Date.now(),
       createdAt: data.createdAt || data.lastUpdated || Date.now(),
     };
@@ -44,6 +50,8 @@ const getEntryRedis = async (client, key) => {
 const setEntryRedis = async (client, key, entry) => {
   const value = JSON.stringify({
     categories: Array.from(entry.categories),
+    concepts: Array.from(entry.concepts || []),
+    examplePointers: entry.examplePointers || {},
     lastUpdated: entry.lastUpdated,
     createdAt: entry.createdAt,
   });
@@ -73,8 +81,8 @@ cleanupOldEntriesMemory();
 
 // --- Public API (async; use Redis when available, else in-memory) ---
 
-const getUsedCategories = async (clientId, categoryName) => {
-  const key = redisKey(clientId, categoryName);
+const getUsedCategories = async (trackingId, categoryName) => {
+  const key = redisKey(trackingId, categoryName);
   const client = getRedis();
   if (client) {
     const entry = await getEntryRedis(client, key);
@@ -89,14 +97,20 @@ const getUsedCategories = async (clientId, categoryName) => {
   return Array.from(entry.categories);
 };
 
-const addUsedCategories = async (clientId, categoryName, categories) => {
-  const key = redisKey(clientId, categoryName);
+const addUsedCategories = async (trackingId, categoryName, categories) => {
+  const key = redisKey(trackingId, categoryName);
   const now = Date.now();
   const client = getRedis();
   if (client) {
     let entry = await getEntryRedis(client, key);
     if (!entry) {
-      entry = { categories: new Set(), lastUpdated: now, createdAt: now };
+      entry = {
+        categories: new Set(),
+        concepts: new Set(),
+        examplePointers: {},
+        lastUpdated: now,
+        createdAt: now,
+      };
     }
     entry.lastUpdated = now;
     if (Array.isArray(categories)) {
@@ -110,6 +124,8 @@ const addUsedCategories = async (clientId, categoryName, categories) => {
   if (!usedCategoriesTracker.has(key)) {
     usedCategoriesTracker.set(key, {
       categories: new Set(),
+      concepts: new Set(),
+      examplePointers: {},
       lastUpdated: now,
       createdAt: now,
     });
@@ -124,8 +140,140 @@ const addUsedCategories = async (clientId, categoryName, categories) => {
   return Array.from(entry.categories);
 };
 
-const clearUsedCategories = async (clientId, categoryName) => {
-  const key = redisKey(clientId, categoryName);
+const getUsedConcepts = async (trackingId, categoryName) => {
+  const key = redisKey(trackingId, categoryName);
+  const client = getRedis();
+  if (client) {
+    const entry = await getEntryRedis(client, key);
+    if (!entry) return [];
+    entry.lastUpdated = Date.now();
+    await setEntryRedis(client, key, entry);
+    return Array.from(entry.concepts || []);
+  }
+  const entry = usedCategoriesTracker.get(key);
+  if (!entry) return [];
+  entry.lastUpdated = Date.now();
+  return Array.from(entry.concepts || []);
+};
+
+const addUsedConcepts = async (trackingId, categoryName, concepts) => {
+  const key = redisKey(trackingId, categoryName);
+  const now = Date.now();
+  const client = getRedis();
+  if (client) {
+    let entry = await getEntryRedis(client, key);
+    if (!entry) {
+      entry = {
+        categories: new Set(),
+        concepts: new Set(),
+        examplePointers: {},
+        lastUpdated: now,
+        createdAt: now,
+      };
+    }
+    entry.lastUpdated = now;
+    if (!entry.concepts) entry.concepts = new Set();
+    if (Array.isArray(concepts)) {
+      concepts.forEach((c) => entry.concepts.add(c));
+    } else if (typeof concepts === "string") {
+      entry.concepts.add(concepts);
+    }
+    await setEntryRedis(client, key, entry);
+    return Array.from(entry.concepts);
+  }
+  if (!usedCategoriesTracker.has(key)) {
+    usedCategoriesTracker.set(key, {
+      categories: new Set(),
+      concepts: new Set(),
+      examplePointers: {},
+      lastUpdated: now,
+      createdAt: now,
+    });
+  }
+  const entry = usedCategoriesTracker.get(key);
+  entry.lastUpdated = now;
+  if (!entry.concepts) entry.concepts = new Set();
+  if (Array.isArray(concepts)) {
+    concepts.forEach((c) => entry.concepts.add(c));
+  } else if (typeof concepts === "string") {
+    entry.concepts.add(concepts);
+  }
+  return Array.from(entry.concepts);
+};
+
+const getExamplePointers = async (trackingId, categoryName) => {
+  const key = redisKey(trackingId, categoryName);
+  const client = getRedis();
+  if (client) {
+    const entry = await getEntryRedis(client, key);
+    if (!entry) return {};
+    entry.lastUpdated = Date.now();
+    await setEntryRedis(client, key, entry);
+    return entry.examplePointers || {};
+  }
+  const entry = usedCategoriesTracker.get(key);
+  if (!entry) return {};
+  entry.lastUpdated = Date.now();
+  return entry.examplePointers || {};
+};
+
+/**
+ * Merge example pointer updates into the stored entry.
+ * @param {string} trackingId jobId preferred, else clientId
+ * @param {string} categoryName skill/category (e.g. "Java")
+ * @param {Record<string, number>} updates mapping logicCategoryName -> nextIndex
+ */
+const setExamplePointers = async (trackingId, categoryName, updates) => {
+  const key = redisKey(trackingId, categoryName);
+  const now = Date.now();
+  const client = getRedis();
+  if (client) {
+    let entry = await getEntryRedis(client, key);
+    if (!entry) {
+      entry = {
+        categories: new Set(),
+        concepts: new Set(),
+        examplePointers: {},
+        lastUpdated: now,
+        createdAt: now,
+      };
+    }
+    entry.lastUpdated = now;
+    entry.examplePointers = entry.examplePointers || {};
+    if (updates && typeof updates === "object") {
+      Object.entries(updates).forEach(([k, v]) => {
+        if (typeof v === "number" && Number.isFinite(v)) {
+          entry.examplePointers[k] = v;
+        }
+      });
+    }
+    await setEntryRedis(client, key, entry);
+    return entry.examplePointers;
+  }
+  if (!usedCategoriesTracker.has(key)) {
+    usedCategoriesTracker.set(key, {
+      categories: new Set(),
+      concepts: new Set(),
+      examplePointers: {},
+      lastUpdated: now,
+      createdAt: now,
+    });
+  }
+  const entry = usedCategoriesTracker.get(key);
+  entry.lastUpdated = now;
+  entry.examplePointers = entry.examplePointers || {};
+  if (updates && typeof updates === "object") {
+    Object.entries(updates).forEach(([k, v]) => {
+      if (typeof v === "number" && Number.isFinite(v)) {
+        entry.examplePointers[k] = v;
+      }
+    });
+  }
+  return entry.examplePointers;
+};
+
+const clearUsedCategories = async (trackingId, categoryName) => {
+  const key = redisKey(trackingId, categoryName);
   const client = getRedis();
   if (client) {
     await client.del(key);
@@ -134,12 +282,12 @@ const clearUsedCategories = async (clientId, categoryName) => {
   usedCategoriesTracker.delete(key);
 };
 
-const getAllUsedCategories = async (clientId, categoryName) => {
-  return getUsedCategories(clientId, categoryName);
+const getAllUsedCategories = async (trackingId, categoryName) => {
+  return getUsedCategories(trackingId, categoryName);
 };
 
-const refreshTracking = async (clientId, categoryName) => {
-  const key = redisKey(clientId, categoryName);
+const refreshTracking = async (trackingId, categoryName) => {
+  const key = redisKey(trackingId, categoryName);
   const client = getRedis();
   if (client) {
     const entry = await getEntryRedis(client, key);
@@ -154,8 +302,8 @@ const refreshTracking = async (clientId, categoryName) => {
   return true;
 };
 
-const getTrackingInfo = async (clientId, categoryName) => {
-  const key = redisKey(clientId, categoryName);
+const getTrackingInfo = async (trackingId, categoryName) => {
+  const key = redisKey(trackingId, categoryName);
   const client = getRedis();
   let entry;
   if (client) {
@@ -227,6 +375,10 @@ const cleanupOldEntries = () => {
 module.exports = {
   getUsedCategories,
   addUsedCategories,
+  getUsedConcepts,
+  addUsedConcepts,
+  getExamplePointers,
+  setExamplePointers,
   clearUsedCategories,
   getAllUsedCategories,
   refreshTracking,
