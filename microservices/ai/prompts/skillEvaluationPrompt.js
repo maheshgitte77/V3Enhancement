@@ -12,36 +12,37 @@ Analyze the following details and generate a professional Skill Evaluation & Com
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <h3><strong>Evaluation Topic:</strong></h3><p> ${jobDetails.jobTitle}</p>
-   <h3><strong>Target Role/Level:</strong></h3><p> ${jobDetails.jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">EVALUATION TOPIC:</span> ${jobDetails.jobTitle}</p>
+   <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">TARGET ROLE/LEVEL:</span> ${jobDetails.jobRole}</p>
+   <hr style="margin: 0;">
 
-2. <h3><strong>EVALUATION OBJECTIVE :</strong></h3> 
-   - 1-2 professional, objective paragraphs wrapped in <p> tags.
+2. <h3 style="margin: 0;"><strong>EVALUATION OBJECTIVE :</strong></h3> 
+   - 1-2 professional, objective paragraphs wrapped in <p style="margin: 0;"> tags.
    - Focus on the purpose (e.g., Gap analysis, readiness assessment) for a **${jobDetails.seniority?.join(", ")}** resource in **${jobDetails.domain}**.
 
-3. <hr>
+3. <hr style="margin: 0;">
 
-4. <h3><strong>KEY ASSESSMENT AREAS :</strong></h3> 
-   - A SINGLE <ul> containing multiple <li> items highlighting critical themes of evaluation.
+4. <h3 style="margin: 0;"><strong>KEY ASSESSMENT AREAS :</strong></h3> 
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing multiple <li> items highlighting critical themes of evaluation.
 
-5. <hr>
+5. <hr style="margin: 0;">
 
-6. <h3><strong>TECHNICAL COMPETENCIES & BENCHMARKS :</strong></h3>
-   - A SINGLE <ul> containing:
+6. <h3 style="margin: 0;"><strong>TECHNICAL COMPETENCIES & BENCHMARKS :</strong></h3>
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing:
      - **Experience Benchmark**: "<strong>Experience Base</strong>: ${jobDetails.experience} years in ${jobDetails.domain}."
      - **Location Context**: "<strong>Current Work Mode</strong>: ${jobDetails.jobStyle || "Not Specified"} (extract city names from: ${jobDetails.jobLocation?.join(", ") || "Not Specified"})."
      - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Description of proficiency standards."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Full Stack Developer", "Rest Api").
 
-7. <hr> (Include only if Advanced Skills exist)
+7. <hr style="margin: 0;"> (Include only if Advanced Skills exist)
 
-8. <h3><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Advanced proficiency indicators."
+8. <h3 style="margin: 0;"><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Advanced proficiency indicators."
 
-9. <hr> (Include only if Aptitude Skills exist)
+9. <hr style="margin: 0;"> (Include only if Aptitude Skills exist)
 
-10. <h3><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
-    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
+10. <h3 style="margin: 0;"><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
+    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
 
 **CRITICAL RULES:**
 - **NO HALLUCINATION**: Do not create section headers if there is no data for them.

@@ -13,34 +13,35 @@ Analyze the provided source text and generate a professional, high-quality Job D
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <h3><strong>Role:</strong></h3><p> ${jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">ROLE:</span> ${jobRole}</p>
+   <hr style="margin: 0;">
 
-2. <h3><strong>SUMMARY :</strong></h3> 
-   - 2-3 engaging, descriptive paragraphs wrapped in <p> tags.
+2. <h3 style="margin: 0;"><strong>SUMMARY :</strong></h3> 
+   - 2-3 engaging, descriptive paragraphs wrapped in <p style="margin: 0;"> tags.
    - Summarize the role's scope and impact based on the extracted text.
 
-3. <hr>
+3. <hr style="margin: 0;">
 
-4. <h3><strong>KEY RESPONSIBILITIES :</strong></h3> 
-   - A SINGLE <ul> containing multiple <li> items based on the provided text.
+4. <h3 style="margin: 0;"><strong>KEY RESPONSIBILITIES :</strong></h3> 
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing multiple <li> items based on the provided text.
 
-5. <hr>
+5. <hr style="margin: 0;">
 
-6. <h3><strong>REQUIRED EXPERIENCE & TECHNICAL SKILLS :</strong></h3>
-   - A SINGLE <ul> containing:
+6. <h3 style="margin: 0;"><strong>REQUIRED EXPERIENCE & TECHNICAL SKILLS :</strong></h3>
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing:
      - **Experience**: "<strong>Experience</strong>: [X]+ years..." (only if found).
      - **Skills**: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency required."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
-7. <hr> (Include only if extraction finds Good to Have data)
+7. <hr style="margin: 0;"> (Include only if extraction finds Good to Have data)
 
-8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+8. <h3 style="margin: 0;"><strong>GOOD TO HAVE SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
-9. <hr> (Include only if extraction finds Aptitude data)
+9. <hr style="margin: 0;"> (Include only if extraction finds Aptitude data)
 
-10. <h3><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
-    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+10. <h3 style="margin: 0;"><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
+    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
 **METADATA EXTRACTION (STRICT):**
 Extract into [META_DATA] JSON block:

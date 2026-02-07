@@ -15,35 +15,36 @@ Analyze the provided source text and generate a precise Staffing Requirement doc
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <h3><strong>Assigned Role:</strong></h3><p> ${jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em;"><strong>ASSIGNED ROLE:</strong></span> ${jobRole}</p>
+   <hr style="margin: 0;">
 
-2. <h3><strong>STAFFING OBJECTIVE :</strong></h3> 
-   - 1-2 objective paragraphs wrapped in <p> tags.
+2. <h3 style="margin: 0;"><strong>STAFFING OBJECTIVE :</strong></h3> 
+   - 1-2 objective paragraphs wrapped in <p style="margin: 0;"> tags.
    - Describe the Technical Profile and Maturity required based on the text.
 
-3. <hr>
+3. <hr style="margin: 0;">
 
-4. <h3><strong>KEY RESPONSIBILITIES & DELIVERABLES :</strong></h3> 
-   - A SINGLE <ul> containing multiple <li> items based on the text.
+4. <h3 style="margin: 0;"><strong>KEY RESPONSIBILITIES & DELIVERABLES :</strong></h3> 
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing multiple <li> items based on the text.
 
-5. <hr>
+5. <hr style="margin: 0;">
 
-6. <h3><strong>TECHNICAL COMPETENCIES & EXPERTISE :</strong></h3>
-   - A SINGLE <ul> containing:
+6. <h3 style="margin: 0;"><strong>TECHNICAL COMPETENCIES & EXPERTISE :</strong></h3>
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing:
      - **Experience Required**: "<strong>Experience</strong>: [X]+ years..." (only if found).
      - **Context**: "<strong>Work Mode & Location</strong>: [Location/Mode]" (only if found).
      - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Proficiency level required."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
-7. <hr> (Include only if Good to Have data exists)
+7. <hr style="margin: 0;"> (Include only if Good to Have data exists)
 
-8. <h3><strong>GOOD TO HAVE SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+8. <h3 style="margin: 0;"><strong>GOOD TO HAVE SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
-9. <hr> (Include only if Aptitude data exists)
+9. <hr style="margin: 0;"> (Include only if Aptitude data exists)
 
-10. <h3><strong>SOFT SKILLS & APTITUDE :</strong></h3> 
-    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+10. <h3 style="margin: 0;"><strong>SOFT SKILLS & APTITUDE :</strong></h3> 
+    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
 
 **CRITICAL RULES:**
 - **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.

@@ -15,35 +15,36 @@ Analyze the provided source text and generate a precise Skill Evaluation & Compe
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <h3><strong>Target Evaluation Role:</strong></h3><p> ${jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">TARGET EVALUATION ROLE:</span> ${jobRole}</p>
+   <hr style="margin: 0;">
 
-2. <h3><strong>EVALUATION OBJECTIVE :</strong></h3> 
-   - 1-2 objective paragraphs wrapped in <p> tags.
+2. <h3 style="margin: 0;"><strong>EVALUATION OBJECTIVE :</strong></h3> 
+   - 1-2 objective paragraphs wrapped in <p style="margin: 0;"> tags.
    - Describe the required readiness or proficiency standards based on the text.
 
-3. <hr>
+3. <hr style="margin: 0;">
 
-4. <h3><strong>KEY ASSESSMENT AREAS :</strong></h3> 
-   - A SINGLE <ul> containing multiple <li> items on themes like mastery, leadership, or execution.
+4. <h3 style="margin: 0;"><strong>KEY ASSESSMENT AREAS :</strong></h3> 
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing multiple <li> items on themes like mastery, leadership, or execution.
 
-5. <hr>
+5. <hr style="margin: 0;">
 
-6. <h3><strong>TECHNICAL COMPETENCIES & BENCHMARKS :</strong></h3>
-   - A SINGLE <ul> containing:
+6. <h3 style="margin: 0;"><strong>TECHNICAL COMPETENCIES & BENCHMARKS :</strong></h3>
+   - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing:
      - **Experience Benchmark**: "<strong>Experience Base</strong>: [X]+ years..." (only if found).
      - **Assignment Context**: "<strong>Location & Mode</strong>: [Location/Mode]" (only if found).
      - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency being evaluated."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
-7. <hr> (Include only if extraction finds Good to Have data)
+7. <hr style="margin: 0;"> (Include only if extraction finds Good to Have data)
 
-8. <h3><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Advanced indicators."
+8. <h3 style="margin: 0;"><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
+   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Advanced indicators."
 
-9. <hr> (Include only if extraction finds Aptitude data)
+9. <hr style="margin: 0;"> (Include only if extraction finds Aptitude data)
 
-10. <h3><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
-    - (If data exists) A SINGLE <ul> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
+10. <h3 style="margin: 0;"><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
+    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
 
 **CRITICAL RULES:**
 - **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
