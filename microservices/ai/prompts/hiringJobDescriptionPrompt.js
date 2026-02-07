@@ -38,18 +38,20 @@ Analyze the following details and generate a professional, high-quality Job Desc
       - Correct: **React Native**, **Rest Api**, **Java Script**.
       - Incorrect: REACT NATIVE, react native.
 
-7. <hr style="margin: 0;"> (Include only if Good to Have data exists)
+7. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 8. <h3 style="margin: 0;"><strong>GOOD TO HAVE SKILLS :</strong></h3> 
    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format. (Apply **Title Case** to skill names).
+   - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER.
 
-9. <hr style="margin: 0;"> (Include only if Aptitude data exists)
+9. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 10. <h3 style="margin: 0;"><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
     - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format. (Apply **Title Case** to skill names).
+    - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER.
 
 **CRITICAL RULES:**
-- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO EMPTY SECTIONS**: If a section (especially Good to Have or Soft Skills) has no data, YOU MUST NOT OUTPUT THE <h3> HEADER OR THE <hr> DIVIDER. The previous section should end, and if the next one is empty, NOTHING should be printed for it.
 - **NO WRAPPERS**: Do not use <code>, <pre>, or any code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
 - **Skill Enrichment**: For EVERY skill provided, generate a professional 1-line description.
 - **Single List**: Wrap all points of a section in ONE <ul>.

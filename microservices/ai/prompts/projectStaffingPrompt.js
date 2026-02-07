@@ -34,18 +34,20 @@ Analyze the following details and generate a professional Staffing Requirement d
      - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Professional description of expected competency."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Responsive Design", "Rest Api").
 
-7. <hr style="margin: 0;"> (Include only if Good to Have data exists)
+7. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 8. <h3 style="margin: 0;"><strong>GOOD TO HAVE SKILLS :</strong></h3> 
    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+   - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
-9. <hr style="margin: 0;"> (Include only if Aptitude data exists)
+9. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 10. <h3 style="margin: 0;"><strong>SOFT SKILLS & APTITUDE :</strong></h3> 
     - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+    - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
 **CRITICAL RULES:**
-- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO EMPTY SECTIONS**: If a section has no data, YOU MUST NOT OUTPUT THE <h3> HEADER OR THE <hr> DIVIDER. The previous section should end, and if the next one is empty, NOTHING should be printed for it.
 - **NO WRAPPERS**: Do not use <code>, <pre>, or code blocks. Just raw HTML (h3, p, ul, li, hr, strong).
 - **Staffing Language**: Use "internal resource", "team member", "allocation". NEVER "hiring" or "candidate".
 - **Single List**: Wrap all points of a section in ONE <ul>.

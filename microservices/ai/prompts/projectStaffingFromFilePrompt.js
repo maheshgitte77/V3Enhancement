@@ -36,18 +36,20 @@ Analyze the provided source text and generate a precise Staffing Requirement doc
      - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Proficiency level required."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
-7. <hr style="margin: 0;"> (Include only if Good to Have data exists)
+7. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 8. <h3 style="margin: 0;"><strong>GOOD TO HAVE SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+   - (If extracted) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+   - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
-9. <hr style="margin: 0;"> (Include only if Aptitude data exists)
+9. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 10. <h3 style="margin: 0;"><strong>SOFT SKILLS & APTITUDE :</strong></h3> 
-    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+    - (If extracted) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+    - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
 **CRITICAL RULES:**
-- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO EMPTY SECTIONS**: Only create headers and lists if actual data is found for that section. If a skill type is missing, DO NOT print the <h3> or <hr> for it.
 - **NO WRAPPERS**: Do not use <code>, <pre>, or code blocks. Just raw HTML.
 - **Extraction**: Thoroughly scan for ALL skills mentioned in the source text.
 - **Skill Normalization (VERY IMPORTANT)**: 

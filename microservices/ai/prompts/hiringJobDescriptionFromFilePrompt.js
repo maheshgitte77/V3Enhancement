@@ -33,18 +33,20 @@ Analyze the provided source text and generate a professional, high-quality Job D
      - **Skills**: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency required."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
-7. <hr style="margin: 0;"> (Include only if extraction finds Good to Have data)
+7. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 8. <h3 style="margin: 0;"><strong>GOOD TO HAVE SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+   - (If extracted) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+   - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
-9. <hr style="margin: 0;"> (Include only if extraction finds Aptitude data)
+9. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 10. <h3 style="margin: 0;"><strong>BEHAVIORAL SKILLS & APTITUDE :</strong></h3> 
-    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+    - (If extracted) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Description" format.
+    - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
-**METADATA EXTRACTION (STRICT):**
-Extract into [META_DATA] JSON block:
+**CRITICAL RULES:**
+- **NO EMPTY SECTIONS**: Only create headers and lists if actual data is found for that section. If a skill type is missing, DO NOT print the <h3> or <hr> for it.
 1. experienceFrom/To (numbers), location, noticePeriod (number).
 2. **LOCATION EXTRACTION RULES**:
    - Extract ONLY the actual city name(s), not work mode (Remote/Hybrid/Onsite).

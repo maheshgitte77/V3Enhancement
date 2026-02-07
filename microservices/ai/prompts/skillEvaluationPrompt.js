@@ -34,18 +34,20 @@ Analyze the following details and generate a professional Skill Evaluation & Com
      - Followed by the **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Description of proficiency standards."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word, e.g., "Full Stack Developer", "Rest Api").
 
-7. <hr style="margin: 0;"> (Include only if Advanced Skills exist)
+7. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 8. <h3 style="margin: 0;"><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Advanced proficiency indicators."
+   - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
-9. <hr style="margin: 0;"> (Include only if Aptitude Skills exist)
+9. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 10. <h3 style="margin: 0;"><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
     - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
+    - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
 **CRITICAL RULES:**
-- **NO HALLUCINATION**: Do not create section headers if there is no data for them.
+- **NO EMPTY SECTIONS**: If a section has no data, YOU MUST NOT OUTPUT THE <h3> HEADER OR THE <hr> DIVIDER. The previous section should end, and if the next one is empty, NOTHING should be printed for it.
 - **NO WRAPPERS**: Do not use <code> or markdown formatting. Just plain HTML tags (h3, p, ul, li, hr, strong).
 - **Internal Language**: Use "employee", "resource", "assessed", "benchmark". NEVER "hiring" or "candidate".
 - **Empty Check**: If ${jobDetails.goodToHaveSkill.length === 0 ? "NO" : "YES"} "Good to Have" data, handle section 8 accordingly.

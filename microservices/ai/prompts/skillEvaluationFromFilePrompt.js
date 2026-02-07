@@ -36,18 +36,20 @@ Analyze the provided source text and generate a precise Skill Evaluation & Compe
      - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Depth of proficiency being evaluated."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
-7. <hr style="margin: 0;"> (Include only if extraction finds Good to Have data)
+7. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 8. <h3 style="margin: 0;"><strong>ADVANCED / OPTIONAL SKILLS :</strong></h3> 
-   - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Advanced indicators."
+   - (If extracted) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Advanced indicators."
+   - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
-9. <hr style="margin: 0;"> (Include only if extraction finds Aptitude data)
+9. <hr style="margin: 0;"> (OMIT ENTIRE SECTION IF NO DATA)
 
 10. <h3 style="margin: 0;"><strong>BEHAVIORAL & SOFT SKILL COMPETENCIES :</strong></h3> 
-    - (If data exists) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
+    - (If extracted) A SINGLE <ul style="margin: 0; padding-left: 20px;"> with "<strong>Skill Name (Title Case)</strong>: Behavioral benchmarks."
+    - **IF NO DATA**: DO NOT OUTPUT HEADER OR DIVIDER. Skip entirely.
 
 **CRITICAL RULES:**
-- **NO HALLUCINATION**: If a section has no data, skip BOTH the header and the divider.
+- **NO EMPTY SECTIONS**: Only create headers and lists if actual data is found for that section. If a skill type is missing, DO NOT print the <h3> or <hr> for it.
 - **NO WRAPPERS**: No <code>, <pre>, or markdown boxes. Just raw HTML.
 - **Internal Language**: Use "employee", "assessed", "competency".
 - **Extraction**: Thoroughly scan for ALL skills mentioned in the source text.
