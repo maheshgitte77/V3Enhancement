@@ -12,8 +12,7 @@ Analyze the following details and generate a professional Skill Evaluation & Com
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">EVALUATION TOPIC:</span> ${jobDetails.jobTitle}</p>
-   <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">TARGET ROLE/LEVEL:</span> ${jobDetails.jobRole}</p>
+   <p style="margin: 0;"><strong><span style="font-size: 1.17em; font-weight: bold;">TARGET ROLE/LEVEL:</span> </strong>${jobDetails.jobRole}</p>
    <hr style="margin: 0;">
 
 2. <h3 style="margin: 0;"><strong>EVALUATION OBJECTIVE :</strong></h3> 
@@ -57,7 +56,6 @@ Analyze the following details and generate a professional Skill Evaluation & Com
 - Evaluation Focus: ${jobDetails.jobTitle}
 - Role Level: ${jobDetails.jobRole}
 - Domain: ${jobDetails.domain}
-- Seniority: ${jobDetails.seniority?.join(", ")}
 - Experience: ${jobDetails.experience}
 - Required Skills: ${jobDetails.requiredSkill.join(", ")}
 - Good to Have: ${jobDetails.goodToHaveSkill.join(", ")}

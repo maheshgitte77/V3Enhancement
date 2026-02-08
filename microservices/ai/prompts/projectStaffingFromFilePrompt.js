@@ -31,8 +31,8 @@ Analyze the provided source text and generate a precise Staffing Requirement doc
 
 6. <h3 style="margin: 0;"><strong>TECHNICAL COMPETENCIES & EXPERTISE :</strong></h3>
    - A SINGLE <ul style="margin: 0; padding-left: 20px;"> containing:
-     - **Experience Required**: "<strong>Experience</strong>: [X]+ years..." (only if found).
-     - **Context**: "<strong>Work Mode & Location</strong>: [Location/Mode]" (only if found).
+     - **Experience Required**: "<strong>Experience</strong>: [X]+ years..." (omit if not found).
+     - **Context**: "<strong>Work Mode & Location</strong>: [Location/Mode]" (omit if not found).
      - Followed by the extracted **Required Skills** in format: "<strong>Skill Name (Title Case)</strong>: Proficiency level required."
    - **CAPITALIZATION RULE**: Use **Title Case** for skill names (Capitalize only the first letter of each word).
 
