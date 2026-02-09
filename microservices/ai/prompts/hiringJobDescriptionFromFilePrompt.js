@@ -13,7 +13,7 @@ Analyze the provided source text and generate a professional, high-quality Job D
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">ROLE:</span> ${jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em;"><strong>ROLE:</strong></span> ${jobRole}</p>
    <hr style="margin: 0;">
 
 2. <h3 style="margin: 0;"><strong>SUMMARY :</strong></h3> 

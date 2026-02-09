@@ -12,7 +12,7 @@ Analyze the following details and generate a professional Skill Evaluation & Com
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-   <p style="margin: 0;"><strong><span style="font-size: 1.17em; font-weight: bold;">TARGET ROLE/LEVEL:</span> </strong>${jobDetails.jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em;"><strong>EVALUATION TOPIC:</strong></span> ${jobDetails.jobTitle}</p>
    <hr style="margin: 0;">
 
 2. <h3 style="margin: 0;"><strong>EVALUATION OBJECTIVE :</strong></h3> 

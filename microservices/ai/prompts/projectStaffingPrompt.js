@@ -12,8 +12,8 @@ Analyze the following details and generate a professional Staffing Requirement d
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <p style="margin: 0;"><strong><span style="font-size: 1.17em; font-weight: bold;">PROJECT NAME:</span> </strong>${jobDetails.jobTitle}</p>
-   <p style="margin: 0;"><strong><span style="font-size: 1.17em; font-weight: bold;">ASSIGNED ROLE:</span> </strong>${jobDetails.jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em;"><strong>PROJECT NAME:</strong></span> ${jobDetails.jobTitle}</p>
+   <p style="margin: 0;"><span style="font-size: 1.17em;"><strong>ASSIGNED ROLE:</strong></span> ${jobDetails.jobRole}</p>
    <hr style="margin: 0;">
 
 2. <h3 style="margin: 0;"><strong>STAFFING OBJECTIVE :</strong></h3> 

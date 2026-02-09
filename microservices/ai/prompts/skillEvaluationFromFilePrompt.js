@@ -15,7 +15,7 @@ Analyze the provided source text and generate a precise Skill Evaluation & Compe
 
 **STRICT LAYOUT STRUCTURE (Follow this section hierarchy):**
 
-1. <p style="margin: 0;"><span style="font-size: 1.17em; font-weight: bold;">TARGET EVALUATION ROLE:</span> ${jobRole}</p>
+1. <p style="margin: 0;"><span style="font-size: 1.17em;"><strong>TARGET ROLE/LEVEL:</strong></span> ${jobRole}</p>
    <hr style="margin: 0;">
 
 2. <h3 style="margin: 0;"><strong>EVALUATION OBJECTIVE :</strong></h3> 
