@@ -176,12 +176,14 @@ const calculateCandidateFitScore = (assessmentResult) => {
  * @returns {number} Integrity score (0-100)
  */
 const calculateIntegrityScore = (assessmentResult) => {
-  let totalCheatingFlags = 0;
   let totalFullScreenExits = assessmentResult.fullScreenExitCount || 0;
   let totalTabSwitches = assessmentResult.tabSwitchCount || 0;
-  let totalQuestions = assessmentResult.totalQuestions || 0;
 
-  // Count cheating indicators across all questions
+  // Count cheating indicators and attempted questions across all questions
+  let attemptedQuestions = 0;
+  let questionsWithCheating = 0;
+  let totalHighLevelFlags = 0;
+
   assessmentResult.testQuestions?.skills?.forEach((skill) => {
     ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
       (questionType) => {
@@ -189,10 +191,28 @@ const calculateIntegrityScore = (assessmentResult) => {
         ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
           (level) => {
             questions[level]?.forEach((question) => {
+              // Count attempted questions
+              if (question.isAttempted) {
+                attemptedQuestions++;
+              }
+
+              // Count unique high-level flags per question
+              let questionFlagCount = 0;
               if (questionType === "programmingQuestions") {
-                totalCheatingFlags += question.cheatingFlags?.length || 0;
+                // For programming: count detected flags from cheatingAnalysis
+                const flagResults =
+                  question.cheatingAnalysis?.flagResults || [];
+                questionFlagCount = flagResults.filter(
+                  (f) => f.detected,
+                ).length;
               } else {
-                totalCheatingFlags += question.detectedCheatings?.length || 0;
+                // For MCQ/SQL: count detectedCheatings
+                questionFlagCount = question.detectedCheatings?.length || 0;
+              }
+
+              if (questionFlagCount > 0) {
+                questionsWithCheating++;
+                totalHighLevelFlags += questionFlagCount;
               }
             });
           },
@@ -201,32 +221,51 @@ const calculateIntegrityScore = (assessmentResult) => {
     );
   });
 
+  // Use attempted questions for normalization; fallback to totalQuestions
+  const effectiveQuestions =
+    attemptedQuestions > 0
+      ? attemptedQuestions
+      : assessmentResult.totalQuestions || 0;
+
   // Safety check
-  if (totalQuestions === 0) {
+  if (effectiveQuestions === 0) {
+    // No questions attempted — if there are global indicators, penalize
+    if (totalFullScreenExits > 0 || totalTabSwitches > 0) {
+      const exitPen = Math.min(totalFullScreenExits * 10, 30);
+      const switchPen = Math.min(totalTabSwitches * 10, 30);
+      return Math.max(0, Math.round(100 - exitPen - switchPen));
+    }
     return 100;
   }
 
-  const maxExpectedFlags = totalQuestions * 2;
-  const maxExpectedExits = totalQuestions * 1;
-  const maxExpectedSwitches = totalQuestions * 1;
+  // Cheating flags penalty (40% weight):
+  // Based on proportion of questions with cheating detected
+  const cheatingRatio = questionsWithCheating / effectiveQuestions;
+  const flagsPenalty = Math.min(cheatingRatio * 40, 40);
 
-  const flagsPenalty = Math.min(
-    (totalCheatingFlags / maxExpectedFlags) * 40,
-    40,
-  );
+  // Full-screen exits penalty (30% weight):
+  // Normalize against attempted questions
   const exitsPenalty = Math.min(
-    (totalFullScreenExits / maxExpectedExits) * 30,
-    30,
-  );
-  const switchesPenalty = Math.min(
-    (totalTabSwitches / maxExpectedSwitches) * 30,
+    (totalFullScreenExits / effectiveQuestions) * 30,
     30,
   );
 
-  const integrityScore = Math.max(
+  // Tab switches penalty (30% weight):
+  // Normalize against attempted questions
+  const switchesPenalty = Math.min(
+    (totalTabSwitches / effectiveQuestions) * 30,
+    30,
+  );
+
+  let integrityScore = Math.max(
     0,
     Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty),
   );
+
+  // Minimum penalty floor: if cheating IS detected, score can't be above 85
+  if (questionsWithCheating > 0 && integrityScore > 85) {
+    integrityScore = 85;
+  }
 
   return isNaN(integrityScore) ? 100 : integrityScore;
 };
