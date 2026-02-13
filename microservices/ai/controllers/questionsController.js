@@ -291,6 +291,11 @@ JAVA-SPECIFIC RULE (SUPER IMPORTANT FOR JUDGE0):
   * static void solve(...) (or static returnType solve(...))
 - main() should do input/output wiring and call solve(); keep solve() as TODO-only (no algorithm logic).
 - Do NOT use any other public class name.
+- STRICT JAVA BOILERPLATE GUARD:
+  * In Java main(), allow ONLY: initialize Scanner/input string, minimal parsing scaffolding, call solve(...), print returned placeholder/result variable, close scanner.
+  * FORBIDDEN in Java boilerplate: problem-solving loops/conditionals, stack/queue/tree/map algorithm setup, or any problem-specific state transitions.
+  * FORBIDDEN in Java boilerplate: problem-specific variable names derived from the statement (use generic names like input, tokens, result).
+  * If the generated Java code could already solve the problem for real inputs, it is INVALID and must be replaced with a skeleton.
 
 CRITICAL FORMATTING REQUIREMENTS:
 1. Use actual newline characters (\\n) NOT <br/> tags
