@@ -268,6 +268,7 @@ const processProgrammingResponse = async (responseData) => {
       analysisId,
       processingCost,
       contextType, // Pass context type to handler
+      executionSummary, // Pass execution summary to handler to prevent score overwrite
       aiAnalysis: {
         logicalCorrectness: aiAnalysis.logicalCorrectness,
         codeQuality: aiAnalysis.codeQuality,

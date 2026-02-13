@@ -832,6 +832,7 @@ const updateProgrammingQuestionAnalysis = async ({
   analysisId,
   processingCost,
   contextType,
+  executionSummary, // Passed from processor to prioritize test execution results
   aiAnalysis, // NEW: Contains logicalCorrectness and codeQuality scores
 }) => {
   const mongoose = require("mongoose");
@@ -1096,10 +1097,47 @@ const updateProgrammingQuestionAnalysis = async ({
       const aiLogicalScore = aiAnalysis?.logicalCorrectness?.score || 0;
       const aiCodeQualityScore = aiAnalysis?.codeQuality?.score || 0;
 
-      // Calculate new score based on AI logic (0-100 scale)
-      const newObtainedScore = Math.round(
-        (aiLogicalScore / 100) * questionMarks,
-      );
+      // Determine the final score to update
+      let newObtainedScore = 0;
+      let shouldUseExecutionScore = false;
+
+      // PRIORITY 1: Use execution summary (test cases) if available
+      if (
+        executionSummary &&
+        (typeof executionSummary.earnedScore === "number" ||
+          typeof executionSummary.earnedScore === "string")
+      ) {
+        const earned = parseFloat(executionSummary.earnedScore);
+        if (!isNaN(earned)) {
+          newObtainedScore = earned;
+          shouldUseExecutionScore = true;
+          logger.info("Using execution summary score over AI score", {
+            executionScore: newObtainedScore,
+            aiScore: aiLogicalScore,
+            questionId,
+          });
+        } else {
+          // Fallback if parsing failed
+          newObtainedScore = Math.round((aiLogicalScore / 100) * questionMarks);
+          logger.warn(
+            "Execution summary score parsing failed, using AI score",
+            {
+              earnedScore: executionSummary.earnedScore,
+              aiScore: aiLogicalScore,
+              questionId,
+            },
+          );
+        }
+      }
+      // PRIORITY 2: Use AI score if no execution summary available
+      else {
+        newObtainedScore = Math.round((aiLogicalScore / 100) * questionMarks);
+        logger.info("Using AI score (no execution summary)", {
+          aiScore: aiLogicalScore,
+          newObtainedScore,
+          questionId,
+        });
+      }
 
       // Calculate score difference to update totals via $inc (safer for concurrency)
       const scoreDiff = newObtainedScore - oldScore;
