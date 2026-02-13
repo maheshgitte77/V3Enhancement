@@ -1946,17 +1946,7 @@ ${isScenarioBased
     - Go: fmt.Scan/fmt.Scanln
     - PHP: fgets(STDIN)
     - Rust: stdin().read_line()
-  * JAVA-SPECIFIC RULE (SUPER IMPORTANT):
-    - Java output MUST use exactly: public class Main { ... }
-    - Keep both methods inside Main:
-      1) public static void main(String[] args)
-      2) static void solve(...) (or static returnType solve(...))
-    - main() handles input/output and calls solve(); solve() remains TODO-only (no algorithm logic).
-    - Never use another public class name (e.g., Solution/App/UserMain).
-    - In Java main(), allow ONLY: Scanner/input setup, minimal parsing scaffolding, call solve(...), print placeholder/result, close scanner.
-    - FORBIDDEN in Java boilerplate: problem-solving loops/conditionals, stack/queue/tree/map algorithm setup, or problem-specific state transitions.
-    - FORBIDDEN in Java boilerplate: problem-specific variable names from the statement; use generic names (input, tokens, result).
-    - If Java code can already solve the problem end-to-end, it is INVALID and must be rewritten as skeleton-only.
+  * JAVA RULE: Java class should start with public class Main only.
   * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
 
 If titles are provided, you MUST (NO EXCEPTIONS):
@@ -2159,7 +2149,7 @@ Return JSON in this format:
                 ? supportedLanguageNamesForTemplate
                   .map(
                     (langName) =>
-                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). For Java, MUST use exactly public class Main with both methods inside it: public static void main(String[] args) and static solve(...). main must only do input/output wiring and call solve; solve stays TODO-only. Never use any other public class name. Do NOT include problem-solving loops/conditionals or stack/queue/tree/map algorithm setup in boilerplate. Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
+                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). Java rule: class should start with public class Main only. Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
                   )
                   .join(",")
                 : ""

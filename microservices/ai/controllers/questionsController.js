@@ -284,18 +284,7 @@ Code runs non-interactive. Use ONLY these input methods:
 - Rust: stdin().read_line()
 
 Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
-JAVA-SPECIFIC RULE (SUPER IMPORTANT FOR JUDGE0):
-- Java code MUST use exactly: public class Main { ... }
-- Place BOTH methods inside Main:
-  * public static void main(String[] args)
-  * static void solve(...) (or static returnType solve(...))
-- main() should do input/output wiring and call solve(); keep solve() as TODO-only (no algorithm logic).
-- Do NOT use any other public class name.
-- STRICT JAVA BOILERPLATE GUARD:
-  * In Java main(), allow ONLY: initialize Scanner/input string, minimal parsing scaffolding, call solve(...), print returned placeholder/result variable, close scanner.
-  * FORBIDDEN in Java boilerplate: problem-solving loops/conditionals, stack/queue/tree/map algorithm setup, or any problem-specific state transitions.
-  * FORBIDDEN in Java boilerplate: problem-specific variable names derived from the statement (use generic names like input, tokens, result).
-  * If the generated Java code could already solve the problem for real inputs, it is INVALID and must be replaced with a skeleton.
+JAVA RULE: Java class should start with public class Main only.
 
 CRITICAL FORMATTING REQUIREMENTS:
 1. Use actual newline characters (\\n) NOT <br/> tags
