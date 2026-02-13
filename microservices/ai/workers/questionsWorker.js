@@ -1749,7 +1749,6 @@ ${isScenarioBased
     - C++: cin
     - C: scanf
     - Go: fmt.Scan/fmt.Scanln
-    - Kotlin: Scanner(System.`in`)
     - PHP: fgets(STDIN)
     - Rust: stdin().read_line()
   * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
@@ -1945,7 +1944,6 @@ ${isScenarioBased
     - C++: cin
     - C: scanf
     - Go: fmt.Scan/fmt.Scanln
-    - Kotlin: Scanner(System.`in`)
     - PHP: fgets(STDIN)
     - Rust: stdin().read_line()
   * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
@@ -2150,7 +2148,7 @@ Return JSON in this format:
                 ? supportedLanguageNamesForTemplate
                   .map(
                     (langName) =>
-                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; Kotlin: Scanner(System.\\\`in\\\`); PHP: fgets(STDIN); Rust: stdin().read_line(). Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
+                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
                   )
                   .join(",")
                 : ""

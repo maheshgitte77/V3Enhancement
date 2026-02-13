@@ -280,7 +280,6 @@ Code runs non-interactive. Use ONLY these input methods:
 - C++: cin
 - C: scanf
 - Go: fmt.Scan/fmt.Scanln
-- Kotlin: Scanner(System.`in`)
 - PHP: fgets(STDIN)
 - Rust: stdin().read_line()
 
