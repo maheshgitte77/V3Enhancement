@@ -1929,7 +1929,7 @@ ${isScenarioBased
   * **WHAT TO INCLUDE**: Only input reading (language-specific STDIN methods), empty function/class structure, TODO comment like "// TODO: Implement the solution here"
   * **EXAMPLE OF CORRECT BOILERPLATE**: 
     - C++: #include headers, main() with cin for input, empty function with TODO, placeholder output
-    - Java: imports, main() with Scanner(System.in) for input, empty method with TODO, placeholder System.out.println
+    - Java: imports, public class Main { ... }, main() with Scanner(System.in) for input, separate solve() with TODO, placeholder System.out.println
     - JavaScript (Node.js): const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); (ONLY this method, NO other imports) empty function with TODO, placeholder console.log
     - Python: imports, input() or sys.stdin.read() for input, empty function with TODO, placeholder print
   * Use \\n for newlines in boilerplate code (NOT <br/>)
@@ -1946,6 +1946,13 @@ ${isScenarioBased
     - Go: fmt.Scan/fmt.Scanln
     - PHP: fgets(STDIN)
     - Rust: stdin().read_line()
+  * JAVA-SPECIFIC RULE (SUPER IMPORTANT):
+    - Java output MUST use exactly: public class Main { ... }
+    - Keep both methods inside Main:
+      1) public static void main(String[] args)
+      2) static void solve(...) (or static returnType solve(...))
+    - main() handles input/output and calls solve(); solve() remains TODO-only (no algorithm logic).
+    - Never use another public class name (e.g., Solution/App/UserMain).
   * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
 
 If titles are provided, you MUST (NO EXCEPTIONS):
@@ -2148,7 +2155,7 @@ Return JSON in this format:
                 ? supportedLanguageNamesForTemplate
                   .map(
                     (langName) =>
-                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
+                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). For Java, MUST use exactly public class Main with both methods inside it: public static void main(String[] args) and static solve(...), where main handles I/O and calls solve(). Never use any other public class name. Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
                   )
                   .join(",")
                 : ""

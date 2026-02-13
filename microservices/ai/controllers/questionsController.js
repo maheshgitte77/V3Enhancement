@@ -284,6 +284,13 @@ Code runs non-interactive. Use ONLY these input methods:
 - Rust: stdin().read_line()
 
 Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
+JAVA-SPECIFIC RULE (SUPER IMPORTANT FOR JUDGE0):
+- Java code MUST use exactly: public class Main { ... }
+- Place BOTH methods inside Main:
+  * public static void main(String[] args)
+  * static void solve(...) (or static returnType solve(...))
+- main() should do input/output wiring and call solve(); keep solve() as TODO-only (no algorithm logic).
+- Do NOT use any other public class name.
 
 CRITICAL FORMATTING REQUIREMENTS:
 1. Use actual newline characters (\\n) NOT <br/> tags
