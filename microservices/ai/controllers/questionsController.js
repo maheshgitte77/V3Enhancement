@@ -260,7 +260,7 @@ CRITICAL BOILERPLATE CODE REQUIREMENTS:
 2. DO NOT include example implementations, helper functions with logic, or any code that solves the problem
 3. ONLY include:
    - Required imports/headers
-   - Input reading code (e.g., Scanner, readline, input())
+   - Input reading code (language-specific STDIN methods - see JUDGE0 section below)
    - Basic structure (main function, class definition)
    - A separate empty logic function/method (e.g., solve(), compute(), or class method) with a TODO comment
    - A TODO comment indicating where candidates should implement their solution (e.g., '// TODO: Implement the solution here' or '# TODO: Implement the solution here')
@@ -271,6 +271,26 @@ CRITICAL BOILERPLATE CODE REQUIREMENTS:
 5. **ABSOLUTE BAN**:
    - No loops, no conditionals, no algorithm steps, no data structure logic in the logic function body
    - The logic function body must be EMPTY except for a TODO comment (and optional return or throw statements)
+
+JUDGE0 COMPATIBILITY (MANDATORY):
+Code runs non-interactive. Use ONLY these input methods:
+- JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');
+- Python: input() or sys.stdin.read()
+- Java: Scanner(System.in)
+- C++: cin
+- C: scanf
+- Go: fmt.Scan/fmt.Scanln
+- PHP: fgets(STDIN)
+- Rust: stdin().read_line()
+
+Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
+JAVA-SPECIFIC RULE (SUPER IMPORTANT FOR JUDGE0):
+- Java code MUST use exactly: public class Main { ... }
+- Place BOTH methods inside Main:
+  * public static void main(String[] args)
+  * static void solve(...) (or static returnType solve(...))
+- main() should do input/output wiring and call solve(); keep solve() as TODO-only (no algorithm logic).
+- Do NOT use any other public class name.
 
 CRITICAL FORMATTING REQUIREMENTS:
 1. Use actual newline characters (\\n) NOT <br/> tags
