@@ -1741,6 +1741,34 @@ ${isScenarioBased
     - "Check if a string contains valid parentheses"
     - "Merge two sorted arrays into one sorted array"
   * Focus on clarity and standard problem formulations rather than job-role specific scenarios`}
+- **JUDGE0 API COMPATIBILITY - MANDATORY (CRITICAL FOR EXECUTION)**:
+  * **STRICT REQUIREMENT**: All programming questions and boilerplate code MUST be fully compatible with Judge0 online compiler
+  * **PROGRAM MUST BE NON-INTERACTIVE** - Judge0 runs code non-interactive (no prompts)
+  * **NEVER USE** (these will cause Judge0 to hang forever):
+    - readline.question() (JavaScript/Node.js) - this waits forever for input that never comes
+    - prompts or any interactive console input
+    - scanners waiting for user input (Java Scanner with prompts before reading)
+    - input() loops asking questions (Python)
+    - any interactive console input methods
+    - print statements like "Enter number", "Enter input", "Please provide input", etc.
+  * **ALWAYS USE STDIN-BASED INPUT ONLY** (non-interactive):
+    - JavaScript (Node.js): fs.readFileSync(0, 'utf8') or require('readline') with proper non-interactive setup (read from stdin stream, not readline.question)
+    - Python: input() or sys.stdin.read() (single reads, no prompts before reading)
+    - Java: Scanner(System.in) (read directly, NO System.out.print prompts before reading)
+    - C++: cin (direct reads, NO cout prompts before reading)
+    - C: scanf (direct reads, NO printf prompts before reading)
+  * **OUTPUT RULES**:
+    - ONLY print the required output (no prompts, no "Enter number" messages)
+    - No instructional messages to users
+    - Output must match test case expectations exactly
+  * **BOILERPLATE CODE REQUIREMENTS**:
+    - Must read input from STDIN only (non-interactive)
+    - Must have structure for logic processing (empty function/method with TODO - NO actual logic implementation)
+    - Must print output directly (via placeholder call to empty logic function)
+    - Must run directly in Judge0 without modification (but will not produce correct output until candidate implements the logic)
+    - If any interactive input is used, the solution is INVALID
+    - **CRITICAL**: The boilerplate must NOT contain any solution logic - only structure (empty function with TODO comment)
+  * **VALIDATION**: Before generating boilerplate code, verify it uses ONLY non-interactive STDIN input methods. Test mentally: if Judge0 runs this code, will it wait for user input? If yes, it's WRONG.
 - **Experience Level Tailoring** (${experience} years):
   * ${experience <= 3
           ? "Junior Level"
@@ -1925,6 +1953,34 @@ ${isScenarioBased
   * Follow language-specific formatting standards
   * **IMPORTANT**: The boilerplate code must be a clean starting point where candidates write ALL solution logic themselves.
   * **IMPORTANT**: The boilerplate code does not include any solution logic or algorithm implementation.
+- **JUDGE0 API COMPATIBILITY - MANDATORY (CRITICAL FOR EXECUTION)**:
+  * **STRICT REQUIREMENT**: All programming questions and boilerplate code MUST be fully compatible with Judge0 online compiler
+  * **PROGRAM MUST BE NON-INTERACTIVE** - Judge0 runs code non-interactive (no prompts)
+  * **NEVER USE** (these will cause Judge0 to hang forever):
+    - readline.question() (JavaScript/Node.js)
+    - prompts or any interactive console input
+    - scanners waiting for user input (Java Scanner with prompts)
+    - input() loops asking questions (Python)
+    - any interactive console input methods
+    - print statements like "Enter number", "Enter input", "Please provide input", etc.
+  * **ALWAYS USE STDIN-BASED INPUT ONLY** (non-interactive):
+    - JavaScript (Node.js): fs.readFileSync(0, 'utf8') or require('readline') with proper non-interactive setup
+    - Python: input() or sys.stdin.read() (single reads, no prompts)
+    - Java: Scanner(System.in) (read directly, no System.out.print prompts before reading)
+    - C++: cin (direct reads, no cout prompts before reading)
+    - C: scanf (direct reads, no printf prompts before reading)
+  * **OUTPUT RULES**:
+    - ONLY print the required output (no prompts, no "Enter number" messages)
+    - No instructional messages to users
+    - Output must match test case expectations exactly
+  * **BOILERPLATE CODE REQUIREMENTS**:
+    - Must read input from STDIN only (non-interactive)
+    - Must have structure for logic processing (empty function/method with TODO - NO actual logic implementation)
+    - Must print output directly (via placeholder call to empty logic function)
+    - Must run directly in Judge0 without modification (but will not produce correct output until candidate implements the logic)
+    - If any interactive input is used, the solution is INVALID
+    - **CRITICAL**: The boilerplate must NOT contain any solution logic - only structure (empty function with TODO comment)
+  * **VALIDATION**: Before generating boilerplate code, verify it uses ONLY non-interactive STDIN input methods. Test mentally: if Judge0 runs this code, will it wait for user input? If yes, it's WRONG.
 
 If titles are provided, you MUST (NO EXCEPTIONS):
 - Generate exactly one Programming question per title, in the SAME ORDER as the list below.
@@ -2126,7 +2182,7 @@ Return JSON in this format:
                 ? supportedLanguageNamesForTemplate
                   .map(
                     (langName) =>
-                      `"${langName}": "CRITICAL: Generate ONLY boilerplate code with \\\\n for newlines. Include: imports/headers, input reading code (Scanner/readline/input()), basic structure (main function/class), TODO comment (e.g., '// TODO: Implement the solution here')"`,
+                      `"${langName}": "CRITICAL: Generate ONLY boilerplate code with \\\\n for newlines. Include: imports/headers, input reading code (Scanner/readline/input()), basic structure (main function/class), TODO comment (e.g., '// TODO: Implement the solution here'). JUDGE0 COMPATIBILITY MANDATORY: Use ONLY non-interactive STDIN input (JavaScript: fs.readFileSync(0, 'utf8'), Python: input()/sys.stdin.read(), Java: Scanner(System.in), C++: cin, C: scanf). NEVER use readline.question(), prompts, or any interactive input. NO print statements like 'Enter number' or 'Enter input'. Only print the required output."`,
                   )
                   .join(",")
                 : ""
