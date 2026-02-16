@@ -806,10 +806,10 @@ const updateCandidate = async (req, res) => {
     const { id, newEmail, newMobile, status, jobId } = req.body;
     const redis = req.redis;
 
-    if (!requestId || !id || !newEmail || !newMobile || !status || !jobId) {
+    if (!requestId || !id || !newEmail || !status || !jobId) {
       return res.status(400).json({
         error:
-          "requestId, id, newEmail, newMobile, status, and jobId are required",
+          "requestId, id, newEmail, status, and jobId are required",
       });
     }
 
@@ -818,9 +818,16 @@ const updateCandidate = async (req, res) => {
       return res.status(400).json({ error: "Invalid email format" });
     }
 
-    const mobileRegex = /^\d{10}$/;
-    if (!mobileRegex.test(newMobile)) {
-      return res.status(400).json({ error: "Invalid mobile number format" });
+    // Validate mobile number: 7-15 digits (matching frontend validation)
+    // Allow empty/null/undefined to skip validation (will fall back to existing mobile)
+    if (newMobile !== undefined && newMobile !== null && newMobile !== "") {
+      const trimmedMobile = String(newMobile).trim();
+      const mobileRegex = /^\d{7,15}$/;
+      if (trimmedMobile && !mobileRegex.test(trimmedMobile)) {
+        return res.status(400).json({ 
+          error: "Invalid mobile number format. Mobile number must be 7-15 digits." 
+        });
+      }
     }
 
     if (status !== "Valid") {
@@ -868,7 +875,7 @@ const updateCandidate = async (req, res) => {
       email: newEmail,
       mobile: {
         countryCode: candidate.mobile?.countryCode || "+91",
-        number: newMobile,
+        number: newMobile || candidate.mobile?.number,
       },
       status: "Valid",
       details: "Candidate details updated",
