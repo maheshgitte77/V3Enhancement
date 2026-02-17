@@ -70,6 +70,26 @@ const safeJsonParse = (text) => {
   }
 };
 
+const extractHttpErrorDetails = (error) => {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  let details = "";
+  if (data && typeof data === "object") {
+    if (data.message) details = data.message;
+    else if (data.error) details = data.error;
+    else details = JSON.stringify(data);
+  } else if (typeof data === "string") {
+    details = data;
+  }
+  return { status, details };
+};
+
+const isRetriableError = (error) => {
+  const status = error?.response?.status;
+  if (!status) return true;
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+};
+
 const withRetry = async (fn, retries = 3, delayMs = 1000) => {
   let lastError = null;
   for (let i = 0; i < retries; i += 1) {
@@ -77,6 +97,9 @@ const withRetry = async (fn, retries = 3, delayMs = 1000) => {
       return await fn();
     } catch (error) {
       lastError = error;
+      if (!isRetriableError(error)) {
+        throw error;
+      }
       if (i >= retries - 1) break;
       await new Promise((resolve) => setTimeout(resolve, delayMs * (i + 1)));
     }
@@ -104,7 +127,7 @@ const normalizeSupportedLanguages = (question) => {
 
   return languageList
     .map((lang) => ({
-      languageId: lang?.languageId,
+      languageId: Number(lang?.languageId),
       languageName: lang?.languageName,
       codeSnippet: sanitizeText(
         lang?.codeSnippet || lang?.starterCode || boilerplateMap?.[lang?.languageName] || "",
@@ -192,54 +215,81 @@ const executeBulk = async ({
   timeLimit,
   memoryLimit,
 }) => {
+  const safeTimeLimit = Number.isFinite(Number(timeLimit)) ? Number(timeLimit) : 5;
+  const safeMemoryLimit = Number.isFinite(Number(memoryLimit))
+    ? Number(memoryLimit)
+    : 128;
   const payload = {
     codeSubmissions: languageExecutions.map((item) => ({
       code: item.code,
-      languageId: item.languageId,
+      languageId: Number(item.languageId),
       languageName: item.languageName,
     })),
     testCases,
-    timeLimit,
-    memoryLimit,
+    timeLimit: safeTimeLimit,
+    memoryLimit: safeMemoryLimit,
   };
 
   vLog("judge0-bulk", "Calling bulk execution API", {
     bulkUrl: BULK_EXECUTION_URL,
     languages: languageExecutions.length,
     testCases: testCases.length,
-    timeLimit,
-    memoryLimit,
+    timeLimit: safeTimeLimit,
+    memoryLimit: safeMemoryLimit,
+    languageIdTypes: payload.codeSubmissions
+      .map((x) => typeof x.languageId)
+      .join(","),
   });
-  const response = await axios.post(BULK_EXECUTION_URL, payload, {
-    timeout: EXECUTION_TIMEOUT_MS,
-    headers: buildExecutionHeaders(),
-  });
-  return response.data;
+  try {
+    const response = await axios.post(BULK_EXECUTION_URL, payload, {
+      timeout: EXECUTION_TIMEOUT_MS,
+      headers: buildExecutionHeaders(),
+    });
+    return response.data;
+  } catch (error) {
+    const { status, details } = extractHttpErrorDetails(error);
+    vLog("judge0-bulk", "Bulk execution API failed", { status, details });
+    throw error;
+  }
 };
 
 const executeSingle = async ({ code, languageId, testCases, timeLimit, memoryLimit }) => {
+  const safeTimeLimit = Number.isFinite(Number(timeLimit)) ? Number(timeLimit) : 5;
+  const safeMemoryLimit = Number.isFinite(Number(memoryLimit))
+    ? Number(memoryLimit)
+    : 128;
   vLog("judge0-single", "Calling single execution API", {
     singleUrl: SINGLE_EXECUTION_URL,
     languageId,
     testCases: testCases.length,
-    timeLimit,
-    memoryLimit,
+    timeLimit: safeTimeLimit,
+    memoryLimit: safeMemoryLimit,
   });
-  const response = await axios.post(
-    SINGLE_EXECUTION_URL,
-    {
-      code,
+  try {
+    const response = await axios.post(
+      SINGLE_EXECUTION_URL,
+      {
+        code,
+        languageId: Number(languageId),
+        testCases,
+        timeLimit: safeTimeLimit,
+        memoryLimit: safeMemoryLimit,
+      },
+      {
+        timeout: EXECUTION_TIMEOUT_MS,
+        headers: buildExecutionHeaders(),
+      },
+    );
+    return response.data;
+  } catch (error) {
+    const { status, details } = extractHttpErrorDetails(error);
+    vLog("judge0-single", "Single execution API failed", {
+      status,
       languageId,
-      testCases,
-      timeLimit,
-      memoryLimit,
-    },
-    {
-      timeout: EXECUTION_TIMEOUT_MS,
-      headers: buildExecutionHeaders(),
-    },
-  );
-  return response.data;
+      details,
+    });
+    throw error;
+  }
 };
 
 const executeAgainstJudge = async ({
@@ -271,8 +321,11 @@ const executeAgainstJudge = async ({
     }
     vLog("judge0-bulk", "Bulk execution returned empty results, using fallback");
   } catch (error) {
+    const { status, details } = extractHttpErrorDetails(error);
     vLog("judge0-bulk", "Bulk execution failed, using single fallback", {
       error: error.message,
+      status,
+      details,
     });
   }
 
