@@ -148,56 +148,197 @@ const applyBoilerplateMap = (question, boilerplateMap) => {
   });
 };
 
-const buildSolutionPrompt = ({ question, testCases, language }) => `
-You are solving a programming challenge for judge execution.
+const normalizeLanguageKey = (name = "") => String(name).toLowerCase();
+
+const detectLanguageFamily = (languageName = "") => {
+  const v = normalizeLanguageKey(languageName);
+  if (v.includes("c++")) return "cpp";
+  if (v.includes("java")) return "java";
+  if (v.includes("python")) return "python";
+  if (v.includes("javascript") || v.includes("node")) return "javascript";
+  return "other";
+};
+
+const hasInputRead = (code = "", family = "other") => {
+  const c = String(code);
+  if (family === "cpp") return /\bcin\b/.test(c);
+  if (family === "java") return /Scanner\s*\(/.test(c);
+  if (family === "python") return /\binput\s*\(|sys\.stdin/.test(c);
+  if (family === "javascript") return /readFileSync\s*\(\s*0/.test(c);
+  return c.length > 0;
+};
+
+const hasOutputWrite = (code = "", family = "other") => {
+  const c = String(code);
+  if (family === "cpp") return /\bcout\b/.test(c);
+  if (family === "java") return /System\.out/.test(c);
+  if (family === "python") return /\bprint\s*\(/.test(c);
+  if (family === "javascript") return /console\.log/.test(c);
+  return c.length > 0;
+};
+
+const hasTodoPlaceholder = (code = "") =>
+  /TODO|Implement the solution here|pass\s*$|return\s+0\.?0?;?\s*$/im.test(
+    String(code),
+  );
+
+const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
+  const family = detectLanguageFamily(languageName);
+  const checks = {
+    hasInputRead: hasInputRead(codeSnippet, family),
+    hasOutputWrite: hasOutputWrite(codeSnippet, family),
+    hasTodo: hasTodoPlaceholder(codeSnippet),
+  };
+  return {
+    family,
+    valid: checks.hasInputRead && checks.hasOutputWrite && checks.hasTodo,
+    checks,
+  };
+};
+
+const buildBoilerplateRepairPrompt = ({ question, language, testCases }) => `
+You are repairing a programming boilerplate skeleton for ${language.languageName}.
 
 Return ONLY JSON:
 {
-  "solution": "full runnable code"
+  "boilerplateCode": "corrected boilerplate code"
 }
 
-Rules:
-1) Generate complete runnable ${language.languageName} code that reads stdin and writes correct stdout.
-2) It must satisfy all provided test cases exactly.
-3) Do not include markdown fences.
+Requirements:
+1) Must include input reading compatible with Judge0 for ${language.languageName}.
+2) Must include output writing.
+3) Must include a clear TODO placeholder where solution logic should be added.
+4) Keep it minimal and syntactically correct.
+5) No markdown fences.
 
-Question Title: ${question.questionTitle || "Untitled"}
-Question Statement:
+Question:
 ${sanitizeText(question.question || "")}
 
-Test Cases:
+Current boilerplate:
+${language.codeSnippet || ""}
+
+Testcases:
 ${JSON.stringify(testCases, null, 2)}
 `;
 
-const buildFixPrompt = ({ question, failures, testCases, languages }) => `
-You are fixing a generated programming question package after Judge0 failures.
+const buildLogicBlockPrompt = ({ question, testCases, language }) => `
+You are given a boilerplate skeleton for ${language.languageName}.
+Generate ONLY the required logic block to replace TODO in this skeleton.
+
+Return ONLY JSON:
+{
+  "todoReplacement": "code block only, no full program"
+}
+
+Rules:
+1) Do not return full code file.
+2) Return only function/method body logic for TODO area.
+3) Must pass provided test cases when inserted into boilerplate.
+4) No markdown fences.
+
+Question:
+${sanitizeText(question.question || "")}
+
+Boilerplate:
+${language.codeSnippet || ""}
+
+Testcases:
+${JSON.stringify(testCases, null, 2)}
+`;
+
+const indentLines = (text, spaces) =>
+  String(text || "")
+    .split("\n")
+    .map((line) => `${" ".repeat(spaces)}${line}`)
+    .join("\n");
+
+const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName }) => {
+  const family = detectLanguageFamily(languageName);
+  const logic = sanitizeText(todoReplacement);
+  if (!logic) return { mergedCode: boilerplate, injected: false };
+  let code = String(boilerplate || "");
+
+  // Preferred deterministic path: replace TODO comment line.
+  if (/TODO|Implement the solution here/i.test(code)) {
+    if (family === "python") {
+      code = code.replace(
+        /^(\s*)#?\s*.*TODO.*$/im,
+        (_, indent) => indentLines(logic, indent.length),
+      );
+      code = code.replace(/^(\s*)pass\s*$/im, (_, indent) =>
+        indentLines(logic, indent.length),
+      );
+    } else {
+      code = code.replace(
+        /^(\s*)\/\/\s*.*TODO.*$/im,
+        (_, indent) => indentLines(logic, indent.length),
+      );
+      code = code.replace(
+        /^(\s*)#\s*.*TODO.*$/im,
+        (_, indent) => indentLines(logic, indent.length),
+      );
+    }
+    return { mergedCode: code, injected: true };
+  }
+
+  // Fallback injectors by language family.
+  if (family === "python") {
+    code = code.replace(/^(\s*)pass\s*$/im, (_, indent) =>
+      indentLines(logic, indent.length),
+    );
+  } else if (family === "javascript") {
+    code = code.replace(/function\s+solve\s*\([^)]*\)\s*\{([\s\S]*?)\}/m, (m, body) => {
+      const indent = (body.match(/\n(\s*)/) || [null, "  "])[1];
+      return m.replace(body, `\n${indentLines(logic, indent.length)}\n`);
+    });
+  } else if (family === "java" || family === "cpp") {
+    code = code.replace(/\{\s*\n(\s*)(?:return\s+0(?:\.0)?;?)?\s*\n\s*\}/m, (_, indent) => {
+      return `{\n${indentLines(logic, indent.length)}\n${indent}}`;
+    });
+  }
+
+  return { mergedCode: code, injected: true };
+};
+
+const buildRootCauseFixPrompt = ({
+  question,
+  failures,
+  testCases,
+  languages,
+  fixMode,
+}) => `
+You are fixing an AI-generated programming question package after Judge0 failures.
 
 Return ONLY JSON with this exact shape:
 {
   "testCases": [{"input":"","output":"","explanation":"","visible":true,"weightage":20}],
   "boilerplateCode": {
     "LanguageName": "starter code"
+  },
+  "logicBlocks": {
+    "LanguageName": "TODO replacement logic block only"
   }
 }
 
-Constraints:
-1) Fix only what is required to make solution execution pass across languages.
-2) Keep test case count similar unless clearly incorrect.
-3) Preserve language names exactly from requested list.
-4) Boilerplate must be Judge0 compatible and contain no solved algorithm logic.
+Fix mode: ${fixMode}
+
+Rules:
+1) If mode is testcase_repair, prioritize correcting only testcase input/output.
+2) If mode is boilerplate_repair, prioritize failing language boilerplate only.
+3) If mode is logic_repair, prioritize logic blocks only for failing languages.
+4) Keep response minimal; omit fields you are not changing.
 5) No markdown fences.
 
-Question Title: ${question.questionTitle || "Untitled"}
-Question Statement:
+Question:
 ${sanitizeText(question.question || "")}
 
 Languages:
 ${JSON.stringify(languages, null, 2)}
 
-Current Test Cases:
+Current testcases:
 ${JSON.stringify(testCases, null, 2)}
 
-Judge0 Failures:
+Judge0 failures:
 ${JSON.stringify(failures, null, 2)}
 `;
 
@@ -368,7 +509,49 @@ const executeAgainstJudge = async ({
   return singleResults;
 };
 
-const generateLanguageSolution = async ({
+const repairBoilerplateIfNeeded = async ({
+  genAI,
+  modelName,
+  question,
+  testCases,
+  language,
+}) => {
+  const contract = checkBoilerplateContract(language.codeSnippet, language.languageName);
+  if (contract.valid) return { language, repaired: false, contract };
+
+  vLog("contract-check", "Boilerplate contract missing items, repairing", {
+    language: language.languageName,
+    hasInputRead: contract.checks.hasInputRead,
+    hasOutputWrite: contract.checks.hasOutputWrite,
+    hasTodo: contract.checks.hasTodo,
+  });
+
+  const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
+  const response = await withRetry(
+    () =>
+      model.generateContent(
+        buildBoilerplateRepairPrompt({ question, language, testCases }),
+      ),
+    2,
+    1000,
+  );
+  const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const parsed = safeJsonParse(text);
+  if (!parsed?.boilerplateCode || typeof parsed.boilerplateCode !== "string") {
+    throw new Error(`Invalid repaired boilerplate for ${language.languageName}`);
+  }
+  const repairedLanguage = { ...language, codeSnippet: sanitizeText(parsed.boilerplateCode) };
+  const repairedContract = checkBoilerplateContract(
+    repairedLanguage.codeSnippet,
+    repairedLanguage.languageName,
+  );
+  if (!repairedContract.valid) {
+    throw new Error(`Boilerplate contract still invalid for ${language.languageName}`);
+  }
+  return { language: repairedLanguage, repaired: true, contract: repairedContract };
+};
+
+const generateLogicBlockOnly = async ({
   genAI,
   modelName,
   question,
@@ -381,19 +564,46 @@ const generateLanguageSolution = async ({
   });
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
   const response = await withRetry(
-    () => model.generateContent(buildSolutionPrompt({ question, testCases, language })),
+    () => model.generateContent(buildLogicBlockPrompt({ question, testCases, language })),
     3,
     1000,
   );
   const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = safeJsonParse(text);
-  if (!parsed?.solution || typeof parsed.solution !== "string") {
-    throw new Error(`Invalid solution for ${language.languageName}`);
+  if (!parsed?.todoReplacement || typeof parsed.todoReplacement !== "string") {
+    throw new Error(`Invalid logic block for ${language.languageName}`);
   }
   vLog("solution-generate", "Generated solution successfully", {
     language: language.languageName,
   });
-  return sanitizeText(parsed.solution);
+  return sanitizeText(parsed.todoReplacement);
+};
+
+const classifyFixMode = (executionResults = []) => {
+  const failed = executionResults.filter((x) => {
+    const passed = Number(x?.summary?.passed || 0);
+    const total = Number(x?.summary?.total || 0);
+    return !(x?.success !== false && total > 0 && passed === total);
+  });
+  if (failed.length === 0) return "none";
+  const failedCompile = failed.filter((x) =>
+    /Compilation Error|compile/i.test(
+      `${x?.summary?.message || ""} ${x?.error || ""} ${
+        (x?.results || []).map((r) => r?.status || "").join(" ")
+      }`,
+    ),
+  );
+  if (failedCompile.length === 1) return "boilerplate_repair";
+  const allFailed = failed.length === executionResults.length;
+  const wrongAnswerLike = failed.every((x) =>
+    /Wrong Answer|0\/100|Failed/i.test(
+      `${x?.summary?.message || ""} ${x?.error || ""} ${
+        (x?.results || []).map((r) => r?.status || "").join(" ")
+      }`,
+    ),
+  );
+  if (allFailed && wrongAnswerLike) return "testcase_repair";
+  return "logic_repair";
 };
 
 const generateFixes = async ({
@@ -403,15 +613,23 @@ const generateFixes = async ({
   failures,
   testCases,
   languages,
+  fixMode,
 }) => {
   vLog("fix-generate", "Generating fixes from failure analysis", {
     failedLanguages: Array.isArray(failures) ? failures.length : 0,
+    fixMode,
   });
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
   const response = await withRetry(
     () =>
       model.generateContent(
-        buildFixPrompt({ question, failures, testCases, languages }),
+        buildRootCauseFixPrompt({
+          question,
+          failures,
+          testCases,
+          languages,
+          fixMode,
+        }),
       ),
     3,
     1000,
@@ -423,6 +641,10 @@ const generateFixes = async ({
     boilerplateCode:
       parsed?.boilerplateCode && typeof parsed.boilerplateCode === "object"
         ? parsed.boilerplateCode
+        : null,
+    logicBlocks:
+      parsed?.logicBlocks && typeof parsed.logicBlocks === "object"
+        ? parsed.logicBlocks
         : null,
   };
 };
@@ -457,6 +679,14 @@ const verifyOneProgrammingQuestion = async ({
   const workingQuestion = JSON.parse(JSON.stringify(question || {}));
   workingQuestion.testCases = normalizeTestCases(workingQuestion.testCases);
   workingQuestion.supportedLanguages = normalizeSupportedLanguages(workingQuestion);
+  const languageStates = (workingQuestion.supportedLanguages || []).map((lang) => ({
+    languageId: Number(lang.languageId),
+    languageName: lang.languageName,
+    codeSnippet: lang.codeSnippet || "",
+    logicBlock: "",
+    mergedCode: "",
+    lastResult: null,
+  }));
 
   const verificationMeta = {
     attempts: 0,
@@ -484,6 +714,8 @@ const verifyOneProgrammingQuestion = async ({
     };
   }
 
+  let failedLanguageIds = new Set(languageStates.map((x) => x.languageId));
+
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     vLog("verify-question", "Attempt started", {
       requestId,
@@ -495,25 +727,90 @@ const verifyOneProgrammingQuestion = async ({
       testCases: workingQuestion.testCases.length,
     });
     verificationMeta.attempts = attempt;
-    const solutions = await Promise.all(
-      workingQuestion.supportedLanguages.map(async (language) => ({
-        languageId: language.languageId,
-        languageName: language.languageName,
-        code: await generateLanguageSolution({
+    const targetStates = languageStates.filter((ls) =>
+      failedLanguageIds.has(ls.languageId),
+    );
+
+    const generationResults = await Promise.allSettled(
+      targetStates.map(async (state) => {
+        const repaired = await repairBoilerplateIfNeeded({
           genAI,
           modelName,
           question: workingQuestion,
           testCases: workingQuestion.testCases,
-          language,
-        }),
-      })),
+          language: state,
+        });
+        state.codeSnippet = repaired.language.codeSnippet;
+        const logicBlock = await generateLogicBlockOnly({
+          genAI,
+          modelName,
+          question: workingQuestion,
+          testCases: workingQuestion.testCases,
+          language: state,
+        });
+        state.logicBlock = logicBlock;
+        const injected = injectLogicIntoBoilerplate({
+          boilerplate: state.codeSnippet,
+          todoReplacement: logicBlock,
+          languageName: state.languageName,
+        });
+        state.mergedCode = injected.mergedCode;
+        return {
+          languageId: state.languageId,
+          languageName: state.languageName,
+          code: state.mergedCode,
+        };
+      }),
     );
 
-    const executionResults = await executeAgainstJudge({
-      languageExecutions: solutions,
-      testCases: workingQuestion.testCases,
-      timeLimit: workingQuestion.timeLimit,
-      memoryLimit: workingQuestion.memoryLimit,
+    const generationFailures = [];
+    generationResults.forEach((result, index) => {
+      const state = targetStates[index];
+      if (result.status !== "fulfilled") {
+        generationFailures.push({
+          languageId: state.languageId,
+          languageName: state.languageName,
+          success: false,
+          summary: {
+            passed: 0,
+            total: workingQuestion.testCases.length,
+            message:
+              result.reason?.message ||
+              `Failed to generate merged execution code for ${state.languageName}`,
+          },
+          results: [],
+          error:
+            result.reason?.message ||
+            `Failed to generate merged execution code for ${state.languageName}`,
+        });
+      }
+    });
+
+    const runnableExecutions = languageStates
+      .filter((ls) => ls.mergedCode && ls.mergedCode.length > 0)
+      .map((ls) => ({
+        languageId: ls.languageId,
+        languageName: ls.languageName,
+        code: ls.mergedCode,
+      }));
+
+    let executionResults = [];
+    if (runnableExecutions.length > 0) {
+      executionResults = await executeAgainstJudge({
+        languageExecutions: runnableExecutions,
+        testCases: workingQuestion.testCases,
+        timeLimit: workingQuestion.timeLimit,
+        memoryLimit: workingQuestion.memoryLimit,
+      });
+    }
+    if (generationFailures.length > 0) executionResults.push(...generationFailures);
+
+    // Merge execution details back to state for selective retry decisions.
+    const executionMap = new Map(
+      executionResults.map((res) => [Number(res.languageId), res]),
+    );
+    languageStates.forEach((ls) => {
+      if (executionMap.has(ls.languageId)) ls.lastResult = executionMap.get(ls.languageId);
     });
 
     const { allPass, languagePassSummary } = summarizeResults(executionResults);
@@ -539,6 +836,11 @@ const verifyOneProgrammingQuestion = async ({
       return {
         question: {
           ...workingQuestion,
+          supportedLanguages: languageStates.map((x) => ({
+            languageId: x.languageId,
+            languageName: x.languageName,
+            codeSnippet: x.codeSnippet,
+          })),
           verified: true,
           verificationAttempts: attempt,
           verificationAt: new Date().toISOString(),
@@ -556,6 +858,9 @@ const verifyOneProgrammingQuestion = async ({
       .filter((item) => !item.success)
       .map((item) => `${item.languageName}: ${item.message || "Failed"}`)
       .join("; ");
+    failedLanguageIds = new Set(
+      languagePassSummary.filter((x) => !x.success).map((x) => Number(x.languageId)),
+    );
 
     if (attempt < maxAttempts) {
       vLog("verify-question", "Attempt failed, requesting fixes", {
@@ -571,10 +876,17 @@ const verifyOneProgrammingQuestion = async ({
         question: workingQuestion,
         failures: executionResults,
         testCases: workingQuestion.testCases,
-        languages: workingQuestion.supportedLanguages,
+        languages: languageStates.map((x) => ({
+          languageId: x.languageId,
+          languageName: x.languageName,
+          codeSnippet: x.codeSnippet,
+        })),
+        fixMode: classifyFixMode(executionResults),
       });
       if (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) {
         workingQuestion.testCases = fixPayload.testCases;
+        // testcase change can impact all languages: re-run all on next attempt
+        failedLanguageIds = new Set(languageStates.map((x) => x.languageId));
         vLog("verify-question", "Applied fixed test cases", {
           requestId,
           consumerId,
@@ -583,12 +895,34 @@ const verifyOneProgrammingQuestion = async ({
         });
       }
       if (fixPayload.boilerplateCode) {
-        applyBoilerplateMap(workingQuestion, fixPayload.boilerplateCode);
+        languageStates.forEach((ls) => {
+          if (fixPayload.boilerplateCode[ls.languageName]) {
+            ls.codeSnippet = sanitizeText(fixPayload.boilerplateCode[ls.languageName]);
+          }
+        });
+        workingQuestion.supportedLanguages = languageStates.map((x) => ({
+          languageId: x.languageId,
+          languageName: x.languageName,
+          codeSnippet: x.codeSnippet,
+        }));
         vLog("verify-question", "Applied fixed boilerplate", {
           requestId,
           consumerId,
           title: workingQuestion.questionTitle || "Untitled",
           languages: Object.keys(fixPayload.boilerplateCode).length,
+        });
+      }
+      if (fixPayload.logicBlocks) {
+        languageStates.forEach((ls) => {
+          if (fixPayload.logicBlocks[ls.languageName]) {
+            ls.logicBlock = sanitizeText(fixPayload.logicBlocks[ls.languageName]);
+            const injected = injectLogicIntoBoilerplate({
+              boilerplate: ls.codeSnippet,
+              todoReplacement: ls.logicBlock,
+              languageName: ls.languageName,
+            });
+            ls.mergedCode = injected.mergedCode;
+          }
         });
       }
     }
@@ -604,6 +938,11 @@ const verifyOneProgrammingQuestion = async ({
   return {
     question: {
       ...workingQuestion,
+      supportedLanguages: languageStates.map((x) => ({
+        languageId: x.languageId,
+        languageName: x.languageName,
+        codeSnippet: x.codeSnippet,
+      })),
       verified: false,
       verificationAttempts: verificationMeta.attempts,
       verificationAt: new Date().toISOString(),
