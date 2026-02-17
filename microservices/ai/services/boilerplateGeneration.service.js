@@ -27,6 +27,10 @@ const normalizeJavaScriptJudge0Input = (code = "") => {
       "",
     )
     .replace(/const\s+rl\s*=\s*require\(['"]readline['"]\)[\s\S]*?;/im, "")
+    .replace(
+      /^\s*const\s+input\s*=\s*fs\.readFileSync\s*\(\s*(['"]\/dev\/stdin['"]|0)\s*,\s*['"]utf8['"]\s*\)\s*;?\s*$/gim,
+      "",
+    )
     .trim();
 
   const inputHeader = "const fs = require('fs');\nconst input = fs.readFileSync(0, 'utf8').trim();";
@@ -43,6 +47,10 @@ const normalizeJavaScriptJudge0Input = (code = "") => {
       "fs.readFileSync(0, 'utf8').trim()",
     );
   }
+  normalized = normalized.replace(
+    /fs\.readFileSync\s*\(\s*['"]\/dev\/stdin['"]\s*,\s*['"]utf8['"]\s*\)/gi,
+    "fs.readFileSync(0, 'utf8').trim()",
+  );
   return normalized.trim();
 };
 
@@ -96,11 +104,15 @@ ${instructionsBlock}
 Global constraints:
 1) Do NOT include solution logic.
 2) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
-3) Keep code Judge0 non-interactive.
-4) Java must be 'public class Main' and avoid unsafe nextLine() after nextInt().
-5) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();
-6) ABSOLUTE BAN for JavaScript: no readline/createInterface/readline.on.
-7) Use real newline chars in code.
+3) MUST keep two explicit sections in each language:
+   A) Input section in entrypoint (main) to read stdin and prepare parsed variables.
+   B) Implementation section as separate solve(...) function/method with TODO.
+4) main/entrypoint must call solve(...) and print the result.
+5) Keep code Judge0 non-interactive.
+6) Java must be 'public class Main' and avoid unsafe nextLine() after nextInt().
+7) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();
+8) ABSOLUTE BAN for JavaScript: no readline/createInterface/readline.on.
+9) Use real newline chars in code.
 
 Return ONLY valid JSON:
 {

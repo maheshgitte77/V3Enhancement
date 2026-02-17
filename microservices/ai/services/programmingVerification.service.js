@@ -164,7 +164,8 @@ const hasInputRead = (code = "", family = "other") => {
   if (family === "cpp") return /\bcin\b/.test(c);
   if (family === "java") return /Scanner\s*\(/.test(c);
   if (family === "python") return /\binput\s*\(|sys\.stdin/.test(c);
-  if (family === "javascript") return /readFileSync\s*\(\s*0/.test(c);
+  if (family === "javascript")
+    return /readFileSync\s*\(\s*(0|['"]\/dev\/stdin['"])/.test(c);
   return c.length > 0;
 };
 
@@ -186,8 +187,27 @@ const hasOutputWrite = (code = "", family = "other") => {
   if (family === "cpp") return /\bcout\b/.test(c);
   if (family === "java") return /System\.out/.test(c);
   if (family === "python") return /\bprint\s*\(/.test(c);
-  if (family === "javascript") return /console\.log/.test(c);
+  if (family === "javascript") return /console\.log|process\.stdout\.write/.test(c);
   return c.length > 0;
+};
+
+const hasImplementationBlock = (code = "", family = "other") => {
+  const c = String(code);
+  if (family === "cpp")
+    return /\b(?:int|long long|double|float|bool|void|string)\s+solve\s*\(/m.test(c);
+  if (family === "java") return /\bstatic\s+[A-Za-z0-9_<>\[\]]+\s+solve\s*\(/m.test(c);
+  if (family === "python") return /^\s*def\s+solve\s*\(/m.test(c);
+  if (family === "javascript") return /\bfunction\s+solve\s*\(/m.test(c);
+  return true;
+};
+
+const hasSolveInvocation = (code = "", family = "other") => {
+  const c = String(code);
+  if (family === "cpp") return /\bsolve\s*\(/.test(c);
+  if (family === "java") return /\bsolve\s*\(/.test(c);
+  if (family === "python") return /\bsolve\s*\(/.test(c);
+  if (family === "javascript") return /\bsolve\s*\(/.test(c);
+  return true;
 };
 
 const hasTodoPlaceholder = (code = "") =>
@@ -200,6 +220,8 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
   const checks = {
     hasInputRead: hasInputRead(codeSnippet, family),
     hasOutputWrite: hasOutputWrite(codeSnippet, family),
+    hasImplementationBlock: hasImplementationBlock(codeSnippet, family),
+    hasSolveInvocation: hasSolveInvocation(codeSnippet, family),
     hasTodo: hasTodoPlaceholder(codeSnippet),
     hasUnsupportedInputPattern: hasUnsupportedInputPattern(codeSnippet, family),
   };
@@ -208,6 +230,8 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
     valid:
       checks.hasInputRead &&
       checks.hasOutputWrite &&
+      checks.hasImplementationBlock &&
+      checks.hasSolveInvocation &&
       checks.hasTodo &&
       !checks.hasUnsupportedInputPattern,
     checks,
@@ -225,11 +249,14 @@ Return ONLY JSON:
 Requirements:
 1) Must include input reading compatible with Judge0 for ${language.languageName}.
 2) Must include output writing.
-3) Must include a clear TODO placeholder where solution logic should be added.
-4) Keep it minimal and syntactically correct.
-5) No markdown fences.
-6) JavaScript: MUST use fs.readFileSync(0, 'utf8').trim(); DO NOT use readline/createInterface/readline.on.
-7) Java: avoid unsafe nextLine() right after nextInt() unless strictly necessary and guarded.
+3) Must include TWO blocks:
+   - Input/Output block in entrypoint (main).
+   - Separate implementation block function/method named solve(...) containing TODO placeholder.
+4) Entrypoint must call solve(...) and print the solve return/output.
+5) Keep it minimal and syntactically correct.
+6) No markdown fences.
+7) JavaScript: MUST use fs.readFileSync(0, 'utf8').trim(); DO NOT use readline/createInterface/readline.on.
+8) Java: avoid unsafe nextLine() right after nextInt() unless strictly necessary and guarded.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -346,8 +373,10 @@ Rules:
 1) If mode is testcase_repair, prioritize correcting only testcase input/output.
 2) If mode is boilerplate_repair, prioritize failing language boilerplate only.
 3) If mode is logic_repair, prioritize logic blocks only for failing languages.
-4) Keep response minimal; omit fields you are not changing.
-5) No markdown fences.
+4) If mode is mixed_repair, return both corrected boilerplate and corrected logic blocks for failed languages.
+5) Boilerplate must keep two blocks: input in entrypoint + separate solve(...) TODO block.
+6) Keep response minimal; omit fields you are not changing.
+7) No markdown fences.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -543,6 +572,8 @@ const repairBoilerplateIfNeeded = async ({
     language: language.languageName,
     hasInputRead: contract.checks.hasInputRead,
     hasOutputWrite: contract.checks.hasOutputWrite,
+    hasImplementationBlock: contract.checks.hasImplementationBlock,
+    hasSolveInvocation: contract.checks.hasSolveInvocation,
     hasTodo: contract.checks.hasTodo,
     hasUnsupportedInputPattern: contract.checks.hasUnsupportedInputPattern,
   });
@@ -600,7 +631,49 @@ const generateLogicBlockOnly = async ({
   return sanitizeText(parsed.todoReplacement);
 };
 
-const classifyFixMode = (executionResults = []) => {
+const normalizeComparableOutput = (value) =>
+  String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+
+const getCaseOutput = (caseResult = {}) =>
+  normalizeComparableOutput(
+    caseResult?.actualOutput ??
+      caseResult?.stdout ??
+      caseResult?.output ??
+      caseResult?.actual ??
+      caseResult?.receivedOutput ??
+      "",
+  );
+
+const isLikelyWrongTestCases = (executionResults = [], testCases = []) => {
+  if (!Array.isArray(executionResults) || executionResults.length < 2) return false;
+  if (!Array.isArray(testCases) || testCases.length === 0) return false;
+
+  const runnable = executionResults.filter(
+    (x) => Array.isArray(x?.results) && x.results.length > 0,
+  );
+  if (runnable.length < 2) return false;
+
+  let suspiciousCount = 0;
+  for (let i = 0; i < testCases.length; i += 1) {
+    const outputs = runnable
+      .map((langRes) => getCaseOutput(langRes.results?.[i]))
+      .filter((x) => x.length > 0);
+    if (outputs.length < 2) continue;
+    const unique = new Set(outputs);
+    if (unique.size !== 1) continue;
+    const expected = normalizeComparableOutput(testCases[i]?.output || "");
+    const actual = outputs[0];
+    if (expected && actual && expected !== actual) suspiciousCount += 1;
+  }
+  // If multiple testcases have same cross-language output but different expected output,
+  // expected outputs are likely incorrect.
+  return suspiciousCount >= 2;
+};
+
+const classifyFixMode = (executionResults = [], testCases = []) => {
   const failed = executionResults.filter((x) => {
     const passed = Number(x?.summary?.passed || 0);
     const total = Number(x?.summary?.total || 0);
@@ -614,7 +687,26 @@ const classifyFixMode = (executionResults = []) => {
       }`,
     ),
   );
-  if (failedCompile.length >= 1) return "boilerplate_repair";
+  const failedBoilerplateContract = failed.filter((x) =>
+    /Boilerplate contract|Invalid repaired boilerplate/i.test(
+      `${x?.summary?.message || ""} ${x?.error || ""}`,
+    ),
+  );
+  const wrongAnswerLike = failed.filter((x) =>
+    /Wrong Answer|0\/100|Failed/i.test(
+      `${x?.summary?.message || ""} ${x?.error || ""} ${
+        (x?.results || []).map((r) => r?.status || "").join(" ")
+      }`,
+    ),
+  );
+  if (
+    (failedCompile.length > 0 || failedBoilerplateContract.length > 0) &&
+    wrongAnswerLike.length > 0
+  ) {
+    return "mixed_repair";
+  }
+  if (failedCompile.length > 0 || failedBoilerplateContract.length > 0)
+    return "boilerplate_repair";
   const allFailed = failed.length === executionResults.length;
   const transportLikeFailure = failed.every((x) =>
     /Request failed|ECONN|timeout|status code 4|status code 5/i.test(
@@ -622,14 +714,11 @@ const classifyFixMode = (executionResults = []) => {
     ),
   );
   if (transportLikeFailure) return "boilerplate_repair";
-  const wrongAnswerLike = failed.every((x) =>
-    /Wrong Answer|0\/100|Failed/i.test(
-      `${x?.summary?.message || ""} ${x?.error || ""} ${
-        (x?.results || []).map((r) => r?.status || "").join(" ")
-      }`,
-    ),
-  );
-  if (allFailed && wrongAnswerLike) return "testcase_repair";
+  const wrongAnswerAll = wrongAnswerLike.length === failed.length && failed.length > 0;
+  if (wrongAnswerAll && isLikelyWrongTestCases(executionResults, testCases)) {
+    return "testcase_repair";
+  }
+  if (allFailed && wrongAnswerAll) return "logic_repair";
   return "logic_repair";
 };
 
@@ -908,7 +997,7 @@ const verifyOneProgrammingQuestion = async ({
           languageName: x.languageName,
           codeSnippet: x.codeSnippet,
         })),
-        fixMode: classifyFixMode(executionResults),
+        fixMode: classifyFixMode(executionResults, workingQuestion.testCases),
       });
       const hasAnyFix =
         (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) ||
