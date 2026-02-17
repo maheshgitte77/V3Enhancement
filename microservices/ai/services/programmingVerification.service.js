@@ -3,6 +3,8 @@ const axios = require("axios");
 const DEFAULT_MODEL = "gemini-2.0-flash";
 const MAX_VERIFICATION_ATTEMPTS = 3;
 const EXECUTION_TIMEOUT_MS = 30000;
+const VERIFICATION_LOG_ENABLED =
+  process.env.PROGRAMMING_VERIFICATION_LOGS !== "false";
 
 const QUESTION_SERVICE_URL =
   process.env.QUESTION_SERVICE_URL ||
@@ -10,9 +12,35 @@ const QUESTION_SERVICE_URL =
   "https://staging.api.hirecorrecto.com";
 const BULK_EXECUTION_PATH =
   process.env.QUESTION_TEST_EXECUTION_BULK_PATH ||
-  "/api/public/question/test-execution/bulk";
+  "/public/question/test-execution/bulk";
 const SINGLE_EXECUTION_PATH =
-  process.env.QUESTION_TEST_EXECUTION_PATH || "/api/public/question/test-execution";
+  process.env.QUESTION_TEST_EXECUTION_PATH || "/public/question/test-execution";
+
+const joinUrl = (base, path) =>
+  `${String(base || "").replace(/\/+$/, "")}/${String(path || "").replace(
+    /^\/+/,
+    "",
+  )}`;
+
+const BULK_EXECUTION_URL = joinUrl(QUESTION_SERVICE_URL, BULK_EXECUTION_PATH);
+const SINGLE_EXECUTION_URL = joinUrl(QUESTION_SERVICE_URL, SINGLE_EXECUTION_PATH);
+
+const vLog = (step, message, meta = {}) => {
+  if (!VERIFICATION_LOG_ENABLED) return;
+  const context = Object.entries(meta)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" ");
+  console.log(
+    `[ProgrammingVerification][${step}] ${message}${context ? ` | ${context}` : ""}`,
+  );
+};
+
+vLog("config", "Verification execution endpoints resolved", {
+  bulkUrl: BULK_EXECUTION_URL,
+  singleUrl: SINGLE_EXECUTION_URL,
+  timeoutMs: EXECUTION_TIMEOUT_MS,
+});
 
 const sanitizeText = (value) =>
   String(value || "")
@@ -175,20 +203,30 @@ const executeBulk = async ({
     memoryLimit,
   };
 
-  const response = await axios.post(
-    `${QUESTION_SERVICE_URL}${BULK_EXECUTION_PATH}`,
-    payload,
-    {
-      timeout: EXECUTION_TIMEOUT_MS,
-      headers: buildExecutionHeaders(),
-    },
-  );
+  vLog("judge0-bulk", "Calling bulk execution API", {
+    bulkUrl: BULK_EXECUTION_URL,
+    languages: languageExecutions.length,
+    testCases: testCases.length,
+    timeLimit,
+    memoryLimit,
+  });
+  const response = await axios.post(BULK_EXECUTION_URL, payload, {
+    timeout: EXECUTION_TIMEOUT_MS,
+    headers: buildExecutionHeaders(),
+  });
   return response.data;
 };
 
 const executeSingle = async ({ code, languageId, testCases, timeLimit, memoryLimit }) => {
+  vLog("judge0-single", "Calling single execution API", {
+    singleUrl: SINGLE_EXECUTION_URL,
+    languageId,
+    testCases: testCases.length,
+    timeLimit,
+    memoryLimit,
+  });
   const response = await axios.post(
-    `${QUESTION_SERVICE_URL}${SINGLE_EXECUTION_PATH}`,
+    SINGLE_EXECUTION_URL,
     {
       code,
       languageId,
@@ -210,6 +248,10 @@ const executeAgainstJudge = async ({
   timeLimit,
   memoryLimit,
 }) => {
+  vLog("judge0-start", "Starting Judge0 execution phase", {
+    languages: languageExecutions.length,
+    testCases: testCases.length,
+  });
   try {
     const bulkResult = await withRetry(
       () =>
@@ -223,9 +265,15 @@ const executeAgainstJudge = async ({
       700,
     );
     const results = Array.isArray(bulkResult?.results) ? bulkResult.results : [];
-    if (results.length > 0) return results;
+    if (results.length > 0) {
+      vLog("judge0-bulk", "Bulk execution succeeded", { resultCount: results.length });
+      return results;
+    }
+    vLog("judge0-bulk", "Bulk execution returned empty results, using fallback");
   } catch (error) {
-    // fallback to single execution endpoint below
+    vLog("judge0-bulk", "Bulk execution failed, using single fallback", {
+      error: error.message,
+    });
   }
 
   const singleResults = await Promise.all(
@@ -261,6 +309,9 @@ const executeAgainstJudge = async ({
     }),
   );
 
+  vLog("judge0-single", "Single execution fallback completed", {
+    resultCount: singleResults.length,
+  });
   return singleResults;
 };
 
@@ -271,6 +322,10 @@ const generateLanguageSolution = async ({
   testCases,
   language,
 }) => {
+  vLog("solution-generate", "Generating solution for language", {
+    language: language.languageName,
+    languageId: language.languageId,
+  });
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
   const response = await withRetry(
     () => model.generateContent(buildSolutionPrompt({ question, testCases, language })),
@@ -282,6 +337,9 @@ const generateLanguageSolution = async ({
   if (!parsed?.solution || typeof parsed.solution !== "string") {
     throw new Error(`Invalid solution for ${language.languageName}`);
   }
+  vLog("solution-generate", "Generated solution successfully", {
+    language: language.languageName,
+  });
   return sanitizeText(parsed.solution);
 };
 
@@ -293,6 +351,9 @@ const generateFixes = async ({
   testCases,
   languages,
 }) => {
+  vLog("fix-generate", "Generating fixes from failure analysis", {
+    failedLanguages: Array.isArray(failures) ? failures.length : 0,
+  });
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
   const response = await withRetry(
     () =>
@@ -353,6 +414,11 @@ const verifyOneProgrammingQuestion = async ({
   };
 
   if (!workingQuestion.supportedLanguages.length || !workingQuestion.testCases.length) {
+    vLog("verify-question", "Skipping verification due to missing inputs", {
+      requestId,
+      consumerId,
+      title: workingQuestion.questionTitle || "Untitled",
+    });
     return {
       question: {
         ...workingQuestion,
@@ -366,6 +432,15 @@ const verifyOneProgrammingQuestion = async ({
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    vLog("verify-question", "Attempt started", {
+      requestId,
+      consumerId,
+      title: workingQuestion.questionTitle || "Untitled",
+      attempt,
+      maxAttempts,
+      languages: workingQuestion.supportedLanguages.length,
+      testCases: workingQuestion.testCases.length,
+    });
     verificationMeta.attempts = attempt;
     const solutions = await Promise.all(
       workingQuestion.supportedLanguages.map(async (language) => ({
@@ -390,8 +465,24 @@ const verifyOneProgrammingQuestion = async ({
 
     const { allPass, languagePassSummary } = summarizeResults(executionResults);
     verificationMeta.languagePassSummary = languagePassSummary;
+    vLog("verify-question", "Attempt completed", {
+      requestId,
+      consumerId,
+      title: workingQuestion.questionTitle || "Untitled",
+      attempt,
+      allPass,
+      summary: languagePassSummary
+        .map((item) => `${item.languageName}:${item.passed}/${item.total}`)
+        .join(", "),
+    });
 
     if (allPass) {
+      vLog("verify-question", "Question verified successfully", {
+        requestId,
+        consumerId,
+        title: workingQuestion.questionTitle || "Untitled",
+        attempt,
+      });
       return {
         question: {
           ...workingQuestion,
@@ -414,6 +505,13 @@ const verifyOneProgrammingQuestion = async ({
       .join("; ");
 
     if (attempt < maxAttempts) {
+      vLog("verify-question", "Attempt failed, requesting fixes", {
+        requestId,
+        consumerId,
+        title: workingQuestion.questionTitle || "Untitled",
+        attempt,
+        reason: verificationMeta.lastFailureReason,
+      });
       const fixPayload = await generateFixes({
         genAI,
         modelName,
@@ -424,13 +522,32 @@ const verifyOneProgrammingQuestion = async ({
       });
       if (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) {
         workingQuestion.testCases = fixPayload.testCases;
+        vLog("verify-question", "Applied fixed test cases", {
+          requestId,
+          consumerId,
+          title: workingQuestion.questionTitle || "Untitled",
+          testCases: fixPayload.testCases.length,
+        });
       }
       if (fixPayload.boilerplateCode) {
         applyBoilerplateMap(workingQuestion, fixPayload.boilerplateCode);
+        vLog("verify-question", "Applied fixed boilerplate", {
+          requestId,
+          consumerId,
+          title: workingQuestion.questionTitle || "Untitled",
+          languages: Object.keys(fixPayload.boilerplateCode).length,
+        });
       }
     }
   }
 
+  vLog("verify-question", "Question verification failed after max attempts", {
+    requestId,
+    consumerId,
+    title: workingQuestion.questionTitle || "Untitled",
+    maxAttempts,
+    reason: verificationMeta.lastFailureReason,
+  });
   return {
     question: {
       ...workingQuestion,
@@ -464,6 +581,11 @@ const verifyProgrammingQuestions = async ({
   requestId = "",
   consumerId = "",
 }) => {
+  vLog("verify-batch", "Starting programming verification batch", {
+    requestId,
+    consumerId,
+    questionCount: questions.length,
+  });
   const verifiedQuestions = await Promise.all(
     questions.map(async (question) => {
       try {
@@ -476,6 +598,12 @@ const verifyProgrammingQuestions = async ({
         });
         return stripInternalFields(result.question);
       } catch (error) {
+        vLog("verify-batch", "Question verification crashed", {
+          requestId,
+          consumerId,
+          title: question?.questionTitle || "Untitled",
+          error: error.message,
+        });
         return stripInternalFields({
           ...question,
           verified: false,
@@ -488,6 +616,13 @@ const verifyProgrammingQuestions = async ({
       }
     }),
   );
+  const verifiedCount = verifiedQuestions.filter((q) => q.verified).length;
+  vLog("verify-batch", "Completed programming verification batch", {
+    requestId,
+    consumerId,
+    questionCount: questions.length,
+    verifiedCount,
+  });
   return { questions: verifiedQuestions };
 };
 
@@ -500,6 +635,11 @@ const verifyGeneratedBoilerplate = async ({
   genAI,
   modelName = DEFAULT_MODEL,
 }) => {
+  vLog("verify-boilerplate", "Starting boilerplate verification", {
+    title: questionTitle || "Untitled",
+    languages: Array.isArray(languages) ? languages.length : 0,
+    testCases: Array.isArray(testCases) ? testCases.length : 0,
+  });
   const syntheticQuestion = {
     questionTitle,
     question,
@@ -526,6 +666,11 @@ const verifyGeneratedBoilerplate = async ({
     updatedBoilerplate[lang.languageName] = lang.codeSnippet || "";
   });
 
+  vLog("verify-boilerplate", "Completed boilerplate verification", {
+    title: questionTitle || "Untitled",
+    verified: !!verifiedResult.question.verified,
+    attempts: verifiedResult.question.verificationAttempts || 0,
+  });
   return {
     boilerplateCode: updatedBoilerplate,
     verified: !!verifiedResult.question.verified,
