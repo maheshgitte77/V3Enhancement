@@ -1,4 +1,10 @@
 const { buildLanguageInstructionsBlock } = require("../utils/judge0LanguageInstructions");
+const BLOCK_MARKERS = {
+  inputStart: "HC_INPUT_BLOCK_START",
+  inputEnd: "HC_INPUT_BLOCK_END",
+  implStart: "HC_IMPLEMENTATION_BLOCK_START",
+  implEnd: "HC_IMPLEMENTATION_BLOCK_END",
+};
 
 const sanitize = (value) =>
   String(value || "")
@@ -57,18 +63,49 @@ const normalizeJavaScriptJudge0Input = (code = "") => {
 const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
   const normalized = {};
   Object.keys(boilerplateMap || {}).forEach((langName) => {
-    const cleaned = sanitize(boilerplateMap[langName]);
+    let cleaned = sanitize(boilerplateMap[langName]);
     if (/javascript|node/i.test(String(langName))) {
-      normalized[langName] = normalizeJavaScriptJudge0Input(cleaned);
+      cleaned = normalizeJavaScriptJudge0Input(cleaned);
     } else if (/python/i.test(String(langName))) {
       // Guard against invalid empty function body after TODO comment.
-      normalized[langName] = cleaned.replace(
+      cleaned = cleaned.replace(
         /(def\s+solve\s*\([^)]*\)\s*:\s*\n\s*#\s*TODO[^\n]*\n)(?=\s*(?:if __name__|[A-Za-z_]+\s*=|print\(|for |while |$))/i,
         "$1    pass\n",
       );
-    } else {
-      normalized[langName] = cleaned;
     }
+    const markerPrefix = /python/i.test(String(langName)) ? "#" : "//";
+    if (!cleaned.includes(BLOCK_MARKERS.implStart) && /TODO|Implement the solution here/i.test(cleaned)) {
+      cleaned = cleaned.replace(
+        /^(\s*)(#|\/\/)\s*.*TODO.*$/im,
+        (_, indent, commentPrefix) =>
+          `${indent}${commentPrefix} ${BLOCK_MARKERS.implStart}\n${indent}${commentPrefix} TODO: Implement the solution here\n${indent}${commentPrefix} ${BLOCK_MARKERS.implEnd}`,
+      );
+    }
+    if (!cleaned.includes(BLOCK_MARKERS.inputStart)) {
+      const lines = cleaned.split("\n");
+      const inputLine = lines.findIndex((line) =>
+        /cin\s*>>|scanner\.(next|hasNext)|\binput\s*\(|sys\.stdin|readFileSync\s*\(/i.test(
+          line,
+        ),
+      );
+      const solveCallLine = (() => {
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          const line = lines[i];
+          if (/\bsolve\s*\(/.test(line) && !/function\s+solve|def\s+solve|static\s+.*\bsolve/.test(line))
+            return i;
+        }
+        return -1;
+      })();
+      if (inputLine !== -1 && solveCallLine !== -1 && solveCallLine > inputLine) {
+        const startIndent = (lines[inputLine].match(/^(\s*)/) || [null, ""])[1];
+        lines.splice(inputLine, 0, `${startIndent}${markerPrefix} ${BLOCK_MARKERS.inputStart}`);
+        const endShifted = solveCallLine + 1;
+        const endIndent = (lines[endShifted].match(/^(\s*)/) || [null, ""])[1];
+        lines.splice(endShifted, 0, `${endIndent}${markerPrefix} ${BLOCK_MARKERS.inputEnd}`);
+        cleaned = lines.join("\n");
+      }
+    }
+    normalized[langName] = cleaned;
   });
   return normalized;
 };
@@ -83,7 +120,7 @@ const parseJson = (text) => {
 
 const generateBoilerplateWithGemini = async ({
   genAI,
-  modelName = "gemini-2.0-flash",
+  modelName = process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
   questionTitle,
   question,
   testCases,
@@ -111,8 +148,8 @@ Global constraints:
 1) Do NOT include solution logic.
 2) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
 3) MUST keep two explicit sections in each language:
-   A) Input section in entrypoint (main) to read stdin and prepare parsed variables.
-   B) Implementation section as separate solve(...) function/method with TODO.
+   A) Input section in entrypoint (main) wrapped by markers ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
+   B) Implementation section as separate solve(...) function/method with TODO wrapped by markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd}
 4) main/entrypoint must call solve(...) and print the result.
 5) Keep code Judge0 non-interactive.
 6) Java must be 'public class Main' and avoid unsafe nextLine() after nextInt().

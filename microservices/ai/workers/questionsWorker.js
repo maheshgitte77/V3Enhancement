@@ -2202,7 +2202,7 @@ const createConsumer = async (id) => {
           const { questionTitle, question, testCases, languages } = boilerplateRequest;
           const boilerplateResult = await generateBoilerplateWithGemini({
             genAI,
-            modelName: "gemini-2.0-flash",
+            modelName: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
             questionTitle,
             question,
             testCases,
@@ -2223,7 +2223,7 @@ const createConsumer = async (id) => {
               languages,
               boilerplateCode: boilerplateResult.boilerplateCode,
               genAI,
-              modelName: "gemini-2.0-flash",
+              modelName: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
             });
             finalBoilerplateCode = verificationResult.boilerplateCode;
             verified = verificationResult.verified;
@@ -2238,7 +2238,7 @@ const createConsumer = async (id) => {
             try {
               await CreditServiceClient.deductAiUsage({
                 clientId,
-                modelId: "gemini-2.0-flash",
+                modelId: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
                 referenceId: `ai_code_gen_${Date.now()}`,
                 inputTokens: boilerplateResult.tokenUsage.promptTokens || 0,
                 outputTokens: boilerplateResult.tokenUsage.completionTokens || 0,
@@ -3433,7 +3433,8 @@ const createConsumer = async (id) => {
                 try {
                   const bp = await generateBoilerplateWithGemini({
                     genAI,
-                    modelName: "gemini-2.0-flash",
+                    modelName:
+                      process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
                     questionTitle: question.questionTitle,
                     question: question.question,
                     testCases: question.testCases || [],
@@ -3460,7 +3461,8 @@ const createConsumer = async (id) => {
                   const verificationResult = await verifyProgrammingQuestions({
                     questions: aiResponse.Programming,
                     genAI,
-                    modelName: "gemini-2.0-flash",
+                    modelName:
+                      process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
                     requestId,
                     consumerId: id,
                   });

@@ -1,6 +1,7 @@
 const axios = require("axios");
 
-const DEFAULT_MODEL = "gemini-2.0-flash";
+const DEFAULT_MODEL =
+  process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash";
 const MAX_VERIFICATION_ATTEMPTS = 3;
 const EXECUTION_TIMEOUT_MS = 30000;
 const VERIFICATION_LOG_ENABLED =
@@ -52,6 +53,13 @@ const sanitizeText = (value) =>
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .trim();
+
+const BLOCK_MARKERS = {
+  inputStart: "HC_INPUT_BLOCK_START",
+  inputEnd: "HC_INPUT_BLOCK_END",
+  implStart: "HC_IMPLEMENTATION_BLOCK_START",
+  implEnd: "HC_IMPLEMENTATION_BLOCK_END",
+};
 
 const safeJsonParse = (text) => {
   if (!text || typeof text !== "string") return null;
@@ -159,6 +167,75 @@ const detectLanguageFamily = (languageName = "") => {
   return "other";
 };
 
+const markerPrefix = (family = "other") => (family === "python" ? "#" : "//");
+
+const markerLine = (family, marker, indent = "") =>
+  `${indent}${markerPrefix(family)} ${marker}`;
+
+const findSolveInvocationLineIndex = (lines = []) => {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!/\bsolve\s*\(/.test(line)) continue;
+    if (
+      /\bfunction\s+solve\b|^\s*def\s+solve\b|\bstatic\b.*\bsolve\b|solve\s*\([^)]*\)\s*\{/.test(
+        line,
+      )
+    ) {
+      continue;
+    }
+    return i;
+  }
+  return -1;
+};
+
+const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
+  const family = detectLanguageFamily(languageName);
+  if (!codeSnippet) return codeSnippet;
+  let code = String(codeSnippet);
+  let lines = code.split("\n");
+
+  const hasImplMarkers =
+    code.includes(BLOCK_MARKERS.implStart) && code.includes(BLOCK_MARKERS.implEnd);
+  if (!hasImplMarkers) {
+    const todoIdx = lines.findIndex((line) => /TODO|Implement the solution here/i.test(line));
+    if (todoIdx !== -1) {
+      const indent = (lines[todoIdx].match(/^(\s*)/) || [null, ""])[1];
+      lines.splice(
+        todoIdx,
+        1,
+        markerLine(family, BLOCK_MARKERS.implStart, indent),
+        lines[todoIdx],
+        markerLine(family, BLOCK_MARKERS.implEnd, indent),
+      );
+    }
+  }
+
+  code = lines.join("\n");
+  const hasInputMarkers =
+    code.includes(BLOCK_MARKERS.inputStart) && code.includes(BLOCK_MARKERS.inputEnd);
+  if (!hasInputMarkers) {
+    lines = code.split("\n");
+    const inputIdx = lines.findIndex((line) => {
+      if (family === "cpp") return /\bcin\s*>>/.test(line);
+      if (family === "java") return /scanner\.(next|hasNext)/i.test(line);
+      if (family === "python") return /\binput\s*\(|sys\.stdin/.test(line);
+      if (family === "javascript") return /readFileSync\s*\(|input\.split\s*\(/.test(line);
+      return false;
+    });
+    const solveInvokeIdx = findSolveInvocationLineIndex(lines);
+    if (inputIdx !== -1 && solveInvokeIdx !== -1 && solveInvokeIdx > inputIdx) {
+      const startIndent = (lines[inputIdx].match(/^(\s*)/) || [null, ""])[1];
+      lines.splice(inputIdx, 0, markerLine(family, BLOCK_MARKERS.inputStart, startIndent));
+      const endIdxShifted = solveInvokeIdx + 1;
+      const endIndent = (lines[endIdxShifted].match(/^(\s*)/) || [null, ""])[1];
+      lines.splice(endIdxShifted, 0, markerLine(family, BLOCK_MARKERS.inputEnd, endIndent));
+      code = lines.join("\n");
+    }
+  }
+
+  return code;
+};
+
 const hasInputRead = (code = "", family = "other") => {
   const c = String(code);
   if (family === "cpp") return /\bcin\b/.test(c);
@@ -201,6 +278,14 @@ const hasImplementationBlock = (code = "", family = "other") => {
   return true;
 };
 
+const hasInputBlockMarkers = (code = "") =>
+  String(code).includes(BLOCK_MARKERS.inputStart) &&
+  String(code).includes(BLOCK_MARKERS.inputEnd);
+
+const hasImplementationBlockMarkers = (code = "") =>
+  String(code).includes(BLOCK_MARKERS.implStart) &&
+  String(code).includes(BLOCK_MARKERS.implEnd);
+
 const hasSolveInvocation = (code = "", family = "other") => {
   const c = String(code);
   if (family === "cpp") return /\bsolve\s*\(/.test(c);
@@ -221,6 +306,8 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
     hasInputRead: hasInputRead(codeSnippet, family),
     hasOutputWrite: hasOutputWrite(codeSnippet, family),
     hasImplementationBlock: hasImplementationBlock(codeSnippet, family),
+    hasInputBlockMarkers: hasInputBlockMarkers(codeSnippet),
+    hasImplementationBlockMarkers: hasImplementationBlockMarkers(codeSnippet),
     hasSolveInvocation: hasSolveInvocation(codeSnippet, family),
     hasTodo: hasTodoPlaceholder(codeSnippet),
     hasUnsupportedInputPattern: hasUnsupportedInputPattern(codeSnippet, family),
@@ -231,6 +318,8 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
       checks.hasInputRead &&
       checks.hasOutputWrite &&
       checks.hasImplementationBlock &&
+      checks.hasInputBlockMarkers &&
+      checks.hasImplementationBlockMarkers &&
       checks.hasSolveInvocation &&
       checks.hasTodo &&
       !checks.hasUnsupportedInputPattern,
@@ -250,8 +339,10 @@ Requirements:
 1) Must include input reading compatible with Judge0 for ${language.languageName}.
 2) Must include output writing.
 3) Must include TWO blocks:
-   - Input/Output block in entrypoint (main).
-   - Separate implementation block function/method named solve(...) containing TODO placeholder.
+   - Input/Output block in entrypoint (main) wrapped with markers:
+     ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
+   - Separate implementation block function/method named solve(...) containing TODO placeholder, wrapped with markers:
+     ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd}
 4) Entrypoint must call solve(...) and print the solve return/output.
 5) Keep it minimal and syntactically correct.
 6) No markdown fences.
@@ -270,18 +361,19 @@ ${JSON.stringify(testCases, null, 2)}
 
 const buildLogicBlockPrompt = ({ question, testCases, language }) => `
 You are given a boilerplate skeleton for ${language.languageName}.
-Generate ONLY the required logic block to replace TODO in this skeleton.
+Generate ONLY the required implementation lines that go INSIDE marker block ${BLOCK_MARKERS.implStart} ... ${BLOCK_MARKERS.implEnd}.
 
 Return ONLY JSON:
 {
-  "todoReplacement": "code block only, no full program"
+  "todoReplacement": "implementation lines only, no function signature, no full program"
 }
 
 Rules:
 1) Do not return full code file.
-2) Return only function/method body logic for TODO area.
+2) Return only function/method body logic lines for marker implementation block.
 3) Must pass provided test cases when inserted into boilerplate.
-4) No markdown fences.
+4) Do NOT return solve/main/function/class definition.
+5) No markdown fences.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -303,7 +395,34 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
   const family = detectLanguageFamily(languageName);
   const logic = sanitizeText(todoReplacement);
   if (!logic) return { mergedCode: boilerplate, injected: false };
-  let code = String(boilerplate || "");
+  let code = ensureBoilerplateMarkers(String(boilerplate || ""), languageName);
+
+  const implStartIdx = code.indexOf(BLOCK_MARKERS.implStart);
+  const implEndIdx = code.indexOf(BLOCK_MARKERS.implEnd);
+  if (implStartIdx !== -1 && implEndIdx !== -1 && implEndIdx > implStartIdx) {
+    const beforeStart = code.substring(0, implStartIdx);
+    const startLineEnd = code.indexOf("\n", implStartIdx);
+    const endLineStart = code.lastIndexOf("\n", implEndIdx);
+    const startLine = code.substring(
+      implStartIdx,
+      startLineEnd === -1 ? implStartIdx + BLOCK_MARKERS.implStart.length : startLineEnd,
+    );
+    const endLine = code.substring(endLineStart + 1, code.length);
+    const indent = (() => {
+      const afterStart = code.substring(startLineEnd + 1, endLineStart);
+      const match = afterStart.match(/\n(\s*)\S/);
+      if (match?.[1] !== undefined) return match[1].length;
+      const startIndent = (startLine.match(/^(\s*)/) || [null, ""])[1];
+      return startIndent.length + (family === "python" ? 4 : 2);
+    })();
+    const replacement = `${startLine}\n${indentLines(logic, indent)}\n${endLine}`;
+    return {
+      mergedCode: `${beforeStart}${replacement}`,
+      injected: true,
+    };
+  }
+
+  code = String(code || "");
 
   // Preferred deterministic path: replace TODO comment line.
   if (/TODO|Implement the solution here/i.test(code)) {
@@ -375,8 +494,12 @@ Rules:
 3) If mode is logic_repair, prioritize logic blocks only for failing languages.
 4) If mode is mixed_repair, return both corrected boilerplate and corrected logic blocks for failed languages.
 5) Boilerplate must keep two blocks: input in entrypoint + separate solve(...) TODO block.
-6) Keep response minimal; omit fields you are not changing.
-7) No markdown fences.
+6) Keep explicit markers in boilerplate:
+   - ${BLOCK_MARKERS.inputStart} ... ${BLOCK_MARKERS.inputEnd}
+   - ${BLOCK_MARKERS.implStart} ... ${BLOCK_MARKERS.implEnd}
+7) logicBlocks entries must contain ONLY implementation lines to place inside ${BLOCK_MARKERS.implStart}/${BLOCK_MARKERS.implEnd}.
+8) Keep response minimal; omit fields you are not changing.
+9) No markdown fences.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -565,14 +688,23 @@ const repairBoilerplateIfNeeded = async ({
   testCases,
   language,
 }) => {
-  const contract = checkBoilerplateContract(language.codeSnippet, language.languageName);
-  if (contract.valid) return { language, repaired: false, contract };
+  const preprocessedLanguage = {
+    ...language,
+    codeSnippet: ensureBoilerplateMarkers(language.codeSnippet, language.languageName),
+  };
+  const contract = checkBoilerplateContract(
+    preprocessedLanguage.codeSnippet,
+    preprocessedLanguage.languageName,
+  );
+  if (contract.valid) return { language: preprocessedLanguage, repaired: false, contract };
 
   vLog("contract-check", "Boilerplate contract missing items, repairing", {
     language: language.languageName,
     hasInputRead: contract.checks.hasInputRead,
     hasOutputWrite: contract.checks.hasOutputWrite,
     hasImplementationBlock: contract.checks.hasImplementationBlock,
+    hasInputBlockMarkers: contract.checks.hasInputBlockMarkers,
+    hasImplementationBlockMarkers: contract.checks.hasImplementationBlockMarkers,
     hasSolveInvocation: contract.checks.hasSolveInvocation,
     hasTodo: contract.checks.hasTodo,
     hasUnsupportedInputPattern: contract.checks.hasUnsupportedInputPattern,
@@ -582,7 +714,11 @@ const repairBoilerplateIfNeeded = async ({
   const response = await withRetry(
     () =>
       model.generateContent(
-        buildBoilerplateRepairPrompt({ question, language, testCases }),
+        buildBoilerplateRepairPrompt({
+          question,
+          language: preprocessedLanguage,
+          testCases,
+        }),
       ),
     2,
     1000,
@@ -592,7 +728,13 @@ const repairBoilerplateIfNeeded = async ({
   if (!parsed?.boilerplateCode || typeof parsed.boilerplateCode !== "string") {
     throw new Error(`Invalid repaired boilerplate for ${language.languageName}`);
   }
-  const repairedLanguage = { ...language, codeSnippet: sanitizeText(parsed.boilerplateCode) };
+  const repairedLanguage = {
+    ...language,
+    codeSnippet: ensureBoilerplateMarkers(
+      sanitizeText(parsed.boilerplateCode),
+      language.languageName,
+    ),
+  };
   const repairedContract = checkBoilerplateContract(
     repairedLanguage.codeSnippet,
     repairedLanguage.languageName,
@@ -603,6 +745,8 @@ const repairBoilerplateIfNeeded = async ({
       hasInputRead: repairedContract.checks.hasInputRead,
       hasOutputWrite: repairedContract.checks.hasOutputWrite,
       hasImplementationBlock: repairedContract.checks.hasImplementationBlock,
+      hasInputBlockMarkers: repairedContract.checks.hasInputBlockMarkers,
+      hasImplementationBlockMarkers: repairedContract.checks.hasImplementationBlockMarkers,
       hasSolveInvocation: repairedContract.checks.hasSolveInvocation,
       hasTodo: repairedContract.checks.hasTodo,
       hasUnsupportedInputPattern: repairedContract.checks.hasUnsupportedInputPattern,
@@ -880,6 +1024,7 @@ const verifyOneProgrammingQuestion = async ({
       failedLanguageIds.has(ls.languageId),
     );
     targetStates.forEach((state) => {
+      state.codeSnippet = ensureBoilerplateMarkers(state.codeSnippet, state.languageName);
       state.mergedCode = "";
       state.logicBlock = "";
       state.lastResult = null;
@@ -993,7 +1138,7 @@ const verifyOneProgrammingQuestion = async ({
           supportedLanguages: languageStates.map((x) => ({
             languageId: x.languageId,
             languageName: x.languageName,
-            codeSnippet: x.codeSnippet,
+            codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
           })),
           verified: true,
           verificationAttempts: attempt,
@@ -1033,7 +1178,7 @@ const verifyOneProgrammingQuestion = async ({
         languages: languageStates.map((x) => ({
           languageId: x.languageId,
           languageName: x.languageName,
-          codeSnippet: x.codeSnippet,
+          codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
         })),
         fixMode: classifyFixMode(executionResults, workingQuestion.testCases),
       });
@@ -1081,13 +1226,16 @@ const verifyOneProgrammingQuestion = async ({
       if (fixPayload.boilerplateCode) {
         languageStates.forEach((ls) => {
           if (fixPayload.boilerplateCode[ls.languageName]) {
-            ls.codeSnippet = sanitizeText(fixPayload.boilerplateCode[ls.languageName]);
+            ls.codeSnippet = ensureBoilerplateMarkers(
+              sanitizeText(fixPayload.boilerplateCode[ls.languageName]),
+              ls.languageName,
+            );
           }
         });
         workingQuestion.supportedLanguages = languageStates.map((x) => ({
           languageId: x.languageId,
           languageName: x.languageName,
-          codeSnippet: x.codeSnippet,
+          codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
         }));
         vLog("verify-question", "Applied fixed boilerplate", {
           requestId,
@@ -1125,7 +1273,7 @@ const verifyOneProgrammingQuestion = async ({
       supportedLanguages: languageStates.map((x) => ({
         languageId: x.languageId,
         languageName: x.languageName,
-        codeSnippet: x.codeSnippet,
+        codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
       })),
       verified: false,
       verificationAttempts: verificationMeta.attempts,
