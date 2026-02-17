@@ -9,6 +9,9 @@ const {
 const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
 const {
+  verifyProgrammingQuestions,
+} = require("../services/programmingVerification.service");
+const {
   normalizeProgrammingContext,
   validateTitlesAgainstExisting,
   truncateToWords,
@@ -3355,8 +3358,34 @@ const createConsumer = async (id) => {
               }
             }
 
-            // Process Programming questions: validate test cases and boilerplate code
+            // Process Programming questions: verify and normalize test cases/boilerplate code
             if (questionType === "Programming" && aiResponse.Programming) {
+              const verificationEnabled =
+                process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false";
+              if (verificationEnabled) {
+                try {
+                  const verificationResult = await verifyProgrammingQuestions({
+                    questions: aiResponse.Programming,
+                    genAI,
+                    modelName: "gemini-2.0-flash",
+                    requestId,
+                    consumerId: id,
+                  });
+                  aiResponse.Programming = verificationResult.questions;
+                  const verifiedCount = aiResponse.Programming.filter(
+                    (q) => q.verified === true,
+                  ).length;
+                  console.log(
+                    `✅ Programming verification summary (Consumer ${id}): ${verifiedCount}/${aiResponse.Programming.length} questions verified.`,
+                  );
+                } catch (verificationError) {
+                  console.error(
+                    `❌ Programming verification failed in Consumer ${id}:`,
+                    verificationError,
+                  );
+                }
+              }
+
               aiResponse.Programming.forEach((question) => {
                 try {
                   // Validate and clean test cases

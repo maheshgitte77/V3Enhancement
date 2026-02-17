@@ -2,6 +2,9 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
 const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
+const {
+  verifyGeneratedBoilerplate,
+} = require("../services/programmingVerification.service");
 require("dotenv").config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -375,6 +378,33 @@ Ensure the JSON is valid and each language name matches exactly with the provide
           boilerplate = boilerplate.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
           aiResponse.boilerplateCode[langName] = boilerplate;
         });
+      }
+
+      if (process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false") {
+        try {
+          const verificationResult = await verifyGeneratedBoilerplate({
+            questionTitle,
+            question,
+            testCases,
+            languages,
+            boilerplateCode: aiResponse.boilerplateCode || {},
+            genAI,
+            modelName: "gemini-2.0-flash",
+          });
+          aiResponse.boilerplateCode = verificationResult.boilerplateCode;
+          aiResponse.verified = verificationResult.verified;
+          aiResponse.verificationMeta = verificationResult.verificationMeta;
+        } catch (verificationError) {
+          console.error(
+            "❌ Boilerplate verification failed:",
+            verificationError.message,
+          );
+          aiResponse.verified = false;
+          aiResponse.verificationMeta = {
+            attempts: 0,
+            summary: { status: "failed", reason: verificationError.message },
+          };
+        }
       }
 
       return res.json(aiResponse);
