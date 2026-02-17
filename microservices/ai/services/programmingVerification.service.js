@@ -598,6 +598,15 @@ const repairBoilerplateIfNeeded = async ({
     repairedLanguage.languageName,
   );
   if (!repairedContract.valid) {
+    vLog("contract-check", "Repaired boilerplate still invalid", {
+      language: repairedLanguage.languageName,
+      hasInputRead: repairedContract.checks.hasInputRead,
+      hasOutputWrite: repairedContract.checks.hasOutputWrite,
+      hasImplementationBlock: repairedContract.checks.hasImplementationBlock,
+      hasSolveInvocation: repairedContract.checks.hasSolveInvocation,
+      hasTodo: repairedContract.checks.hasTodo,
+      hasUnsupportedInputPattern: repairedContract.checks.hasUnsupportedInputPattern,
+    });
     throw new Error(`Boilerplate contract still invalid for ${language.languageName}`);
   }
   return { language: repairedLanguage, repaired: true, contract: repairedContract };
@@ -767,19 +776,43 @@ const generateFixes = async ({
 
 const summarizeResults = (executionResults = []) => {
   let allPass = true;
-  const languagePassSummary = executionResults.map((entry) => {
+  const byLanguage = new Map();
+  executionResults.forEach((entry) => {
+    const key = Number(entry?.languageId);
     const passed = Number(entry?.summary?.passed || 0);
     const total = Number(entry?.summary?.total || 0);
     const ok = entry?.success !== false && total > 0 && passed === total;
-    if (!ok) allPass = false;
-    return {
-      languageId: entry.languageId,
-      languageName: entry.languageName,
-      passed,
-      total,
-      success: ok,
-      message: entry?.summary?.message || entry?.error || "",
-    };
+    const message = entry?.summary?.message || entry?.error || "";
+    const current = byLanguage.get(key);
+
+    if (!current) {
+      byLanguage.set(key, {
+        languageId: entry.languageId,
+        languageName: entry.languageName,
+        passed,
+        total,
+        success: ok,
+        message,
+      });
+      return;
+    }
+
+    byLanguage.set(key, {
+      ...current,
+      passed: Math.min(current.passed, passed),
+      total: Math.max(current.total, total),
+      success: current.success && ok,
+      message:
+        !current.success && current.message
+          ? current.message
+          : !ok && message
+            ? message
+            : current.message || message,
+    });
+  });
+  const languagePassSummary = Array.from(byLanguage.values());
+  languagePassSummary.forEach((item) => {
+    if (!item.success) allPass = false;
   });
   return { allPass, languagePassSummary };
 };
@@ -846,6 +879,11 @@ const verifyOneProgrammingQuestion = async ({
     const targetStates = languageStates.filter((ls) =>
       failedLanguageIds.has(ls.languageId),
     );
+    targetStates.forEach((state) => {
+      state.mergedCode = "";
+      state.logicBlock = "";
+      state.lastResult = null;
+    });
 
     const generationResults = await Promise.allSettled(
       targetStates.map(async (state) => {

@@ -60,6 +60,12 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
     const cleaned = sanitize(boilerplateMap[langName]);
     if (/javascript|node/i.test(String(langName))) {
       normalized[langName] = normalizeJavaScriptJudge0Input(cleaned);
+    } else if (/python/i.test(String(langName))) {
+      // Guard against invalid empty function body after TODO comment.
+      normalized[langName] = cleaned.replace(
+        /(def\s+solve\s*\([^)]*\)\s*:\s*\n\s*#\s*TODO[^\n]*\n)(?=\s*(?:if __name__|[A-Za-z_]+\s*=|print\(|for |while |$))/i,
+        "$1    pass\n",
+      );
     } else {
       normalized[langName] = cleaned;
     }
