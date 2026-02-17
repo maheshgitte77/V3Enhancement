@@ -4,12 +4,15 @@ const DEFAULT_MODEL = "gemini-2.0-flash";
 const MAX_VERIFICATION_ATTEMPTS = 3;
 const EXECUTION_TIMEOUT_MS = 30000;
 
-const QUESTION_SERVICE_URL = "https://staging.api.ai.hirecorrecto.com" ||
-  process.env.HIRE360_SERVICES_URL || process.env.QUESTION_SERVICE_URL;
+const QUESTION_SERVICE_URL =
+  process.env.QUESTION_SERVICE_URL ||
+  process.env.HIRE360_SERVICES_URL ||
+  "https://staging.api.hirecorrecto.com";
 const BULK_EXECUTION_PATH =
-  process.env.QUESTION_TEST_EXECUTION_BULK_PATH || "/api/question/test-execution/bulk";
+  process.env.QUESTION_TEST_EXECUTION_BULK_PATH ||
+  "/api/public/question/test-execution/bulk";
 const SINGLE_EXECUTION_PATH =
-  process.env.QUESTION_TEST_EXECUTION_PATH || "/api/question/test-execution";
+  process.env.QUESTION_TEST_EXECUTION_PATH || "/api/public/question/test-execution";
 
 const sanitizeText = (value) =>
   String(value || "")
