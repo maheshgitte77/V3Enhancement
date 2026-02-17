@@ -35,8 +35,8 @@ const LANGUAGE_RULES = {
   javascript: {
     match: ["javascript", "node"],
     instruction: [
-      "Use: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');",
-      "Do not use readline or interactive input.",
+      "MANDATORY: Use exactly stdin file read style: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();",
+      "ABSOLUTE BAN: Do not use readline, prompts, process.stdin.on('data'), or any interactive input API.",
       "Parse input manually from string.",
       "Output using console.log only.",
       "Do not print prompts.",

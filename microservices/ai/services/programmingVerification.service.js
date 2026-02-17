@@ -168,6 +168,19 @@ const hasInputRead = (code = "", family = "other") => {
   return c.length > 0;
 };
 
+const hasUnsupportedInputPattern = (code = "", family = "other") => {
+  const c = String(code);
+  if (family === "javascript") {
+    return /require\s*\(\s*['"]readline['"]\s*\)|createInterface\s*\(|readline\.on\s*\(/i.test(
+      c,
+    );
+  }
+  if (family === "java") {
+    return /\bnextInt\s*\(\s*\)\s*;\s*\n\s*.*nextLine\s*\(\s*\)\s*;/i.test(c);
+  }
+  return false;
+};
+
 const hasOutputWrite = (code = "", family = "other") => {
   const c = String(code);
   if (family === "cpp") return /\bcout\b/.test(c);
@@ -188,10 +201,15 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
     hasInputRead: hasInputRead(codeSnippet, family),
     hasOutputWrite: hasOutputWrite(codeSnippet, family),
     hasTodo: hasTodoPlaceholder(codeSnippet),
+    hasUnsupportedInputPattern: hasUnsupportedInputPattern(codeSnippet, family),
   };
   return {
     family,
-    valid: checks.hasInputRead && checks.hasOutputWrite && checks.hasTodo,
+    valid:
+      checks.hasInputRead &&
+      checks.hasOutputWrite &&
+      checks.hasTodo &&
+      !checks.hasUnsupportedInputPattern,
     checks,
   };
 };
@@ -210,6 +228,8 @@ Requirements:
 3) Must include a clear TODO placeholder where solution logic should be added.
 4) Keep it minimal and syntactically correct.
 5) No markdown fences.
+6) JavaScript: MUST use fs.readFileSync(0, 'utf8').trim(); DO NOT use readline/createInterface/readline.on.
+7) Java: avoid unsafe nextLine() right after nextInt() unless strictly necessary and guarded.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -524,6 +544,7 @@ const repairBoilerplateIfNeeded = async ({
     hasInputRead: contract.checks.hasInputRead,
     hasOutputWrite: contract.checks.hasOutputWrite,
     hasTodo: contract.checks.hasTodo,
+    hasUnsupportedInputPattern: contract.checks.hasUnsupportedInputPattern,
   });
 
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
@@ -593,8 +614,14 @@ const classifyFixMode = (executionResults = []) => {
       }`,
     ),
   );
-  if (failedCompile.length === 1) return "boilerplate_repair";
+  if (failedCompile.length >= 1) return "boilerplate_repair";
   const allFailed = failed.length === executionResults.length;
+  const transportLikeFailure = failed.every((x) =>
+    /Request failed|ECONN|timeout|status code 4|status code 5/i.test(
+      `${x?.summary?.message || ""} ${x?.error || ""}`,
+    ),
+  );
+  if (transportLikeFailure) return "boilerplate_repair";
   const wrongAnswerLike = failed.every((x) =>
     /Wrong Answer|0\/100|Failed/i.test(
       `${x?.summary?.message || ""} ${x?.error || ""} ${
@@ -883,6 +910,36 @@ const verifyOneProgrammingQuestion = async ({
         })),
         fixMode: classifyFixMode(executionResults),
       });
+      const hasAnyFix =
+        (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) ||
+        (fixPayload.boilerplateCode &&
+          Object.keys(fixPayload.boilerplateCode).length > 0) ||
+        (fixPayload.logicBlocks && Object.keys(fixPayload.logicBlocks).length > 0);
+
+      if (!hasAnyFix) {
+        // Deterministic fallback: force per-language boilerplate contract repair
+        // so retry attempts are not wasted on unchanged broken templates.
+        const fallbackTargets = languageStates.filter((ls) =>
+          failedLanguageIds.has(ls.languageId),
+        );
+        const fallbackRepairs = await Promise.allSettled(
+          fallbackTargets.map(async (ls) =>
+            repairBoilerplateIfNeeded({
+              genAI,
+              modelName,
+              question: workingQuestion,
+              testCases: workingQuestion.testCases,
+              language: ls,
+            }),
+          ),
+        );
+        fallbackRepairs.forEach((res, idx) => {
+          const state = fallbackTargets[idx];
+          if (res.status === "fulfilled" && res.value?.language?.codeSnippet) {
+            state.codeSnippet = res.value.language.codeSnippet;
+          }
+        });
+      }
       if (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) {
         workingQuestion.testCases = fixPayload.testCases;
         // testcase change can impact all languages: re-run all on next attempt

@@ -11,6 +11,54 @@ const sanitize = (value) =>
     .replace(/\r/g, "\n")
     .trim();
 
+const normalizeJavaScriptJudge0Input = (code = "") => {
+  const source = String(code || "");
+  const hasReadline =
+    /require\s*\(\s*['"]readline['"]\s*\)|readline\.on\s*\(|createInterface\s*\(/i.test(
+      source,
+    );
+  const hasFsInput = /fs\.readFileSync\s*\(\s*0\s*,\s*['"]utf8['"]\s*\)/i.test(source);
+  if (!hasReadline && hasFsInput) return source;
+
+  // Keep user logic skeleton but force Judge0-safe input source.
+  let normalized = source
+    .replace(
+      /const\s+readline[\s\S]*?readline\.on\(\s*['"]line['"][\s\S]*?\}\)\s*;?/im,
+      "",
+    )
+    .replace(/const\s+rl\s*=\s*require\(['"]readline['"]\)[\s\S]*?;/im, "")
+    .trim();
+
+  const inputHeader = "const fs = require('fs');\nconst input = fs.readFileSync(0, 'utf8').trim();";
+  if (!/const\s+fs\s*=\s*require\(['"]fs['"]\)/i.test(normalized)) {
+    normalized = `${inputHeader}\n\n${normalized}`;
+  } else if (!/readFileSync\s*\(\s*0\s*,\s*['"]utf8['"]\s*\)/i.test(normalized)) {
+    normalized = normalized.replace(
+      /const\s+fs\s*=\s*require\(['"]fs['"]\)\s*;?/i,
+      inputHeader,
+    );
+  } else {
+    normalized = normalized.replace(
+      /fs\.readFileSync\s*\(\s*0\s*,\s*['"]utf8['"]\s*\)(?!\.trim\(\))/i,
+      "fs.readFileSync(0, 'utf8').trim()",
+    );
+  }
+  return normalized.trim();
+};
+
+const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
+  const normalized = {};
+  Object.keys(boilerplateMap || {}).forEach((langName) => {
+    const cleaned = sanitize(boilerplateMap[langName]);
+    if (/javascript|node/i.test(String(langName))) {
+      normalized[langName] = normalizeJavaScriptJudge0Input(cleaned);
+    } else {
+      normalized[langName] = cleaned;
+    }
+  });
+  return normalized;
+};
+
 const parseJson = (text) => {
   const cleaned = String(text || "")
     .replace(/```json/gi, "")
@@ -50,7 +98,9 @@ Global constraints:
 2) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
 3) Keep code Judge0 non-interactive.
 4) Java must be 'public class Main' and avoid unsafe nextLine() after nextInt().
-5) Use real newline chars in code.
+5) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();
+6) ABSOLUTE BAN for JavaScript: no readline/createInterface/readline.on.
+7) Use real newline chars in code.
 
 Return ONLY valid JSON:
 {
@@ -66,10 +116,7 @@ Return ONLY valid JSON:
   const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = parseJson(text);
 
-  const normalized = {};
-  Object.keys(parsed.boilerplateCode || {}).forEach((langName) => {
-    normalized[langName] = sanitize(parsed.boilerplateCode[langName]);
-  });
+  const normalized = normalizeGeneratedBoilerplateMap(parsed.boilerplateCode || {});
 
   return {
     boilerplateCode: normalized,
