@@ -1,13 +1,6 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
-const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
-const {
-  verifyGeneratedBoilerplate,
-} = require("../services/programmingVerification.service");
 require("dotenv").config();
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const generateScreeningQuestion = async (req, res) => {
   try {
@@ -234,184 +227,56 @@ const generateBoilerplateCode = async (req, res) => {
       });
     }
 
-    // Extract language names for the prompt
-    const languageNames = languages
-      .map((lang) => lang.languageName || lang.name)
-      .join(", ");
+    const requestId = `bp-${Date.now()}-${crypto
+      .randomBytes(4)
+      .toString("hex")}`;
 
-    const prompt = `
-Generate boilerplate code for the following programming problem for the following languages: ${languageNames}
-
-Problem Title: ${questionTitle}
-
-Problem Statement:
-${question}
-
-Test Cases:
-${JSON.stringify(testCases, null, 2)}
-
-For each of the following languages, generate appropriate boilerplate code:
-${languages
-        .map(
-          (lang) =>
-            `- ${lang.languageName || lang.name} (ID: ${lang.languageId || lang.id})`,
-        )
-        .join("\n")}
-
-CRITICAL BOILERPLATE CODE REQUIREMENTS:
-1. DO NOT include any solution code, even if commented out
-2. DO NOT include example implementations, helper functions with logic, or any code that solves the problem
-3. ONLY include:
-   - Required imports/headers
-   - Input reading code (language-specific STDIN methods - see JUDGE0 section below)
-   - Basic structure (main function, class definition)
-   - A separate empty logic function/method (e.g., solve(), compute(), or class method) with a TODO comment
-   - A TODO comment indicating where candidates should implement their solution (e.g., '// TODO: Implement the solution here' or '# TODO: Implement the solution here')
-   - A placeholder print/output statement in main that calls the separate logic function
-4. **MANDATORY STRUCTURE**:
-   - main() must ONLY handle input/output and call the separate logic function/method
-   - DO NOT place any solution logic in main() or input parsing
-5. **ABSOLUTE BAN**:
-   - No loops, no conditionals, no algorithm steps, no data structure logic in the logic function body
-   - The logic function body must be EMPTY except for a TODO comment (and optional return or throw statements)
-
-JUDGE0 COMPATIBILITY (MANDATORY):
-Code runs non-interactive. Use ONLY these input methods:
-- JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');
-- Python: input() or sys.stdin.read()
-- Java: Scanner(System.in)
-- C++: cin
-- C: scanf
-- Go: fmt.Scan/fmt.Scanln
-- PHP: fgets(STDIN)
-- Rust: stdin().read_line()
-
-Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
-JAVA RULE: Java class should start with public class Main only.
-
-CRITICAL FORMATTING REQUIREMENTS:
-1. Use actual newline characters (\\n) NOT <br/> tags
-2. Use proper indentation (2 or 4 spaces depending on language conventions)
-3. Follow language-specific formatting standards (e.g., Java: camelCase, Python: snake_case, proper spacing)
-4. Ensure all braces, brackets, and parentheses are properly matched and formatted
-5. Include proper imports/headers at the top
-6. The code should be ready to use and only require the candidate to implement the solution logic
-7. Format the code exactly as it would appear in a code editor - clean, readable, and properly indented
-
-Return ONLY a valid JSON object in this exact format:
-{
-  "boilerplateCode": {
-    "${languages[0].languageName || languages[0].name
-      }": "generated code here with \\n for newlines",
-    "${languages.length > 1 ? languages[1].languageName || languages[1].name : ""
-      }": "generated code here with \\n for newlines"
-  }
-}
-
-Ensure the JSON is valid and each language name matches exactly with the provided language names.
-`;
-
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
+    await req.producer.send({
+      topic: "questions-request-topic",
+      messages: [
+        {
+          key: `bp-${Date.now()}`,
+          value: JSON.stringify({
+            requestId,
+            questionType: "Boilerplate",
+            category: { category: "boilerplate", skills: "unknown" },
+            boilerplateRequest: {
+              questionTitle,
+              question,
+              testCases,
+              languages,
+            },
+            clientId,
+            channelId,
+            jobId,
+            tempId,
+          }),
+        },
+      ],
     });
 
-    const result = await model.generateContent(prompt);
-    const response = result.response;
+    const REQUEST_TIMEOUT_MS = 90 * 1000;
+    const timeoutId = setTimeout(() => {
+      const info = req.pendingRequests.get(requestId);
+      if (!info) return;
+      req.pendingRequests.delete(requestId);
+      info.res.status(504).json({
+        message: "Boilerplate generation timeout",
+        requestId,
+      });
+    }, REQUEST_TIMEOUT_MS);
 
-    // --- Credit System Integration ---
-    try {
-      const usageMetadata = response.usageMetadata || {};
-      const inputTokens = usageMetadata.promptTokenCount || 0;
-      const outputTokens = usageMetadata.candidatesTokenCount || 0;
-
-      if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-        await CreditServiceClient.deductAiUsage({
-          clientId,
-          modelId: "gemini-2.0-flash",
-          referenceId: `ai_code_gen_${Date.now()}`,
-          inputTokens,
-          outputTokens,
-          meta: {
-            type: "ai_code_generation",
-            serviceKey: "AI_CODE_GENERATION",
-          },
-          channelId,
-          jobId,
-          tempId,
-        });
-        console.log(
-          `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`,
-        );
-      }
-    } catch (creditError) {
-      console.error(
-        "❌ AI Credit deduction failed (Non-blocking):",
-        creditError.message,
-      );
-    }
-    // ---------------------------------
-
-    const candidate = response.candidates?.[0]?.content;
-
-    if (candidate && candidate.parts) {
-      const aiResponseText = candidate.parts[0]?.text;
-      const aiResponseJson = aiResponseText.replace(/```json|```/g, "").trim();
-
-      let aiResponse;
-      try {
-        aiResponse = JSON.parse(aiResponseJson);
-      } catch (parseError) {
-        console.error("❌ Error parsing AI response:", parseError);
-        return res.status(500).json({ message: "Failed to parse AI response" });
-      }
-
-      // Clean up boilerplate code: replace <br/> tags with actual newlines
-      if (aiResponse.boilerplateCode) {
-        Object.keys(aiResponse.boilerplateCode).forEach((langName) => {
-          let boilerplate = aiResponse.boilerplateCode[langName];
-          boilerplate = String(boilerplate)
-            .replace(/<br\s*\/?>/gi, "\n")
-            .replace(/&nbsp;/g, " ")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">")
-            .replace(/&amp;/g, "&");
-          boilerplate = boilerplate.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-          aiResponse.boilerplateCode[langName] = boilerplate;
-        });
-      }
-
-      if (process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false") {
-        try {
-          const verificationResult = await verifyGeneratedBoilerplate({
-            questionTitle,
-            question,
-            testCases,
-            languages,
-            boilerplateCode: aiResponse.boilerplateCode || {},
-            genAI,
-            modelName: "gemini-2.0-flash",
-          });
-          aiResponse.boilerplateCode = verificationResult.boilerplateCode;
-          aiResponse.verified = verificationResult.verified;
-          aiResponse.verificationMeta = verificationResult.verificationMeta;
-        } catch (verificationError) {
-          console.error(
-            "❌ Boilerplate verification failed:",
-            verificationError.message,
-          );
-          aiResponse.verified = false;
-          aiResponse.verificationMeta = {
-            attempts: 0,
-            summary: { status: "failed", reason: verificationError.message },
-          };
-        }
-      }
-
-      return res.json(aiResponse);
-    } else {
-      console.error("❌ No valid response received from Gemini.");
-      return res.status(500).json({ message: "No valid response from AI" });
-    }
+    req.pendingRequests.set(requestId, {
+      res,
+      expectedResponses: 1,
+      requestMode: "boilerplate",
+      clientId,
+      channelId,
+      jobId,
+      tempId,
+      timeoutId,
+    });
+    return;
   } catch (error) {
     console.error("❌ Error in generateBoilerplateCode:", error);
     return res

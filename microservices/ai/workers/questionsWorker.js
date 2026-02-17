@@ -10,6 +10,7 @@ const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
 const {
   verifyProgrammingQuestions,
+  verifyGeneratedBoilerplate,
 } = require("../services/programmingVerification.service");
 const {
   normalizeProgrammingContext,
@@ -20,6 +21,9 @@ const {
   jaccard: jaccardFromModule,
   TITLE_SIMILARITY_THRESHOLD: BODY_SIMILARITY_THRESHOLD,
 } = require("../utils/programmingDuplicateAvoidance");
+const {
+  generateBoilerplateWithGemini,
+} = require("../services/boilerplateGeneration.service");
 
 require("dotenv").config();
 
@@ -1745,16 +1749,8 @@ ${isScenarioBased
     - "Merge two sorted arrays into one sorted array"
   * Focus on clarity and standard problem formulations rather than job-role specific scenarios`}
 - **JUDGE0 COMPATIBILITY** (MANDATORY):
-  * Code runs non-interactive. Use ONLY these input methods:
-    - JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');
-    - Python: input() or sys.stdin.read()
-    - Java: Scanner(System.in)
-    - C++: cin
-    - C: scanf
-    - Go: fmt.Scan/fmt.Scanln
-    - PHP: fgets(STDIN)
-    - Rust: stdin().read_line()
-  * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
+  * Problems/testcases must be executable on Judge0.
+  * Boilerplate will be generated in a separate dedicated boilerplate step after questions+testcases.
 - **Experience Level Tailoring** (${experience} years):
   * ${experience <= 3
           ? "Junior Level"
@@ -1924,33 +1920,7 @@ ${isScenarioBased
   * If maxTime <= 30 minutes: Medium max unless explicitly asked and still solvable
   * Ignore any "Hard" preference if it conflicts with maxTime
 - Supported Languages: ${supportedLanguageNames.join(", ")}
-- **CRITICAL BOILERPLATE CODE REQUIREMENTS - STRICTLY ENFORCED**:
-  * Boilerplate MUST include ONLY: imports/headers, input reading code, basic structure (main function/class), TODO comment
-  * **MANDATORY STRUCTURE**: Keep solution logic in a SEPARATE function/method (e.g., solve(), compute(), or class method)
-  * main() must ONLY handle input/output and call the separate logic function/method
-  * **DO NOT** place any solution logic in main() or input parsing
-  * **WHAT TO INCLUDE**: Only input reading (language-specific STDIN methods), empty function/class structure, TODO comment like "// TODO: Implement the solution here"
-  * **EXAMPLE OF CORRECT BOILERPLATE**: 
-    - C++: #include headers, main() with cin for input, empty function with TODO, placeholder output
-    - Java: imports, public class Main { ... }, main() with Scanner(System.in) for input, separate solve() with TODO, placeholder System.out.println
-    - JavaScript (Node.js): const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); (ONLY this method, NO other imports) empty function with TODO, placeholder console.log
-    - Python: imports, input() or sys.stdin.read() for input, empty function with TODO, placeholder print
-  * Use \\n for newlines in boilerplate code (NOT <br/>)
-  * Follow language-specific formatting standards
-  * **IMPORTANT**: The boilerplate code must be a clean starting point where candidates write ALL solution logic themselves.
-  * **IMPORTANT**: The boilerplate code does not include any solution logic or algorithm implementation.
-- **JUDGE0 COMPATIBILITY** (MANDATORY):
-  * Code runs non-interactive. Use ONLY these input methods:
-    - JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');
-    - Python: input() or sys.stdin.read()
-    - Java: Scanner(System.in)
-    - C++: cin
-    - C: scanf
-    - Go: fmt.Scan/fmt.Scanln
-    - PHP: fgets(STDIN)
-    - Rust: stdin().read_line()
-  * JAVA RULE: Java class should start with public class Main only.
-  * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
+- Boilerplate code instructions are handled in dedicated boilerplate generation API/step; do not output boilerplate here.
 
 If titles are provided, you MUST (NO EXCEPTIONS):
 - Generate exactly one Programming question per title, in the SAME ORDER as the list below.
@@ -2090,11 +2060,6 @@ Return JSON in this format:
           }));
       const supportedLanguagesInfoForTemplate =
         programmingConfigForTemplate.supportedLanguages || [];
-      const supportedLanguageNamesForTemplate =
-        supportedLanguagesInfoForTemplate.map((lang) => lang.languageName) ||
-        [];
-      const supportedLanguageIdsForTemplate =
-        supportedLanguagesInfoForTemplate.map((lang) => lang.languageId) || [];
 
       const programmingCount =
         Array.isArray(titles) && titles.length > 0 ? titles.length : number;
@@ -2141,23 +2106,16 @@ Return JSON in this format:
                       : "",
                   })),
                 )},
-      "supportedLanguageNames": ${JSON.stringify(
-                  supportedLanguageNamesForTemplate,
-                )},
-      "supportedLanguageIds": ${JSON.stringify(
-                  supportedLanguageIdsForTemplate,
-                )},
-      "boilerplateCode": {
-        ${supportedLanguageNamesForTemplate.length > 0
-                ? supportedLanguageNamesForTemplate
-                  .map(
-                    (langName) =>
-                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). Java rule: class should start with public class Main only. Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
-                  )
-                  .join(",")
-                : ""
-              }
-      }
+      "supportedLanguages": ${JSON.stringify(
+                  supportedLanguagesInfoForTemplate.map((lang) => ({
+                    languageId: lang.languageId,
+                    languageName: lang.languageName,
+                    language: lang.languageName.split(" (")[0],
+                    version: lang.languageName.includes("(")
+                      ? lang.languageName.split("(")[1].replace(")", "")
+                      : "",
+                  })),
+                )}
     }`;
           })
           .join(",")}
@@ -2198,6 +2156,7 @@ const createConsumer = async (id) => {
       let jobId = null;
       let tempId = null;
       let screeningAssessmentId = null;
+      let boilerplateRequest = null;
 
       try {
         const parsedMessage = JSON.parse(message.value.toString());
@@ -2221,6 +2180,7 @@ const createConsumer = async (id) => {
         jobId = parsedMessage.jobId;
         tempId = parsedMessage.tempId;
         screeningAssessmentId = parsedMessage.screeningAssessmentId;
+        boilerplateRequest = parsedMessage.boilerplateRequest || null;
       } catch (parseError) {
         console.error(
           `❌ Error parsing incoming Kafka message in Consumer ${id}:`,
@@ -2230,6 +2190,110 @@ const createConsumer = async (id) => {
           `Message value (first 500 chars):`,
           message.value.toString().substring(0, 500),
         );
+        return;
+      }
+
+      // Handle combined Audio/Video/Subjective type
+      if (questionType === "Boilerplate") {
+        try {
+          if (!boilerplateRequest) {
+            throw new Error("Missing boilerplateRequest payload");
+          }
+          const { questionTitle, question, testCases, languages } = boilerplateRequest;
+          const boilerplateResult = await generateBoilerplateWithGemini({
+            genAI,
+            modelName: "gemini-2.0-flash",
+            questionTitle,
+            question,
+            testCases,
+            languages,
+          });
+          let verified = false;
+          let verificationMeta = {
+            attempts: 0,
+            summary: { status: "skipped", reason: "Verification disabled" },
+          };
+          let finalBoilerplateCode = boilerplateResult.boilerplateCode;
+
+          if (process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false") {
+            const verificationResult = await verifyGeneratedBoilerplate({
+              questionTitle,
+              question,
+              testCases,
+              languages,
+              boilerplateCode: boilerplateResult.boilerplateCode,
+              genAI,
+              modelName: "gemini-2.0-flash",
+            });
+            finalBoilerplateCode = verificationResult.boilerplateCode;
+            verified = verificationResult.verified;
+            verificationMeta = verificationResult.verificationMeta;
+          }
+
+          if (
+            clientId &&
+            (boilerplateResult.tokenUsage?.promptTokens ||
+              boilerplateResult.tokenUsage?.completionTokens)
+          ) {
+            try {
+              await CreditServiceClient.deductAiUsage({
+                clientId,
+                modelId: "gemini-2.0-flash",
+                referenceId: `ai_code_gen_${Date.now()}`,
+                inputTokens: boilerplateResult.tokenUsage.promptTokens || 0,
+                outputTokens: boilerplateResult.tokenUsage.completionTokens || 0,
+                meta: {
+                  type: "ai_code_generation",
+                  serviceKey: "AI_CODE_GENERATION",
+                },
+                channelId,
+                jobId,
+                tempId,
+              });
+            } catch (creditError) {
+              console.error(
+                `❌ AI Credit deduction failed for boilerplate in Consumer ${id}:`,
+                creditError.message,
+              );
+            }
+          }
+
+          await producer.send({
+            topic: replyTopic,
+            messages: [
+              {
+                key: requestId,
+                value: JSON.stringify({
+                  requestId,
+                  questionType: "Boilerplate",
+                  category: category?.category || "boilerplate",
+                  boilerplateResponse: {
+                    boilerplateCode: finalBoilerplateCode,
+                    verified,
+                    verificationMeta,
+                  },
+                  tokenUsage: boilerplateResult.tokenUsage,
+                }),
+              },
+            ],
+          });
+        } catch (error) {
+          await producer.send({
+            topic: replyTopic,
+            messages: [
+              {
+                key: requestId,
+                value: JSON.stringify({
+                  requestId,
+                  questionType: "Boilerplate",
+                  category: category?.category || "boilerplate",
+                  error: true,
+                  message: error.message || "Boilerplate generation failed",
+                }),
+              },
+            ],
+          });
+        }
         return;
       }
 
@@ -3360,6 +3424,35 @@ const createConsumer = async (id) => {
 
             // Process Programming questions: verify and normalize test cases/boilerplate code
             if (questionType === "Programming" && aiResponse.Programming) {
+              // Generate boilerplate AFTER question+testcase generation.
+              const boilerplatePromises = aiResponse.Programming.map(async (question) => {
+                const supportedLanguages = Array.isArray(question.supportedLanguages)
+                  ? question.supportedLanguages
+                  : [];
+                if (!supportedLanguages.length) return question;
+                try {
+                  const bp = await generateBoilerplateWithGemini({
+                    genAI,
+                    modelName: "gemini-2.0-flash",
+                    questionTitle: question.questionTitle,
+                    question: question.question,
+                    testCases: question.testCases || [],
+                    languages: supportedLanguages,
+                  });
+                  question.supportedLanguages = supportedLanguages.map((lang) => ({
+                    ...lang,
+                    codeSnippet: bp.boilerplateCode?.[lang.languageName] || "",
+                  }));
+                } catch (bpErr) {
+                  console.error(
+                    `❌ Boilerplate generation failed in Consumer ${id} for ${question.questionTitle}:`,
+                    bpErr?.message || bpErr,
+                  );
+                }
+                return question;
+              });
+              aiResponse.Programming = await Promise.all(boilerplatePromises);
+
               const verificationEnabled =
                 process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false";
               if (verificationEnabled) {
@@ -3417,40 +3510,6 @@ const createConsumer = async (id) => {
                         .trim();
                       return tc;
                     });
-                  }
-
-                  if (
-                    question.supportedLanguageNames &&
-                    question.supportedLanguageNames.length > 0 &&
-                    question.boilerplateCode
-                  ) {
-                    // Update supportedLanguages with boilerplate code from response
-                    if (
-                      question.supportedLanguages &&
-                      question.supportedLanguages.length > 0
-                    ) {
-                      question.supportedLanguages.forEach((lang) => {
-                        if (question.boilerplateCode[lang.languageName]) {
-                          let boilerplate =
-                            question.boilerplateCode[lang.languageName];
-
-                          // Clean up boilerplate code: replace <br/> tags with actual newlines
-                          boilerplate = String(boilerplate)
-                            .replace(/<br\s*\/?>/gi, "\n")
-                            .replace(/&nbsp;/g, " ")
-                            .replace(/&lt;/g, "<")
-                            .replace(/&gt;/g, ">")
-                            .replace(/&amp;/g, "&");
-
-                          // Normalize line endings
-                          boilerplate = boilerplate
-                            .replace(/\r\n/g, "\n")
-                            .replace(/\r/g, "\n");
-
-                          lang.codeSnippet = boilerplate;
-                        }
-                      });
-                    }
                   }
 
                   // Remove non-schema fields before sending response

@@ -106,6 +106,18 @@ const ensureTopics = async () => {
             );
             const requestInfo = pendingRequests.get(key);
             if (requestInfo) {
+              if (
+                requestInfo.requestMode === "boilerplate" &&
+                responseData.questionType === "Boilerplate"
+              ) {
+                if (requestInfo.timeoutId) clearTimeout(requestInfo.timeoutId);
+                requestInfo.res.status(500).json({
+                  message: responseData.message || "Boilerplate generation failed",
+                  requestId: key,
+                });
+                pendingRequests.delete(key);
+                return;
+              }
               if (!requestInfo.errors) {
                 requestInfo.errors = [];
               }
@@ -150,6 +162,18 @@ const ensureTopics = async () => {
           const requestInfo = pendingRequests.get(key);
           if (!requestInfo) {
             console.error(`❌ No pending request found for requestId: ${key}`);
+            return;
+          }
+
+          if (
+            requestInfo.requestMode === "boilerplate" &&
+            responseData.questionType === "Boilerplate"
+          ) {
+            if (requestInfo.timeoutId) {
+              clearTimeout(requestInfo.timeoutId);
+            }
+            requestInfo.res.status(200).json(responseData.boilerplateResponse || {});
+            pendingRequests.delete(key);
             return;
           }
 
