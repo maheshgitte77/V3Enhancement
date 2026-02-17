@@ -1,4 +1,4 @@
-export const LANGUAGE_RULES = {
+const LANGUAGE_RULES = {
   c: {
     match: ["c (gcc"],
     instruction: [
