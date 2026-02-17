@@ -338,7 +338,7 @@ console.log(result);
 `;
 };
 
-const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
+const checkBoilerplateContract = (codeSnippet = "", languageName = "", skipTodoCheck = false) => {
   const family = detectLanguageFamily(languageName);
   const checks = {
     hasInputRead: hasInputRead(codeSnippet, family),
@@ -351,19 +351,30 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "") => {
     hasUnsupportedInputPattern: hasUnsupportedInputPattern(codeSnippet, family),
   };
   
-  // If markers exist but code patterns don't, markers indicate intent - be more lenient
-  const hasMarkers = checks.hasInputBlockMarkers && checks.hasImplementationBlockMarkers;
-  const hasBasicCode = checks.hasInputRead || checks.hasOutputWrite || checks.hasImplementationBlock;
+  // Marker-based validation: if both markers exist, trust them completely - skip all extra checks
+  const hasBothMarkers = checks.hasInputBlockMarkers && checks.hasImplementationBlockMarkers;
   
+  if (hasBothMarkers) {
+    // Markers exist = structure is correct, only check critical safety requirements
+    return {
+      family,
+      valid:
+        checks.hasSolveInvocation &&
+        !checks.hasUnsupportedInputPattern,
+      checks,
+    };
+  }
+  
+  // Fallback: if no markers, use traditional code pattern checks
   return {
     family,
     valid:
-      checks.hasInputBlockMarkers &&
-      checks.hasImplementationBlockMarkers &&
+      checks.hasInputRead &&
+      checks.hasOutputWrite &&
+      checks.hasImplementationBlock &&
       checks.hasSolveInvocation &&
-      checks.hasTodo &&
-      !checks.hasUnsupportedInputPattern &&
-      (hasBasicCode || hasMarkers), // Accept if markers exist OR basic code exists
+      (skipTodoCheck || checks.hasTodo) &&
+      !checks.hasUnsupportedInputPattern,
     checks,
   };
 };
@@ -739,6 +750,7 @@ const repairBoilerplateIfNeeded = async ({
   const contract = checkBoilerplateContract(
     preprocessedLanguage.codeSnippet,
     preprocessedLanguage.languageName,
+    false, // Check TODO before injection
   );
   if (contract.valid) return { language: preprocessedLanguage, repaired: false, contract };
 
@@ -797,6 +809,7 @@ const repairBoilerplateIfNeeded = async ({
   const repairedContract = checkBoilerplateContract(
     repairedLanguage.codeSnippet,
     repairedLanguage.languageName,
+    false, // Check TODO for repaired boilerplate
   );
   if (!repairedContract.valid) {
     vLog("contract-check", "Repaired boilerplate still invalid", {
@@ -824,6 +837,7 @@ const repairBoilerplateIfNeeded = async ({
       const finalContract = checkBoilerplateContract(
         finalLanguage.codeSnippet,
         finalLanguage.languageName,
+        false, // Check TODO for deterministic fallback
       );
       if (finalContract.valid) {
         return { language: finalLanguage, repaired: true, contract: finalContract };
