@@ -1345,6 +1345,7 @@ const verifyOneProgrammingQuestion = async ({
     modelName,
     requestId,
     consumerId,
+    skipRegeneration = false, // If true, proceed to Phase 4/5 even if failed
 }) => {
     const workingQuestion = JSON.parse(JSON.stringify(question || {}));
     workingQuestion.testCases = normalizeTestCases(workingQuestion.testCases);
@@ -1503,7 +1504,64 @@ const verifyOneProgrammingQuestion = async ({
         summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
     });
 
-    // PHASE 4: Handle failing languages with AI analysis
+    // Early exit: If all languages verified, return immediately
+    if (failingLanguages.length === 0) {
+        const allLanguagesVerified = languagePassSummary.length > 0 && languagePassSummary.every((lang) =>
+            verifiedLanguageIds.has(lang.languageId),
+        );
+        const finalLanguagePassSummary = languagePassSummary.map((lang) => ({
+            ...lang,
+            verified: verifiedLanguageIds.has(lang.languageId),
+        }));
+
+        return {
+            question: {
+                ...workingQuestion,
+                supportedLanguages: languageStates.map((x) => ({
+                    languageId: x.languageId,
+                    languageName: x.languageName,
+                    codeSnippet: x.codeSnippet,
+                })),
+                verified: allLanguagesVerified,
+                verificationAttempts: 1,
+                verificationAt: new Date().toISOString(),
+                verificationSummary: {
+                    status: "passed",
+                    languagePassSummary: finalLanguagePassSummary,
+                },
+            },
+            verified: allLanguagesVerified,
+            needsRegeneration: false,
+        };
+    }
+
+    // If skipRegeneration is false, return early for regeneration
+    if (!skipRegeneration) {
+        return {
+            question: {
+                ...workingQuestion,
+                supportedLanguages: languageStates.map((x) => ({
+                    languageId: x.languageId,
+                    languageName: x.languageName,
+                    codeSnippet: x.codeSnippet,
+                })),
+                verified: false,
+                verificationAttempts: 1,
+                verificationAt: new Date().toISOString(),
+                verificationSummary: {
+                    status: "needs_regeneration",
+                    languagePassSummary: languagePassSummary.map((lang) => ({
+                        ...lang,
+                        verified: verifiedLanguageIds.has(lang.languageId),
+                    })),
+                },
+            },
+            verified: false,
+            needsRegeneration: true,
+        };
+    }
+
+    // PHASE 4: Handle failing languages with AI analysis (only reached if regeneration attempts exhausted)
     for (const failingLang of failingLanguages) {
         const langState = languageStates.find((ls) => ls.languageId === failingLang.languageId);
         const execResult = executionMap.get(failingLang.languageId);
@@ -1768,6 +1826,7 @@ const verifyOneProgrammingQuestion = async ({
             },
         },
         verified: allLanguagesVerified,
+        needsRegeneration: false,
     };
 };
 
@@ -1780,56 +1839,204 @@ const stripInternalFields = (question) => {
     return cleaned;
 };
 
+/**
+ * Regenerate a question using its title
+ * This should call the question generation service/API
+ */
+const regenerateQuestionFromTitle = async ({
+    questionTitle,
+    genAI,
+    modelName,
+    requestId,
+    consumerId,
+}) => {
+    // TODO: Implement actual question regeneration logic
+    // This should call the question generation service with the title
+    // For now, return null to indicate regeneration is not implemented
+    vLog("regenerate-question", "Regeneration requested but not implemented", {
+        requestId,
+        consumerId,
+        title: questionTitle,
+    });
+    return null;
+};
+
 const verifyProgrammingQuestions = async ({
     questions = [],
     genAI,
     modelName = DEFAULT_MODEL,
     requestId = "",
     consumerId = "",
+    regenerateFunction = null, // Optional function to regenerate questions: (title) => Promise<question>
 }) => {
-    vLog("verify-batch", "Starting programming verification batch", {
+    vLog("verify-batch", "Starting programming verification batch with regeneration", {
         requestId,
         consumerId,
         questionCount: questions.length,
+        maxRegenerationAttempts: 3,
     });
-    const verifiedQuestions = await Promise.all(
-        questions.map(async (question) => {
-            try {
-                const result = await verifyOneProgrammingQuestion({
-                    question,
-                    genAI,
-                    modelName,
-                    requestId,
-                    consumerId,
-                });
-                return stripInternalFields(result.question);
-            } catch (error) {
-                vLog("verify-batch", "Question verification crashed", {
-                    requestId,
-                    consumerId,
-                    title: question?.questionTitle || "Untitled",
-                    error: error.message,
-                });
-                return stripInternalFields({
-                    ...question,
-                    verified: false,
-                    verificationAttempts: 1,
-                    verificationSummary: {
-                        status: "failed",
-                        reason: error.message || "Verification failed",
-                    },
-                });
+
+    const MAX_REGENERATION_ATTEMPTS = 3;
+    let currentQuestions = [...questions];
+    const questionAttempts = new Map(); // Track attempts per question title
+    const verifiedQuestions = [];
+    const finalResults = [];
+
+    // Initialize attempts tracking
+    currentQuestions.forEach((q) => {
+        const title = q.questionTitle || "Untitled";
+        questionAttempts.set(title, 0);
+    });
+
+    for (let cycle = 1; cycle <= MAX_REGENERATION_ATTEMPTS; cycle++) {
+        vLog("verify-batch", `Regeneration cycle ${cycle}/${MAX_REGENERATION_ATTEMPTS}`, {
+            requestId,
+            consumerId,
+            questionsInCycle: currentQuestions.length,
+        });
+
+        // Verify all questions in current cycle
+        const cycleResults = await Promise.all(
+            currentQuestions.map(async (question) => {
+                const title = question.questionTitle || "Untitled";
+                const attempts = questionAttempts.get(title) || 0;
+                
+                try {
+                    const skipRegeneration = cycle === MAX_REGENERATION_ATTEMPTS; // Last attempt, proceed to Phase 4/5
+                    const result = await verifyOneProgrammingQuestion({
+                        question,
+                        genAI,
+                        modelName,
+                        requestId,
+                        consumerId,
+                        skipRegeneration,
+                    });
+                    
+                    questionAttempts.set(title, attempts + 1);
+                    return { question, result, title };
+                } catch (error) {
+                    vLog("verify-batch", "Question verification crashed", {
+                        requestId,
+                        consumerId,
+                        title,
+                        error: error.message,
+                    });
+                    questionAttempts.set(title, attempts + 1);
+                    return {
+                        question,
+                        result: {
+                            question: {
+                                ...question,
+                                verified: false,
+                                verificationAttempts: attempts + 1,
+                                verificationSummary: {
+                                    status: "failed",
+                                    reason: error.message || "Verification failed",
+                                },
+                            },
+                            verified: false,
+                            needsRegeneration: cycle < MAX_REGENERATION_ATTEMPTS,
+                        },
+                        title,
+                    };
+                }
+            }),
+        );
+
+        // Separate verified and failed questions
+        const cycleVerified = [];
+        const cycleFailed = [];
+
+        cycleResults.forEach(({ question, result, title }) => {
+            const cleanedQuestion = stripInternalFields(result.question);
+            finalResults.push(cleanedQuestion);
+
+            if (result.verified) {
+                cycleVerified.push(cleanedQuestion);
+                verifiedQuestions.push(cleanedQuestion);
+            } else if (result.needsRegeneration && cycle < MAX_REGENERATION_ATTEMPTS) {
+                cycleFailed.push({ question, title });
+            } else {
+                // Max attempts reached or regeneration disabled
+                verifiedQuestions.push(cleanedQuestion);
             }
-        }),
-    );
+        });
+
+        vLog("verify-batch", `Cycle ${cycle} completed`, {
+            requestId,
+            consumerId,
+            verified: cycleVerified.length,
+            failed: cycleFailed.length,
+            totalVerified: verifiedQuestions.length,
+        });
+
+        // If no failures or max attempts reached, stop
+        if (cycleFailed.length === 0 || cycle === MAX_REGENERATION_ATTEMPTS) {
+            break;
+        }
+
+        // Regenerate failed questions
+        if (regenerateFunction && typeof regenerateFunction === "function") {
+            vLog("verify-batch", "Regenerating failed questions", {
+                requestId,
+                consumerId,
+                failedCount: cycleFailed.length,
+            });
+
+            const regenerationPromises = cycleFailed.map(async ({ title }) => {
+                try {
+                    const regenerated = await regenerateFunction(title);
+                    if (regenerated) {
+                        return regenerated;
+                    }
+                } catch (error) {
+                    vLog("verify-batch", "Regeneration failed", {
+                        requestId,
+                        consumerId,
+                        title,
+                        error: error.message,
+                    });
+                }
+                return null;
+            });
+
+            const regeneratedQuestions = (await Promise.all(regenerationPromises)).filter(Boolean);
+            
+            if (regeneratedQuestions.length > 0) {
+                currentQuestions = regeneratedQuestions;
+                vLog("verify-batch", "Questions regenerated", {
+                    requestId,
+                    consumerId,
+                    regeneratedCount: regeneratedQuestions.length,
+                });
+            } else {
+                // Regeneration failed, stop cycles
+                vLog("verify-batch", "Regeneration failed for all questions, stopping cycles", {
+                    requestId,
+                    consumerId,
+                });
+                break;
+            }
+        } else {
+            // No regeneration function provided, stop cycles
+            vLog("verify-batch", "No regeneration function provided, stopping cycles", {
+                requestId,
+                consumerId,
+            });
+            break;
+        }
+    }
+
     const verifiedCount = verifiedQuestions.filter((q) => q.verified).length;
-    vLog("verify-batch", "Completed programming verification batch", {
+    vLog("verify-batch", "Completed programming verification batch with regeneration", {
         requestId,
         consumerId,
         questionCount: questions.length,
         verifiedCount,
+        totalCycles: Math.min(MAX_REGENERATION_ATTEMPTS, questionAttempts.size),
     });
-    return { questions: verifiedQuestions };
+
+    return { questions: finalResults };
 };
 
 const verifyGeneratedBoilerplate = async ({
