@@ -58,7 +58,7 @@ const LANGUAGE_RULES = {
     match: ["python"],
     instruction: [
       "MANDATORY for Judge0: use sys.stdin for input (e.g. n = int(sys.stdin.readline()), arr = list(map(int, sys.stdin.readline().split()))). Do not use input() so execution is non-interactive.",
-      "Implementation block: markers HC_IMPLEMENTATION_BLOCK_START/END must wrap the solve function (marker line, then def solve(...):, then body). Use 4-space indent for body.",
+      "Implementation block: markers HC_IMPLEMENTATION_BLOCK_START/END must wrap the solve function (marker line, then def solve(...):, then body). Body must use consistent 4-space indent for every line inside solve; mixed indentation causes IndentationError when injected.",
       "Do not use interactive prompts. Output using print only.",
     ].join(" "),
   },

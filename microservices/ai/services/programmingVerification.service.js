@@ -446,6 +446,10 @@ ${JSON.stringify(testCases, null, 2)}
 
 const buildLogicBlockPrompt = ({ question, testCases, language }) => {
     const langInstruction = getLanguageInstruction(language.languageName);
+    const isPython = /python/i.test(String(language.languageName || ""));
+    const pythonNote = isPython
+        ? " For Python: use exactly 4 spaces at the start of every line of the body (consistent indent); mixed indentation causes IndentationError when injected."
+        : "";
     return `
 You are given a boilerplate skeleton for ${language.languageName}.
 Generate ONLY the implementation body that goes INSIDE the solve function between ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd}.
@@ -461,7 +465,7 @@ Rules:
 1) todoReplacement = only the executable body lines (what goes inside solve). No def solve, no function solve, no closing }.
 2) Do not return full file, main, or any code outside the solve body.
 3) Must pass provided test cases when this body is inserted into the boilerplate.
-4) Minimize comments. No markdown fences. Output only the JSON.
+4) Minimize comments. No markdown fences. Output only the JSON.${pythonNote}
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -491,6 +495,15 @@ const normalizeMinIndent = (text) => {
     }
     if (minSpaces === Infinity || minSpaces === 0) return String(text || "").trim();
     return lines.map((line) => (line.length >= minSpaces ? line.slice(minSpaces) : line)).join("\n").trim();
+};
+
+/** Python: strip all leading whitespace so every line gets the same indent when we add bodyIndent (avoids IndentationError from mixed indents). */
+const normalizePythonBodyForInjection = (text) => {
+    return String(text || "")
+        .split("\n")
+        .map((line) => line.trimStart())
+        .join("\n")
+        .trim();
 };
 
 const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName }) => {
@@ -544,7 +557,9 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
                     : isPython
                         ? 4
                         : 4;
-            const logicNormalized = normalizeMinIndent(logic);
+            const logicNormalized = isPython
+                ? normalizePythonBodyForInjection(logic)
+                : normalizeMinIndent(logic);
             const replacement =
                 startMarkerLine +
                 "\n" +
