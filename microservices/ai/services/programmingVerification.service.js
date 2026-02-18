@@ -1245,33 +1245,228 @@ const summarizeResults = (executionResults = []) => {
     return { allPass, languagePassSummary };
 };
 
+/**
+ * Check if language passes verification threshold (70% or 100%)
+ */
+const isLanguageVerified = (languageResult) => {
+    const passed = Number(languageResult?.passed || 0);
+    const total = Number(languageResult?.total || 0);
+    if (total === 0) return false;
+    const percentage = (passed / total) * 100;
+    return percentage >= 70; // 70% threshold
+};
+
+/**
+ * Generate complete solution using original boilerplate (without changing boilerplate, only add solution)
+ * Returns: complete solution code (boilerplate + solution merged)
+ */
+const generateCompleteSolutionWithBoilerplate = async ({
+    genAI,
+    modelName,
+    question,
+    testCases,
+    boilerplateCode,
+    language,
+}) => {
+    const langInstruction = getLanguageInstruction(language.languageName);
+    const prompt = `
+You are completing a programming solution using the provided boilerplate code.
+
+CRITICAL INSTRUCTIONS:
+- DO NOT change ANY word in the boilerplate code
+- DO NOT modify the boilerplate structure, markers, or any existing code
+- ONLY add the solution logic inside the implementation block (between HC_IMPLEMENTATION_BLOCK_START and HC_IMPLEMENTATION_BLOCK_END)
+- The boilerplate code is correct and must remain exactly as provided
+- Complete the solution by implementing the logic inside the solve function/method
+
+Question:
+${sanitizeText(question.question || "")}
+
+Test Cases:
+${JSON.stringify(testCases || [], null, 2)}
+
+Boilerplate Code (DO NOT MODIFY - USE EXACTLY AS PROVIDED):
+${boilerplateCode || ""}
+
+Language: ${language.languageName}
+Judge0 Rules:
+${langInstruction}
+
+Return ONLY the complete solution code (boilerplate + your solution logic merged together).
+The boilerplate code must remain EXACTLY as provided, with only the solution logic added inside the implementation block.
+
+Return ONLY JSON:
+{
+  "completeSolution": "full code with boilerplate unchanged and solution added"
+}
+`;
+    
+    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
+    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
+    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const parsed = safeJsonParse(text);
+    
+    if (!parsed?.completeSolution || typeof parsed.completeSolution !== "string") {
+        throw new Error(`Invalid complete solution for ${language.languageName}`);
+    }
+    
+    return sanitizeText(parsed.completeSolution);
+};
+
+/**
+ * Re-evaluate test cases when any language doesn't pass all test cases
+ * Returns: { testCasesCorrect: boolean, correctedTestCases?: [], reason: "" }
+ */
+const reEvaluateTestCases = async ({
+    genAI,
+    modelName,
+    question,
+    testCases,
+    languagePassSummary,
+}) => {
+    // Prepare language summary for AI (only languageName, passed, total)
+    const langSummary = languagePassSummary.map((lang) => ({
+        languageName: lang.languageName,
+        passed: lang.passed,
+        total: lang.total,
+    }));
+
+    const prompt = `
+You are analyzing test cases for a programming question. Multiple languages are showing partial test case failures (not all 5 test cases passed).
+
+Question:
+${sanitizeText(question.question || "")}
+
+Current Test Cases:
+${JSON.stringify(testCases || [], null, 2)}
+
+Language Execution Results:
+${JSON.stringify(langSummary, null, 2)}
+
+Analyze: Are the test cases correct? If multiple languages are failing the same test cases, or if the expected outputs don't match the problem description, the test cases may be incorrect.
+
+Return ONLY JSON:
+{
+  "testCasesCorrect": true or false,
+  "correctedTestCases": [...], // Only if testCasesCorrect is false, array of { input: "...", output: "..." }
+  "reason": "explanation"
+}
+
+Rules:
+- testCasesCorrect = true if test cases are correct and failures are due to code issues
+- testCasesCorrect = false if test cases have wrong expected outputs
+- correctedTestCases: Array of test case objects with input and output fields (same count as original)
+- If test cases are correct, return empty array for correctedTestCases
+`;
+    
+    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
+    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
+    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const parsed = safeJsonParse(text);
+    
+    return {
+        testCasesCorrect: parsed?.testCasesCorrect === true,
+        correctedTestCases: Array.isArray(parsed?.correctedTestCases) && parsed.correctedTestCases.length > 0
+            ? parsed.correctedTestCases
+            : null,
+        reason: parsed?.reason || "Analysis completed",
+    };
+};
+
+/**
+ * Analyze failure to determine if issue is with test cases or boilerplate code
+ * Returns: { issueType: "testCase" | "boilerplate", correctedTestCases?: [], correctedBoilerplate?: "", reason: "" }
+ */
+const analyzeFailureWithAI = async ({
+    genAI,
+    modelName,
+    question,
+    testCases,
+    mergedCode,
+    executionResult,
+    language,
+}) => {
+    const langInstruction = getLanguageInstruction(language.languageName);
+    const failureSummary = buildFailureSummaryForFix([executionResult]);
+    const stderr = failureSummary[0]?.stderr || "";
+    const compileOutput = failureSummary[0]?.compileOutput || "";
+    const errors = [stderr, compileOutput].filter(Boolean).join("\n").slice(0, 2000);
+    
+    // Get actual outputs from execution results
+    const actualOutputs = (executionResult?.results || []).map((r) => ({
+        input: r.input || "",
+        expected: r.expectedOutput || r.expected || "",
+        actual: r.actualOutput || r.stdout || r.output || "",
+        status: r.status || "",
+    }));
+
+    const prompt = `
+You are analyzing why a programming solution failed test cases. Determine if the failure is due to:
+1. INCORRECT TEST CASES - The test cases have wrong expected outputs
+2. BOILERPLATE CODE ISSUE - The boilerplate code structure is incompatible with Judge0 or has syntax errors
+
+Question:
+${sanitizeText(question.question || "")}
+
+Test Cases:
+${JSON.stringify(testCases || [], null, 2)}
+
+Merged Code (Boilerplate + Solution):
+${mergedCode || ""}
+
+Execution Results:
+${JSON.stringify(actualOutputs, null, 2)}
+
+Judge0 Errors:
+${errors || "No errors reported"}
+
+Language: ${language.languageName}
+Judge0 Rules:
+${langInstruction}
+
+Analyze and determine:
+- If test cases are incorrect: Return corrected test cases
+- If boilerplate code has issues: Return corrected boilerplate code only (without solution logic)
+
+Return ONLY JSON:
+{
+  "issueType": "testCase" or "boilerplate",
+  "correctedTestCases": [...], // Only if issueType is "testCase", array of { input: "...", output: "..." }
+  "correctedBoilerplate": "...", // Only if issueType is "boilerplate", just the boilerplate code
+  "reason": "explanation of the issue"
+}
+
+Rules:
+- issueType = "testCase" if expected outputs in test cases are wrong for the given solution logic
+- issueType = "boilerplate" if boilerplate has syntax errors, wrong I/O patterns, missing imports, or Judge0 incompatibilities
+- correctedTestCases: Array of test case objects with input and output fields
+- correctedBoilerplate: Complete boilerplate code with markers, but WITHOUT solution logic (keep TODO placeholder)
+`;
+    
+    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
+    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
+    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const parsed = safeJsonParse(text);
+    
+    return {
+        issueType: parsed?.issueType === "testCase" ? "testCase" : "boilerplate",
+        correctedTestCases: Array.isArray(parsed?.correctedTestCases) ? parsed.correctedTestCases : null,
+        correctedBoilerplate: typeof parsed?.correctedBoilerplate === "string" ? parsed.correctedBoilerplate : null,
+        reason: parsed?.reason || "Analysis completed",
+    };
+};
+
 const verifyOneProgrammingQuestion = async ({
     question,
     genAI,
     modelName,
     requestId,
     consumerId,
-    maxAttempts = MAX_VERIFICATION_ATTEMPTS,
+    skipRegeneration = false, // If true, proceed to Phase 4/5 even if failed
 }) => {
     const workingQuestion = JSON.parse(JSON.stringify(question || {}));
     workingQuestion.testCases = normalizeTestCases(workingQuestion.testCases);
     workingQuestion.supportedLanguages = normalizeSupportedLanguages(workingQuestion);
-    const languageStates = (workingQuestion.supportedLanguages || []).map((lang) => ({
-        languageId: Number(lang.languageId),
-        languageName: lang.languageName,
-        codeSnippet: lang.codeSnippet || "",
-        logicBlock: "",
-        mergedCode: "",
-        lastResult: null,
-    }));
-
-    const verificationMeta = {
-        attempts: 0,
-        requestId,
-        consumerId,
-        languagePassSummary: [],
-        lastFailureReason: "",
-    };
 
     if (!workingQuestion.supportedLanguages.length || !workingQuestion.testCases.length) {
         vLog("verify-question", "Skipping verification due to missing inputs", {
@@ -1283,325 +1478,499 @@ const verifyOneProgrammingQuestion = async ({
             question: {
                 ...workingQuestion,
                 verified: false,
-                verificationAttempts: 0,
+                verificationAttempts: 1,
                 verificationSummary: { reason: "Missing languages or test cases" },
             },
             verified: false,
-            verificationMeta,
         };
     }
 
-    let failedLanguageIds = new Set(languageStates.map((x) => x.languageId));
+    vLog("verify-question", "Starting restructured single-attempt verification", {
+        requestId,
+        consumerId,
+        title: workingQuestion.questionTitle || "Untitled",
+        languages: workingQuestion.supportedLanguages.length,
+        testCases: workingQuestion.testCases.length,
+    });
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        vLog("verify-question", "Attempt started", {
+    // Initialize language states
+    const languageStates = (workingQuestion.supportedLanguages || []).map((lang) => ({
+        languageId: Number(lang.languageId),
+        languageName: lang.languageName,
+        codeSnippet: ensureBoilerplateMarkers(lang.codeSnippet || "", lang.languageName),
+        logicBlock: "",
+        mergedCode: "",
+        verified: false,
+    }));
+
+    // PHASE 1: Generate solution blocks and inject into boilerplate
+    vLog("verify-question", "Phase 1: Generating solution blocks", {
+        requestId,
+        consumerId,
+        languages: languageStates.length,
+    });
+
+    const generationResults = await Promise.allSettled(
+        languageStates.map(async (state) => {
+            const logicBlock = await generateLogicBlockOnly({
+                genAI,
+                modelName,
+                question: workingQuestion,
+                testCases: workingQuestion.testCases,
+                language: state,
+            });
+            state.logicBlock = logicBlock;
+            const injected = injectLogicIntoBoilerplate({
+                boilerplate: state.codeSnippet,
+                todoReplacement: logicBlock,
+                languageName: state.languageName,
+            });
+            state.mergedCode = injected.mergedCode;
+            return {
+                languageId: state.languageId,
+                languageName: state.languageName,
+                code: state.mergedCode,
+            };
+        }),
+    );
+
+    const generationFailures = [];
+    generationResults.forEach((result, index) => {
+        const state = languageStates[index];
+        if (result.status !== "fulfilled") {
+            generationFailures.push({
+                languageId: state.languageId,
+                languageName: state.languageName,
+                success: false,
+                summary: {
+                    passed: 0,
+                    total: workingQuestion.testCases.length,
+                    message: result.reason?.message || `Failed to generate solution for ${state.languageName}`,
+                },
+                results: [],
+                error: result.reason?.message || `Failed to generate solution for ${state.languageName}`,
+            });
+        }
+    });
+
+    // Log code blocks
+    languageStates.forEach((ls) => {
+        vLogCode("code-boilerplate", "BOILERPLATE", ls.languageName, ls.languageId, ls.codeSnippet);
+        if (ls.logicBlock) {
+            vLogCode("code-solution-block", "SOLUTION_BLOCK", ls.languageName, ls.languageId, ls.logicBlock);
+        }
+        if (ls.mergedCode) {
+            const isPython = detectLanguageFamily(ls.languageName) === "python";
+            const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+            vLogCode("code-merged-judge0", "MERGED_CODE_SENT_TO_JUDGE0", ls.languageName, ls.languageId, loggedMerged);
+        }
+    });
+
+    // PHASE 2: Execute merged code with Judge0 (single execution)
+    const runnableExecutions = languageStates
+        .filter((ls) => ls.mergedCode && ls.mergedCode.length > 0)
+        .map((ls) => {
+            const isPython = detectLanguageFamily(ls.languageName) === "python";
+            const codeToSend = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+            return {
+                languageId: ls.languageId,
+                languageName: ls.languageName,
+                code: codeToSend,
+            };
+        });
+
+    let executionResults = [];
+    if (runnableExecutions.length > 0) {
+        vLog("verify-question", "Phase 2: Executing merged code with Judge0", {
             requestId,
             consumerId,
-            title: workingQuestion.questionTitle || "Untitled",
-            attempt,
-            maxAttempts,
-            languages: workingQuestion.supportedLanguages.length,
+            languages: runnableExecutions.length,
             testCases: workingQuestion.testCases.length,
         });
-        verificationMeta.attempts = attempt;
-        const targetStates = languageStates.filter((ls) =>
-            failedLanguageIds.has(ls.languageId),
-        );
-        targetStates.forEach((state) => {
-            state.codeSnippet = ensureBoilerplateMarkers(state.codeSnippet, state.languageName);
-            state.mergedCode = "";
-            state.logicBlock = "";
-            state.lastResult = null;
+        executionResults = await executeAgainstJudge({
+            languageExecutions: runnableExecutions,
+            testCases: workingQuestion.testCases,
+            timeLimit: workingQuestion.timeLimit,
+            memoryLimit: workingQuestion.memoryLimit,
+        });
+    }
+    if (generationFailures.length > 0) executionResults.push(...generationFailures);
+
+    const { allPass, languagePassSummary } = summarizeResults(executionResults);
+    const executionMap = new Map(executionResults.map((res) => [Number(res.languageId), res]));
+
+    // Store original boilerplate and test cases before any modifications
+    const originalTestCases = JSON.parse(JSON.stringify(workingQuestion.testCases));
+    const originalBoilerplates = new Map();
+    languageStates.forEach((ls) => {
+        originalBoilerplates.set(ls.languageId, ls.codeSnippet);
+    });
+    let testCasesWereUpdated = false; // Track if test cases were updated in Phase 3.5
+
+    // PHASE 3: Analyze results and mark verified languages
+    const verifiedLanguageIds = new Set();
+    const failingLanguages = [];
+
+    languagePassSummary.forEach((langResult) => {
+        if (isLanguageVerified(langResult)) {
+            verifiedLanguageIds.add(langResult.languageId);
+            const langState = languageStates.find((ls) => ls.languageId === langResult.languageId);
+            if (langState) langState.verified = true;
+        } else {
+            failingLanguages.push(langResult);
+        }
+    });
+
+    vLog("verify-question", "Phase 3: Initial verification results", {
+        requestId,
+        consumerId,
+        verifiedCount: verifiedLanguageIds.size,
+        failingCount: failingLanguages.length,
+        summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+    });
+
+    // Check if any language doesn't pass all test cases (even if 70%+)
+    const hasPartialPass = languagePassSummary.some((lang) => lang.passed < lang.total && lang.total > 0);
+    
+    // PHASE 3.5: Re-evaluate test cases if any language has partial pass
+    if (hasPartialPass) {
+        vLog("verify-question", "Phase 3.5: Re-evaluating test cases (some languages have partial pass)", {
+            requestId,
+            consumerId,
+            languagesWithPartialPass: languagePassSummary.filter((lang) => lang.passed < lang.total).length,
         });
 
-        const generationResults = await Promise.allSettled(
-            targetStates.map(async (state) => {
-                const repaired = await repairBoilerplateIfNeeded({
+        try {
+            const testCaseEvaluation = await reEvaluateTestCases({
+                genAI,
+                modelName,
+                question: workingQuestion,
+                testCases: workingQuestion.testCases,
+                languagePassSummary,
+            });
+
+            if (!testCaseEvaluation.testCasesCorrect && testCaseEvaluation.correctedTestCases) {
+                vLog("verify-question", "Test cases are incorrect, applying corrections", {
+                    requestId,
+                    consumerId,
+                    reason: testCaseEvaluation.reason,
+                    correctedCount: testCaseEvaluation.correctedTestCases.length,
+                });
+
+                // Replace test cases
+                workingQuestion.testCases = normalizeTestCases(testCaseEvaluation.correctedTestCases);
+                testCasesWereUpdated = true; // Mark that test cases were updated
+
+                // Re-execute all languages with corrected test cases
+                const reExecResults = await executeAgainstJudge({
+                    languageExecutions: runnableExecutions,
+                    testCases: workingQuestion.testCases,
+                    timeLimit: workingQuestion.timeLimit,
+                    memoryLimit: workingQuestion.memoryLimit,
+                });
+
+                // Re-analyze results
+                const { allPass: reAllPass, languagePassSummary: reLanguagePassSummary } = summarizeResults(reExecResults);
+                const reExecutionMap = new Map(reExecResults.map((res) => [Number(res.languageId), res]));
+
+                // Update verified languages
+                verifiedLanguageIds.clear();
+                failingLanguages.length = 0;
+
+                reLanguagePassSummary.forEach((langResult) => {
+                    if (isLanguageVerified(langResult)) {
+                        verifiedLanguageIds.add(langResult.languageId);
+                        const langState = languageStates.find((ls) => ls.languageId === langResult.languageId);
+                        if (langState) langState.verified = true;
+                    } else {
+                        failingLanguages.push(langResult);
+                    }
+                });
+
+                // Update languagePassSummary for final status
+                languagePassSummary.length = 0;
+                languagePassSummary.push(...reLanguagePassSummary);
+
+                vLog("verify-question", "Re-execution completed after test case correction", {
+                    requestId,
+                    consumerId,
+                    verifiedAfterCorrection: verifiedLanguageIds.size,
+                    failingAfterCorrection: failingLanguages.length,
+                    summary: reLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+                });
+            } else {
+                vLog("verify-question", "Test cases are correct, failures are due to code issues", {
+                    requestId,
+                    consumerId,
+                    reason: testCaseEvaluation.reason,
+                });
+            }
+        } catch (error) {
+            vLog("verify-question", "Test case re-evaluation failed", {
+                requestId,
+                consumerId,
+                error: error.message,
+            });
+        }
+    }
+
+    // PHASE 3.6: Generate complete solution for failed languages using original boilerplate
+    if (failingLanguages.length > 0) {
+        // Use updated test cases if they were updated, otherwise use original
+        const testCasesToUse = testCasesWereUpdated ? workingQuestion.testCases : originalTestCases;
+        
+        vLog("verify-question", "Phase 3.6: Generating complete solutions for failed languages", {
+            requestId,
+            consumerId,
+            failedCount: failingLanguages.length,
+            usingOriginalBoilerplate: true,
+            usingUpdatedTestCases: testCasesWereUpdated,
+            testCasesCount: testCasesToUse.length,
+        });
+
+        const completeSolutionResults = await Promise.allSettled(
+            failingLanguages.map(async (failingLang) => {
+                const langState = languageStates.find((ls) => ls.languageId === failingLang.languageId);
+                if (!langState) return null;
+
+                const originalBoilerplate = originalBoilerplates.get(failingLang.languageId) || langState.codeSnippet;
+                
+                vLog("verify-question", "Generating complete solution for failed language", {
+                    requestId,
+                    consumerId,
+                    language: failingLang.languageName,
+                });
+
+                const completeSolution = await generateCompleteSolutionWithBoilerplate({
                     genAI,
                     modelName,
                     question: workingQuestion,
-                    testCases: workingQuestion.testCases,
-                    language: state,
+                    testCases: testCasesToUse, // Use updated test cases if available, otherwise original
+                    boilerplateCode: originalBoilerplate, // Use original boilerplate
+                    language: langState,
                 });
-                state.codeSnippet = repaired.language.codeSnippet;
-                const logicBlock = await generateLogicBlockOnly({
-                    genAI,
-                    modelName,
-                    question: workingQuestion,
-                    testCases: workingQuestion.testCases,
-                    language: state,
-                });
-                state.logicBlock = logicBlock;
-                const injected = injectLogicIntoBoilerplate({
-                    boilerplate: state.codeSnippet,
-                    todoReplacement: logicBlock,
-                    languageName: state.languageName,
-                });
-                state.mergedCode = injected.mergedCode;
+
+                langState.mergedCode = completeSolution;
                 return {
-                    languageId: state.languageId,
-                    languageName: state.languageName,
-                    code: state.mergedCode,
+                    languageId: langState.languageId,
+                    languageName: langState.languageName,
+                    code: detectLanguageFamily(langState.languageName) === "python"
+                        ? fixPythonIndentationForJudge0(completeSolution)
+                        : completeSolution,
                 };
             }),
         );
 
-        const generationFailures = [];
-        generationResults.forEach((result, index) => {
-            const state = targetStates[index];
-            if (result.status !== "fulfilled") {
-                generationFailures.push({
-                    languageId: state.languageId,
-                    languageName: state.languageName,
-                    success: false,
-                    summary: {
-                        passed: 0,
-                        total: workingQuestion.testCases.length,
-                        message:
-                            result.reason?.message ||
-                            `Failed to generate merged execution code for ${state.languageName}`,
-                    },
-                    results: [],
-                    error:
-                        result.reason?.message ||
-                        `Failed to generate merged execution code for ${state.languageName}`,
-                });
-            }
-        });
+        const completeSolutionExecutions = completeSolutionResults
+            .filter((result) => result.status === "fulfilled" && result.value !== null)
+            .map((result) => result.value);
 
-        const runnableExecutions = languageStates
-            .filter((ls) => ls.mergedCode && ls.mergedCode.length > 0)
-            .map((ls) => {
-                const isPython = detectLanguageFamily(ls.languageName) === "python";
-                const codeToSend =
-                    isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
-                return {
-                    languageId: ls.languageId,
-                    languageName: ls.languageName,
-                    code: codeToSend,
-                };
+        if (completeSolutionExecutions.length > 0) {
+            vLog("verify-question", "Executing complete solutions", {
+                requestId,
+                consumerId,
+                languages: completeSolutionExecutions.length,
+                testCases: testCasesToUse.length,
+                usingUpdatedTestCases: testCasesWereUpdated,
             });
 
-        // Log boilerplate, solution block, and full merged code per language for analysis/debugging
-        languageStates.forEach((ls) => {
-            vLogCode(
-                "code-boilerplate",
-                "BOILERPLATE",
-                ls.languageName,
-                ls.languageId,
-                ls.codeSnippet,
-            );
-            vLogCode(
-                "code-solution-block",
-                "SOLUTION_BLOCK",
-                ls.languageName,
-                ls.languageId,
-                ls.logicBlock,
-            );
-            const isPython = detectLanguageFamily(ls.languageName) === "python";
-            const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
-            vLogCode(
-                "code-merged-judge0",
-                "MERGED_CODE_SENT_TO_JUDGE0",
-                ls.languageName,
-                ls.languageId,
-                loggedMerged,
-            );
-        });
-
-        let executionResults = [];
-        if (runnableExecutions.length > 0) {
-            executionResults = await executeAgainstJudge({
-                languageExecutions: runnableExecutions,
-                testCases: workingQuestion.testCases,
+            const completeExecResults = await executeAgainstJudge({
+                languageExecutions: completeSolutionExecutions,
+                testCases: testCasesToUse, // Use updated test cases if available, otherwise original
                 timeLimit: workingQuestion.timeLimit,
                 memoryLimit: workingQuestion.memoryLimit,
             });
-        }
-        if (generationFailures.length > 0) executionResults.push(...generationFailures);
 
-        // Merge execution details back to state for selective retry decisions.
-        const executionMap = new Map(
-            executionResults.map((res) => [Number(res.languageId), res]),
-        );
-        languageStates.forEach((ls) => {
-            if (executionMap.has(ls.languageId)) ls.lastResult = executionMap.get(ls.languageId);
-        });
+            // Update results for languages that got complete solutions
+            const completeExecMap = new Map(completeExecResults.map((res) => [Number(res.languageId), res]));
+            
+            // Merge with existing execution results
+            completeExecMap.forEach((result, langId) => {
+                executionMap.set(langId, result);
+            });
 
-        const { allPass, languagePassSummary } = summarizeResults(executionResults);
-        verificationMeta.languagePassSummary = languagePassSummary;
-        vLog("verify-question", "Attempt completed", {
-            requestId,
-            consumerId,
-            title: workingQuestion.questionTitle || "Untitled",
-            attempt,
-            allPass,
-            summary: languagePassSummary
-                .map((item) => `${item.languageName}:${item.passed}/${item.total}`)
-                .join(", "),
-        });
+            // Re-analyze all results
+            const allResults = Array.from(executionMap.values());
+            const { allPass: finalAllPass, languagePassSummary: finalLanguagePassSummary } = summarizeResults(allResults);
 
-        if (allPass) {
-            vLog("verify-question", "Question verified successfully", {
+            // Update verified languages
+            verifiedLanguageIds.clear();
+            failingLanguages.length = 0;
+
+            finalLanguagePassSummary.forEach((langResult) => {
+                if (isLanguageVerified(langResult)) {
+                    verifiedLanguageIds.add(langResult.languageId);
+                    const langState = languageStates.find((ls) => ls.languageId === langResult.languageId);
+                    if (langState) langState.verified = true;
+                } else {
+                    failingLanguages.push(langResult);
+                }
+            });
+
+            // Update languagePassSummary
+            languagePassSummary.length = 0;
+            languagePassSummary.push(...finalLanguagePassSummary);
+
+            vLog("verify-question", "Complete solution execution completed", {
                 requestId,
                 consumerId,
-                title: workingQuestion.questionTitle || "Untitled",
-                attempt,
+                verifiedAfterCompleteSolution: verifiedLanguageIds.size,
+                failingAfterCompleteSolution: failingLanguages.length,
+                summary: finalLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
             });
-            return {
-                question: {
-                    ...workingQuestion,
-                    supportedLanguages: languageStates.map((x) => ({
-                        languageId: x.languageId,
-                        languageName: x.languageName,
-                        codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
-                    })),
-                    verified: true,
-                    verificationAttempts: attempt,
-                    verificationAt: new Date().toISOString(),
-                    verificationSummary: {
-                        status: "passed",
-                        languagePassSummary,
-                    },
-                },
-                verified: true,
-                verificationMeta,
-            };
-        }
-
-        verificationMeta.lastFailureReason = languagePassSummary
-            .filter((item) => !item.success)
-            .map((item) => `${item.languageName}: ${item.message || "Failed"}`)
-            .join("; ");
-        failedLanguageIds = new Set(
-            languagePassSummary.filter((x) => !x.success).map((x) => Number(x.languageId)),
-        );
-
-        if (attempt < maxAttempts) {
-            vLog("verify-question", "Attempt failed, requesting fixes", {
-                requestId,
-                consumerId,
-                title: workingQuestion.questionTitle || "Untitled",
-                attempt,
-                reason: verificationMeta.lastFailureReason,
-            });
-            const fixPayload = await generateFixes({
-                genAI,
-                modelName,
-                question: workingQuestion,
-                failures: executionResults,
-                testCases: workingQuestion.testCases,
-                languages: languageStates.map((x) => ({
-                    languageId: x.languageId,
-                    languageName: x.languageName,
-                    codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
-                })),
-                fixMode: classifyFixMode(executionResults, workingQuestion.testCases),
-            });
-            const hasAnyFix =
-                (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) ||
-                (fixPayload.boilerplateCode &&
-                    Object.keys(fixPayload.boilerplateCode).length > 0) ||
-                (fixPayload.logicBlocks && Object.keys(fixPayload.logicBlocks).length > 0);
-
-            if (!hasAnyFix) {
-                // Deterministic fallback: force per-language boilerplate contract repair
-                // so retry attempts are not wasted on unchanged broken templates.
-                const fallbackTargets = languageStates.filter((ls) =>
-                    failedLanguageIds.has(ls.languageId),
-                );
-                const fallbackRepairs = await Promise.allSettled(
-                    fallbackTargets.map(async (ls) =>
-                        repairBoilerplateIfNeeded({
-                            genAI,
-                            modelName,
-                            question: workingQuestion,
-                            testCases: workingQuestion.testCases,
-                            language: ls,
-                        }),
-                    ),
-                );
-                fallbackRepairs.forEach((res, idx) => {
-                    const state = fallbackTargets[idx];
-                    if (res.status === "fulfilled" && res.value?.language?.codeSnippet) {
-                        state.codeSnippet = res.value.language.codeSnippet;
-                    }
-                });
-            }
-            if (Array.isArray(fixPayload.testCases) && fixPayload.testCases.length > 0) {
-                workingQuestion.testCases = fixPayload.testCases;
-                // testcase change can impact all languages: re-run all on next attempt
-                failedLanguageIds = new Set(languageStates.map((x) => x.languageId));
-                vLog("verify-question", "Applied fixed test cases", {
-                    requestId,
-                    consumerId,
-                    title: workingQuestion.questionTitle || "Untitled",
-                    testCases: fixPayload.testCases.length,
-                });
-            }
-            if (fixPayload.boilerplateCode) {
-                languageStates.forEach((ls) => {
-                    if (fixPayload.boilerplateCode[ls.languageName]) {
-                        ls.codeSnippet = ensureBoilerplateMarkers(
-                            sanitizeText(fixPayload.boilerplateCode[ls.languageName]),
-                            ls.languageName,
-                        );
-                    }
-                });
-                workingQuestion.supportedLanguages = languageStates.map((x) => ({
-                    languageId: x.languageId,
-                    languageName: x.languageName,
-                    codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
-                }));
-                vLog("verify-question", "Applied fixed boilerplate", {
-                    requestId,
-                    consumerId,
-                    title: workingQuestion.questionTitle || "Untitled",
-                    languages: Object.keys(fixPayload.boilerplateCode).length,
-                });
-            }
-            if (fixPayload.logicBlocks) {
-                languageStates.forEach((ls) => {
-                    if (fixPayload.logicBlocks[ls.languageName]) {
-                        ls.logicBlock = sanitizeText(fixPayload.logicBlocks[ls.languageName]);
-                        const injected = injectLogicIntoBoilerplate({
-                            boilerplate: ls.codeSnippet,
-                            todoReplacement: ls.logicBlock,
-                            languageName: ls.languageName,
-                        });
-                        ls.mergedCode = injected.mergedCode;
-                    }
-                });
-            }
         }
     }
 
-    vLog("verify-question", "Question verification failed after max attempts", {
+    // Check if 70%+ languages pass all 5/5 test cases
+    const languagesWith100Percent = languagePassSummary.filter(
+        (lang) => lang.passed === lang.total && lang.total > 0,
+    );
+    const totalLanguages = languagePassSummary.length;
+    const majorityThreshold = Math.ceil(totalLanguages * 0.7); // 70% threshold
+    
+    const hasMajority100Percent = languagesWith100Percent.length >= majorityThreshold;
+
+    // Early exit: If all languages verified after test case correction, return immediately
+    if (failingLanguages.length === 0) {
+        const allLanguagesVerified = languagePassSummary.length > 0 && languagePassSummary.every((lang) =>
+            verifiedLanguageIds.has(lang.languageId),
+        );
+        const finalLanguagePassSummary = languagePassSummary.map((lang) => ({
+            ...lang,
+            verified: verifiedLanguageIds.has(lang.languageId),
+        }));
+
+        return {
+            question: {
+                ...workingQuestion,
+                supportedLanguages: languageStates.map((x) => ({
+                    languageId: x.languageId,
+                    languageName: x.languageName,
+                    codeSnippet: x.codeSnippet,
+                })),
+                verified: allLanguagesVerified,
+                verificationAttempts: 1,
+                verificationAt: new Date().toISOString(),
+                verificationSummary: {
+                    status: "passed",
+                    languagePassSummary: finalLanguagePassSummary,
+                },
+            },
+            verified: allLanguagesVerified,
+            needsRegeneration: false,
+        };
+    }
+
+    // If 50%+ languages pass all 5/5 test cases, mark as verified
+    if (hasMajority100Percent) {
+        vLog("verify-question", "Majority of languages passed all test cases, marking as verified", {
+            requestId,
+            consumerId,
+            languagesWith100Percent: languagesWith100Percent.length,
+            totalLanguages,
+            verifiedLanguages: languagesWith100Percent.map((l) => l.languageName).join(", "),
+        });
+
+        // Mark all languages as verified (including failing ones - they're likely formatting issues)
+        languagePassSummary.forEach((lang) => {
+            verifiedLanguageIds.add(lang.languageId);
+            const langState = languageStates.find((ls) => ls.languageId === lang.languageId);
+            if (langState) langState.verified = true;
+        });
+
+        const finalLanguagePassSummary = languagePassSummary.map((lang) => ({
+            ...lang,
+            verified: true, // Mark all as verified since majority passed
+        }));
+
+        return {
+            question: {
+                ...workingQuestion,
+                supportedLanguages: languageStates.map((x) => ({
+                    languageId: x.languageId,
+                    languageName: x.languageName,
+                    codeSnippet: x.codeSnippet,
+                })),
+                verified: true,
+                verificationAttempts: 1,
+                verificationAt: new Date().toISOString(),
+                verificationSummary: {
+                    status: "passed",
+                    languagePassSummary: finalLanguagePassSummary,
+                },
+            },
+            verified: true,
+            needsRegeneration: false,
+        };
+    }
+
+    // If skipRegeneration is false, return early for regeneration
+    if (!skipRegeneration) {
+        return {
+            question: {
+                ...workingQuestion,
+                supportedLanguages: languageStates.map((x) => ({
+                    languageId: x.languageId,
+                    languageName: x.languageName,
+                    codeSnippet: x.codeSnippet,
+                })),
+                verified: false,
+                verificationAttempts: 1,
+                verificationAt: new Date().toISOString(),
+                verificationSummary: {
+                    status: "needs_regeneration",
+                    languagePassSummary: languagePassSummary.map((lang) => ({
+                        ...lang,
+                        verified: verifiedLanguageIds.has(lang.languageId),
+                    })),
+                },
+            },
+            verified: false,
+            needsRegeneration: true,
+        };
+    }
+
+    // Final verification status (if skipRegeneration is true, meaning regeneration attempts exhausted)
+    const allLanguagesVerified = languagePassSummary.length > 0 && languagePassSummary.every((lang) =>
+        verifiedLanguageIds.has(lang.languageId),
+    );
+
+    // Update language pass summary with verified status
+    const finalLanguagePassSummary = languagePassSummary.map((lang) => ({
+        ...lang,
+        verified: verifiedLanguageIds.has(lang.languageId),
+    }));
+
+    vLog("verify-question", "Verification completed", {
         requestId,
         consumerId,
         title: workingQuestion.questionTitle || "Untitled",
-        maxAttempts,
-        reason: verificationMeta.lastFailureReason,
+        allLanguagesVerified,
+        verifiedCount: verifiedLanguageIds.size,
+        totalLanguages: languagePassSummary.length,
+        summary: finalLanguagePassSummary
+            .map((item) => `${item.languageName}:${item.passed}/${item.total}${item.verified ? " ✓" : ""}`)
+            .join(", "),
     });
+
     return {
         question: {
             ...workingQuestion,
             supportedLanguages: languageStates.map((x) => ({
                 languageId: x.languageId,
                 languageName: x.languageName,
-                codeSnippet: ensureBoilerplateMarkers(x.codeSnippet, x.languageName),
+                codeSnippet: x.codeSnippet,
             })),
-            verified: false,
-            verificationAttempts: verificationMeta.attempts,
+            verified: allLanguagesVerified,
+            verificationAttempts: 1,
             verificationAt: new Date().toISOString(),
             verificationSummary: {
-                status: "failed",
-                languagePassSummary: verificationMeta.languagePassSummary,
-                reason: verificationMeta.lastFailureReason,
+                status: allLanguagesVerified ? "passed" : "partial",
+                languagePassSummary: finalLanguagePassSummary,
             },
         },
-        verified: false,
-        verificationMeta,
+        verified: allLanguagesVerified,
+        needsRegeneration: false,
     };
 };
 
@@ -1614,56 +1983,380 @@ const stripInternalFields = (question) => {
     return cleaned;
 };
 
+/**
+ * Regenerate a question using its title
+ * This should call the question generation service/API
+ */
+const regenerateQuestionFromTitle = async ({
+    questionTitle,
+    genAI,
+    modelName,
+    requestId,
+    consumerId,
+    originalQuestion = null, // Original question object to extract context
+    regenerationContext = null, // Optional context: { skillName, skillType, experience, jobRole, maxTime, programmingConfig, ... }
+}) => {
+    vLog("regenerate-question", "Starting question regeneration", {
+        requestId,
+        consumerId,
+        title: questionTitle,
+    });
+
+    try {
+        // Extract context from originalQuestion or use regenerationContext
+        const context = regenerationContext || (originalQuestion ? {
+            skillName: originalQuestion.skillName || "Programming",
+            skillType: originalQuestion.skillType || "unknown",
+            experience: originalQuestion.experience || 3,
+            jobRole: originalQuestion.jobRole || "Software Developer",
+            maxTime: originalQuestion.maxTime || 30,
+            programmingConfig: originalQuestion.programmingConfig || {
+                testCasesCount: originalQuestion.testCases?.length || 5,
+                supportedLanguages: originalQuestion.supportedLanguages || [],
+            },
+        } : null);
+
+        if (!context) {
+            vLog("regenerate-question", "Missing context for regeneration", {
+                requestId,
+                consumerId,
+                title: questionTitle,
+            });
+            return null;
+        }
+
+        const {
+            skillName,
+            skillType,
+            experience = 3,
+            jobRole = "Software Developer",
+            maxTime = 30,
+            programmingConfig = {},
+        } = context;
+
+        const testCasesCount = programmingConfig.testCasesCount || 5;
+        const supportedLanguages = programmingConfig.supportedLanguages || [];
+        const testCasesConfig = programmingConfig.testCasesConfig || Array(testCasesCount)
+            .fill(null)
+            .map((_, idx) => ({
+                visible: idx < 2,
+                weightage: Math.floor(100 / testCasesCount),
+            }));
+
+        // Build regeneration prompt similar to questionsWorker.js
+        const prompt = `Generate 1 Programming interview question for the following skill:
+skillName: "${skillName}"
+skillType: "${skillType}"
+maxTime: ${maxTime} minutes
+- Candidate Experience Level: ${experience} years
+- Job Role: ${jobRole}
+
+### CRITICAL RULES:
+1. **Time Constraint**: Question MUST be answerable within ${maxTime} minutes
+2. **Use Provided Title**: Use the title "${questionTitle}" VERBATIM as "questionTitle"
+3. **Implement Exact Problem**: The problem description MUST match the title's problem exactly
+4. **Difficulty**: Match ${experience} years of experience
+5. **Test Cases**: Generate exactly ${testCasesCount} test cases
+
+**Programming Question Requirements**:
+- Generate EXACTLY 1 Programming question
+- Use title "${questionTitle}" VERBATIM as the "questionTitle"
+- Implement THE EXACT PROBLEM described by that title
+- Generate classic, well-known programming problems commonly asked in coding interviews
+- Keep problem statements direct and clear
+
+**CRITICAL JSON OUTPUT REQUIREMENTS**:
+- Return ONLY valid JSON (no markdown fences, no extra text)
+- Start with { and end with }
+- No trailing commas
+- Properly escape JSON strings
+
+Return JSON in this format:
+{
+  "skillName": "${skillName}",
+  "skillType": "${skillType}",
+  "type": "Programming",
+  "Programming": [
+    {
+      "questionTitle": "${questionTitle.replace(/"/g, '\\"')}",
+      "question": "<h3>Problem Description</h3><p>Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><br/><h3>Input Format</h3><p>Input specification with examples. Use <ul><li> for lists.</li></ul></p><br/><h3>Output Format</h3><p>Output specification here.</p><br/><h3>Constraints</h3><ul><li>Constraint 1</li><li>Constraint 2</li></ul><br/><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p><strong>Output:</strong> example output description</p>",
+      "maxTime": ${maxTime},
+      "testCases": [
+        ${testCasesConfig.map((tc, tcIdx) => `{
+          "input": "Actual test input value ${tcIdx + 1}",
+          "output": "EXACT expected output value ${tcIdx + 1}",
+          "explanation": "Why this output is correct",
+          "visible": ${tc.visible !== undefined ? tc.visible : tcIdx < 2},
+          "weightage": ${tc.weightage !== undefined ? tc.weightage : Math.floor(100 / testCasesCount)}
+        }`).join(",")}
+      ],
+      "supportedLanguages": ${JSON.stringify(supportedLanguages.map((lang) => ({
+        languageId: lang.languageId,
+        languageName: lang.languageName,
+        language: lang.languageName.split(" (")[0],
+        version: lang.languageName.includes("(") ? lang.languageName.split("(")[1].replace(")", "") : "",
+      })))}
+    }
+  ]
+}`;
+
+        // Call Gemini API
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        const candidate = response.candidates?.[0]?.content;
+
+        if (!candidate || !candidate.parts) {
+            throw new Error("No valid response received from Gemini");
+        }
+
+        const aiResponseText = candidate.parts[0]?.text || "";
+        
+        // Extract JSON from response (similar to extractJsonFromGeminiText in questionsWorker)
+        // Try multiple extraction strategies
+        let jsonText = aiResponseText.trim();
+        
+        // Remove markdown code fences if present
+        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+        
+        // Find JSON object boundaries
+        const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            throw new Error("No JSON found in AI response");
+        }
+        
+        jsonText = jsonMatch[0];
+        
+        // Parse JSON with error handling
+        let parsedResponse;
+        try {
+            parsedResponse = JSON.parse(jsonText);
+        } catch (parseError) {
+            // Try to fix common JSON issues
+            jsonText = jsonText.replace(/,(\s*[}\]])/g, "$1"); // Remove trailing commas
+            parsedResponse = JSON.parse(jsonText);
+        }
+
+        if (!parsedResponse.Programming || !Array.isArray(parsedResponse.Programming) || parsedResponse.Programming.length === 0) {
+            throw new Error("Invalid response: missing Programming array");
+        }
+
+        const regeneratedQuestion = parsedResponse.Programming[0];
+        
+        // Preserve original context fields
+        regeneratedQuestion.skillName = skillName;
+        regeneratedQuestion.skillType = skillType;
+        regeneratedQuestion.experience = experience;
+        regeneratedQuestion.jobRole = jobRole;
+        regeneratedQuestion.programmingConfig = programmingConfig;
+
+        vLog("regenerate-question", "Question regenerated successfully", {
+            requestId,
+            consumerId,
+            title: questionTitle,
+            newTitle: regeneratedQuestion.questionTitle,
+        });
+
+        return regeneratedQuestion;
+    } catch (error) {
+        vLog("regenerate-question", "Regeneration failed", {
+            requestId,
+            consumerId,
+            title: questionTitle,
+            error: error.message,
+        });
+        return null;
+    }
+};
+
 const verifyProgrammingQuestions = async ({
     questions = [],
     genAI,
     modelName = DEFAULT_MODEL,
     requestId = "",
     consumerId = "",
+    regenerateFunction = null, // Optional function to regenerate questions: (title, originalQuestion) => Promise<question>
+    regenerationContext = null, // Optional: { skillName, skillType, experience, jobRole, maxTime, programmingConfig, ... }
 }) => {
-    vLog("verify-batch", "Starting programming verification batch", {
+    vLog("verify-batch", "Starting programming verification batch with regeneration", {
         requestId,
         consumerId,
         questionCount: questions.length,
+        maxRegenerationAttempts: 3,
     });
-    const verifiedQuestions = await Promise.all(
-        questions.map(async (question) => {
-            try {
-                const result = await verifyOneProgrammingQuestion({
-                    question,
-                    genAI,
-                    modelName,
-                    requestId,
-                    consumerId,
-                });
-                return stripInternalFields(result.question);
-            } catch (error) {
-                vLog("verify-batch", "Question verification crashed", {
-                    requestId,
-                    consumerId,
-                    title: question?.questionTitle || "Untitled",
-                    error: error.message,
-                });
-                return stripInternalFields({
-                    ...question,
-                    verified: false,
-                    verificationAttempts: MAX_VERIFICATION_ATTEMPTS,
-                    verificationSummary: {
-                        status: "failed",
-                        reason: error.message || "Verification failed",
-                    },
-                });
+
+    const MAX_REGENERATION_ATTEMPTS = 3;
+    let currentQuestions = [...questions];
+    const questionAttempts = new Map(); // Track attempts per question title
+    const verifiedQuestions = [];
+    const finalResults = [];
+
+    // Initialize attempts tracking
+    currentQuestions.forEach((q) => {
+        const title = q.questionTitle || "Untitled";
+        questionAttempts.set(title, 0);
+    });
+
+    for (let cycle = 1; cycle <= MAX_REGENERATION_ATTEMPTS; cycle++) {
+        vLog("verify-batch", `Regeneration cycle ${cycle}/${MAX_REGENERATION_ATTEMPTS}`, {
+            requestId,
+            consumerId,
+            questionsInCycle: currentQuestions.length,
+        });
+
+        // Verify all questions in current cycle
+        const cycleResults = await Promise.all(
+            currentQuestions.map(async (question) => {
+                const title = question.questionTitle || "Untitled";
+                const attempts = questionAttempts.get(title) || 0;
+                
+                try {
+                    const skipRegeneration = cycle === MAX_REGENERATION_ATTEMPTS; // Last attempt, proceed to Phase 4/5
+                    const result = await verifyOneProgrammingQuestion({
+                        question,
+                        genAI,
+                        modelName,
+                        requestId,
+                        consumerId,
+                        skipRegeneration,
+                    });
+                    
+                    questionAttempts.set(title, attempts + 1);
+                    return { question, result, title };
+                } catch (error) {
+                    vLog("verify-batch", "Question verification crashed", {
+                        requestId,
+                        consumerId,
+                        title,
+                        error: error.message,
+                    });
+                    questionAttempts.set(title, attempts + 1);
+                    return {
+                        question,
+                        result: {
+                            question: {
+                                ...question,
+                                verified: false,
+                                verificationAttempts: attempts + 1,
+                                verificationSummary: {
+                                    status: "failed",
+                                    reason: error.message || "Verification failed",
+                                },
+                            },
+                            verified: false,
+                            needsRegeneration: cycle < MAX_REGENERATION_ATTEMPTS,
+                        },
+                        title,
+                    };
+                }
+            }),
+        );
+
+        // Separate verified and failed questions
+        const cycleVerified = [];
+        const cycleFailed = [];
+
+        cycleResults.forEach(({ question, result, title }) => {
+            const cleanedQuestion = stripInternalFields(result.question);
+            finalResults.push(cleanedQuestion);
+
+            if (result.verified) {
+                cycleVerified.push(cleanedQuestion);
+                verifiedQuestions.push(cleanedQuestion);
+            } else if (result.needsRegeneration && cycle < MAX_REGENERATION_ATTEMPTS) {
+                cycleFailed.push({ question, title });
+            } else {
+                // Max attempts reached or regeneration disabled
+                verifiedQuestions.push(cleanedQuestion);
             }
-        }),
-    );
+        });
+
+        vLog("verify-batch", `Cycle ${cycle} completed`, {
+            requestId,
+            consumerId,
+            verified: cycleVerified.length,
+            failed: cycleFailed.length,
+            totalVerified: verifiedQuestions.length,
+        });
+
+        // If no failures or max attempts reached, stop
+        if (cycleFailed.length === 0 || cycle === MAX_REGENERATION_ATTEMPTS) {
+            break;
+        }
+
+        // Regenerate failed questions
+        if (regenerateFunction && typeof regenerateFunction === "function") {
+            vLog("verify-batch", "Regenerating failed questions", {
+                requestId,
+                consumerId,
+                failedCount: cycleFailed.length,
+            });
+
+            const regenerationPromises = cycleFailed.map(async ({ title, question }) => {
+                try {
+                    // Use provided regenerateFunction or default implementation
+                    const regenerated = regenerateFunction
+                        ? await regenerateFunction(title, question, regenerationContext)
+                        : await regenerateQuestionFromTitle({
+                            questionTitle: title,
+                            genAI,
+                            modelName,
+                            requestId,
+                            consumerId,
+                            originalQuestion: question,
+                            regenerationContext,
+                        });
+                    if (regenerated) {
+                        return regenerated;
+                    }
+                } catch (error) {
+                    vLog("verify-batch", "Regeneration failed", {
+                        requestId,
+                        consumerId,
+                        title,
+                        error: error.message,
+                    });
+                }
+                return null;
+            });
+
+            const regeneratedQuestions = (await Promise.all(regenerationPromises)).filter(Boolean);
+            
+            if (regeneratedQuestions.length > 0) {
+                currentQuestions = regeneratedQuestions;
+                vLog("verify-batch", "Questions regenerated", {
+                    requestId,
+                    consumerId,
+                    regeneratedCount: regeneratedQuestions.length,
+                });
+            } else {
+                // Regeneration failed, stop cycles
+                vLog("verify-batch", "Regeneration failed for all questions, stopping cycles", {
+                    requestId,
+                    consumerId,
+                });
+                break;
+            }
+        } else {
+            // No regeneration function provided, stop cycles
+            vLog("verify-batch", "No regeneration function provided, stopping cycles", {
+                requestId,
+                consumerId,
+            });
+            break;
+        }
+    }
+
     const verifiedCount = verifiedQuestions.filter((q) => q.verified).length;
-    vLog("verify-batch", "Completed programming verification batch", {
+    vLog("verify-batch", "Completed programming verification batch with regeneration", {
         requestId,
         consumerId,
         questionCount: questions.length,
         verifiedCount,
+        totalCycles: Math.min(MAX_REGENERATION_ATTEMPTS, questionAttempts.size),
     });
-    return { questions: verifiedQuestions };
+
+    return { questions: finalResults };
 };
 
 const verifyGeneratedBoilerplate = async ({

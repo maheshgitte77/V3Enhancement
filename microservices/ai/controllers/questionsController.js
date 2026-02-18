@@ -255,7 +255,7 @@ const generateBoilerplateCode = async (req, res) => {
       ],
     });
 
-    const REQUEST_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+    const REQUEST_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
     const timeoutId = setTimeout(() => {
       const info = req.pendingRequests.get(requestId);
       if (!info) return;
