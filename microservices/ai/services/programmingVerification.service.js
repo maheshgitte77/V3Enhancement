@@ -461,6 +461,19 @@ const indentLines = (text, spaces) =>
         .map((line) => `${" ".repeat(spaces)}${line}`)
         .join("\n");
 
+const normalizeMinIndent = (text) => {
+    const lines = String(text || "").split("\n");
+    let minSpaces = Infinity;
+    for (const line of lines) {
+        if (line.trim().length === 0) continue;
+        const m = line.match(/^(\s*)/);
+        const len = m ? m[1].length : 0;
+        if (len < minSpaces) minSpaces = len;
+    }
+    if (minSpaces === Infinity || minSpaces === 0) return String(text || "").trim();
+    return lines.map((line) => (line.length >= minSpaces ? line.slice(minSpaces) : line)).join("\n").trim();
+};
+
 const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName }) => {
     const family = detectLanguageFamily(languageName);
     const logic = sanitizeText(todoReplacement);
@@ -506,12 +519,13 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
                     : family === "python"
                         ? 4
                         : 4;
+            const logicNormalized = normalizeMinIndent(logic);
             const replacement =
                 startMarkerLine +
                 "\n" +
                 signatureLine +
                 "\n" +
-                indentLines(logic, bodyIndent) +
+                indentLines(logicNormalized, bodyIndent) +
                 (closingLine ? "\n" + closingLine : "") +
                 "\n" +
                 endMarkerLine;
