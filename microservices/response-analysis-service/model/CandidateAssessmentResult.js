@@ -307,15 +307,15 @@ const CandidateAssessmentResultSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    communicationClarity: {
+    technicalAccuracy: {
       type: Number,
       default: 0,
     },
-    analyticalThinking: {
+    codeQualityScore: {
       type: Number,
       default: 0,
     },
-    problemSolvingAbility: {
+    reasoningScore: {
       type: Number,
       default: 0,
     },
@@ -353,11 +353,11 @@ const CandidateAssessmentResultSchema = new mongoose.Schema(
   {
     strict: false,
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model(
   "CandidateAssessmentResult",
   CandidateAssessmentResultSchema,
-  "candidateassessmentresults"
+  "candidateassessmentresults",
 );

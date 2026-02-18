@@ -651,7 +651,7 @@ If candidate has 3-5 years experience AND answer is relevant:
  */
 const generateSubjectiveScoringPrompt = (
   responseData,
-  typingAnalysis = null
+  typingAnalysis = null,
 ) => {
   let typingContext = "";
 
@@ -834,7 +834,7 @@ const generateScreeningSummaryPrompt = (
   questionData,
   recommendation,
   integrityScore,
-  evidenceStrength = null
+  evidenceStrength = null,
 ) => {
   let prompt = `
 You are an HR Analytics AI tasked with creating concise, decision-oriented candidate evaluation summaries. Analyze the screening data and provide clear, actionable insights for hiring decisions.
@@ -913,7 +913,7 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - This could be due to candidate thinking deeply, looking at notes, or AI analysis error
 - DO NOT treat this as a red flag or integrity concern in the summary
 - If mentioning at all, phrase as: "Minor observation in Q${evidenceStrength.flaggedQuestionIndices.join(
-        ", Q"
+        ", Q",
       )} may warrant brief clarification during interview"
 - Focus the summary on the candidate's STRENGTHS and technical performance
 - The recommendation "${recommendation}" should NOT be negatively impacted by this minor observation
@@ -941,7 +941,7 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
       // Strong concern - AI should clearly highlight integrity issues
       const correlationInfo = evidenceStrength.hasCorrelatedCheatingPattern
         ? `\n- Correlated Cheating Patterns: ${evidenceStrength.matchedCorrelations.join(
-            ", "
+            ", ",
           )} (Strong indicator of deliberate cheating)`
         : "";
 
@@ -1032,7 +1032,30 @@ const generateProgrammingAnalysisPrompt = (responseData) => {
     questionDescription,
     testCases,
     languageName,
+    executionSummary,
   } = responseData;
+
+  // Extract test cases with weightage for context
+  const testCasesWithWeightage = (testCases || []).map((tc, index) => ({
+    input: tc.input,
+    expectedOutput: tc.output,
+    weightage: tc.weightage || 1, // Default weightage 1 if not defined
+    explanation: tc.explanation,
+    isPublic: tc.visible,
+  }));
+
+  const totalWeightage = testCasesWithWeightage.reduce(
+    (sum, tc) => sum + (Number(tc.weightage) || 0),
+    0,
+  );
+
+  const executionContext = executionSummary
+    ? `
+EXECUTION RESULTS (CRITICAL):
+- Test Cases Passed: ${executionSummary.passed} / ${executionSummary.total}
+- Earned Score: ${executionSummary.earnedScore} / ${executionSummary.maxScore}
+`
+    : "EXECUTION RESULTS: Not available (code was not compiled/run)";
 
   return `You are an expert code reviewer. Analyze the following code for logical correctness and quality.
 
@@ -1044,58 +1067,66 @@ QUESTION: ${questionTitle || "Programming Question"}
 DESCRIPTION: ${questionDescription || "No description provided"}
 PROGRAMMING LANGUAGE: ${languageName || "Unknown"}
 
+${executionContext}
+
 CANDIDATE'S CODE (boilerplate removed):
 \`\`\`
 ${candidateCode || "// No code provided"}
 \`\`\`
 
-TEST CASES (for context):
-${JSON.stringify(testCases || [], null, 2)}
+TEST CASES & WEIGHTAGE (Total Weightage: ${totalWeightage}):
+${JSON.stringify(testCasesWithWeightage, null, 2)}
+
+**CRITICAL SCORING RULES BASED ON EXECUTION & WEIGHTAGE:**
+1. **Problem Solving Ability Calculation:**
+   - This score MUST correlate with the WEIGHTED success rate (Earned Score / Max Score).
+   - If Earned Score is low (e.g., < 50% of Max Score), Problem Solving score MUST be low (< 50).
+   - Formula approximation: (Earned Score / Max Score) * 100.
+   - If Execution Results show 0 passed or 0 score, Problem Solving Ability MUST be < 30.
+
+2. **Analytical Thinking Calculation:**
+   - This score reflects the candidate's ability to handle edge cases and meaningful logic.
+   - If the code fails basic logic or edge cases (often represented by specific Weighted Test Cases), penalize this score.
+   - Efficiency and Logic Quality also factor in, but CANNOT save the score if the code fails to produce correct outputs.
+   - If Execution Results show 0 passed, Analytical Thinking MUST be < 35.
+
+3. **Logical Correctness (Code Quality):**
+   - If Test Cases Passed < 50%, "Logical Correctness" MUST be < 60.
+   - If Passed == 0, "Logical Correctness" MUST be < 40.
+   - You MUST explain *why* the code failed in "reasoning".
+
+4. **Compilation Errors:**
+   - If indicated, ALL scores (Logical, Problem Solving, Analytical) MUST be < 30.
 
 **MANDATORY ARRAY CONTENT RULES:**
 You MUST provide at least 1 item in EACH array field (strengths, weaknesses, suggestions, recommendations). NEVER return empty arrays.
 
-**For EXCELLENT code (score >= 85):**
-- DO NOT fabricate or hallucinate weaknesses that don't exist
-- In "weaknesses": Use positive affirmations like:
-  - "No significant weaknesses identified - the implementation is well-crafted"
-  - "The candidate has addressed all key aspects of the problem effectively"
-  - "No major issues found in the logic or implementation"
-- In "suggestions": Use encouraging statements like:
-  - "The candidate has demonstrated strong problem-solving skills"
-  - "Continue applying these coding practices in future implementations"
-  - "The solution shows good understanding of the requirements"
-- In "recommendations": Use affirmative feedback like:
-  - "Excellent implementation - the candidate has covered the requirements comprehensively"
-  - "Strong coding skills demonstrated - ready for production-level work"
-  - "The candidate shows proficiency in ${
-    languageName || "the programming language"
-  }"
+**For EXCELLENT code (score >= 85 AND All Test Cases Passed):**
+- DO NOT fabricate weaknesses.
+- Use affirmative feedback in all array fields.
 
 **For AVERAGE code (score 50-84):**
-- Provide specific, real technical issues found
-- Give actionable improvement suggestions
-- Be constructive but honest
+- specific technical issues found.
+- actionable improvement suggestions.
 
-**For POOR code (score < 50):**
-- Clearly identify fundamental issues
-- Provide learning-focused recommendations
-- Be specific about what needs improvement
+**For POOR code (score < 50 OR Failed Test Cases):**
+- Clearly identify fundamental issues.
+- Recommend specific learning paths.
 
 Please provide a comprehensive analysis in the following JSON format:
 {
   "logicalCorrectness": {
     "score": 85,
     "maxScore": 100,
-    "reasoning": "The code demonstrates good understanding of the problem but has some logical issues...",
-    "strengths": ["Good algorithm choice", "Proper variable naming"],
-    "weaknesses": ["Missing edge case handling", "Inefficient nested loops"],
-    "suggestions": ["Add null checks", "Consider using a more efficient data structure"]
+    "reasoning": "The code demonstrates good understanding...",
+    "strengths": ["Good algorithm"],
+    "weaknesses": ["Missing edge case"],
+    "suggestions": ["Add null check"]
   },
   "codeQuality": {
     "score": 78,
     "maxScore": 100,
-    "reasoning": "Code is readable but could be improved...",
+    "reasoning": "Readable but valid...",
     "aspects": {
       "readability": "Good",
       "maintainability": "Fair", 
@@ -1103,13 +1134,21 @@ Please provide a comprehensive analysis in the following JSON format:
       "bestPractices": "Good"
     }
   },
+  "analyticalThinking": {
+    "score": 82,
+    "reasoning": "[Explain score based on weighted test case performance and logic]"
+  },
+  "problemSolvingAbility": {
+    "score": 88,
+    "reasoning": "[Explain score based on solved weighted test cases]"
+  },
   "overallAssessment": {
-    "summary": "Solid solution with room for improvement",
-    "recommendations": ["Focus on edge cases", "Optimize time complexity"]
+    "summary": "Solid solution...",
+    "recommendations": ["Recommendation 1"]
   }
 }
 
-Be thorough but concise. Focus on logical correctness, algorithm efficiency, and code quality. Remember: IGNORE ALL COMMENTS - only evaluate the executable code. Do NOT include a grade field.`;
+Be thorough but concise. IGNORE ALL COMMENTS. Do NOT include a grade field.`;
 };
 
 /**
@@ -1121,19 +1160,62 @@ const generateAssessmentSummaryPrompt = (
   scores,
   recommendation,
   integrityScore,
-  evidenceStrength = null
+  metadata = {},
 ) => {
+  const { hasMcq, hasProgramming, hasSql } = metadata;
+
+  // Build dynamic summary requirements based on assessment content
+  let summaryPoints = [
+    "1. **Overall Performance Overview**: One sentence about overall candidate performance and assessment integrity across all attempted sections.",
+  ];
+
+  if (hasMcq && hasProgramming) {
+    summaryPoints.push(
+      "2. **MCQ Performance Summary**: Specific performance on the MCQ section, highlighting strengths or weaknesses in theoretical knowledge.",
+      "3. **Programming Performance Summary**: Specific performance on the Programming section, covering logic, code quality, and test case success.",
+    );
+  } else if (hasMcq && hasSql) {
+    summaryPoints.push(
+      "2. **Theoretical Knowledge**: Deep dive into MCQ performance, identifying specific technical areas where the candidate excelled or struggled.",
+      "3. **SQL & Database Proficiency**: Analysis of database query implementation, schema understanding, and logical correctness in SQL.",
+    );
+  } else if (hasProgramming && hasSql) {
+    summaryPoints.push(
+      "2. **Technical Implementation**: Analyze the candidate's ability to translate requirements into functional code and efficient algorithms.",
+      "3. **SQL & Database Proficiency**: Analysis of database query implementation, schema understanding, and logical correctness in SQL.",
+    );
+  } else if (hasProgramming) {
+    summaryPoints.push(
+      "2. **Code Logic & Algorithmic Thinking**: Detailed analysis of problem-solving approach, algorithm efficiency, and handling of complex logic.",
+      "3. **Practical Implementation Quality**: Evaluation of code readability, maintainability, and test case success rates.",
+    );
+  } else if (hasMcq) {
+    summaryPoints.push(
+      "2. **Theoretical Depth**: Analysis of candidate's grasp on conceptual topics as demonstrated in MCQ performance.",
+      "3. **Skill Consistency**: Evaluation of performance stability across different technical domains and difficulty levels.",
+    );
+  } else if (hasSql) {
+    summaryPoints.push(
+      "2. **Database Design & Logic**: Analysis of the candidate's ability to structure queries and understand data relationships.",
+      "3. **Query Accuracy**: Evaluation of SQL accuracy, handling of joins/filtering, and correctness against requirements.",
+    );
+  } else {
+    // Fallback if structure is unknown
+    summaryPoints.push(
+      "2. **Technical Section Analysis**: Specific performance indicators from attempted technical assessments.",
+      "3. **Learning Potential**: Analysis of candidate's approach to the assessment and areas for development.",
+    );
+  }
+
   let prompt = `
 You are an HR Analytics AI tasked with creating concise, decision-oriented candidate assessment summaries. Analyze the assessment data and provide clear, actionable insights for hiring decisions.
 
 **ASSESSMENT SUMMARY REQUIREMENTS:**
 Generate exactly 3 concise, professional bullet points:
-1. **Overall Performance Overview**: One sentence about overall candidate performance and assessment integrity across MCQ and Programming sections.
-2. **MCQ Performance Summary**: Specific performance on the MCQ section, highlighting strengths or weaknesses in theoretical knowledge.
-3. **Programming Performance Summary**: Specific performance on the Programming section, covering logic, code quality, and test case success.
+${summaryPoints.join("\n")}
 
 Each point should be:
-- Maximum 25 words
+- Maximum 40 words
 - Factual and specific (mention scores, behaviors, specific technical skills)
 - Focused on what HR needs to know for decision-making
 - Professional tone without overly technical jargon
@@ -1149,45 +1231,42 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 
 **Format for fitScorePointers:**
 1. **✅ Fit for Role Type**: One clear sentence stating if candidate fits the role and recommended action
-2. **⚡ Primary Strength**: One specific strength observed (theoretical knowledge OR practical programming)
+2. **⚡ Primary Strength**: One specific strength observed (theoretical knowledge OR practical skills)
 3. **🛠️ Area to Watch**: One brief area for improvement or concern (technical gaps or integrity patterns)
 
 **EVALUATION DATA:**
 - **Candidate Fit Score**: ${candidateFitScore}%
 - **Integrity Score**: ${integrityScore}%
+- **Technical Accuracy**: ${scores.technicalAccuracy}%
+- **Code Quality Score**: ${scores.codeQualityScore}%
+- **Reasoning Score**: ${scores.reasoningScore}%
 - **MCQ Score**: ${scores.mcqScore !== null ? scores.mcqScore + "%" : "N/A"}
 - **Programming Test Case Score**: ${
     scores.programmingTestCaseScore !== null
       ? scores.programmingTestCaseScore + "%"
       : "N/A"
   }
-- **Programming Code Quality Score**: ${
-    scores.programmingCodeQualityScore !== null
-      ? scores.programmingCodeQualityScore + "%"
-      : "N/A"
-  }
+- **SQL Score**: ${scores.sqlScore !== null ? scores.sqlScore + "%" : "N/A"}
 - **Final Recommendation (Preliminary)**: ${recommendation}
 
+**TECHNICAL BREAKDOWN:**
+${metadata.technicalContext || "No detailed question-level data available."}
+
 **AI INSTRUCTION FOR SUMMARY:**
-- Base your analysis on the provided scores and integrity indicators.
-- If MCQ scores are high but programming is low, highlight the gap between theory and practice.
-- If integrity score is low, mentions the "Area to Watch" accordingly.
+- Base your analysis on the provided scores, integrity indicators, and the detailed TECHNICAL BREAKDOWN.
+- In the summary, mention specific skills or question types where the candidate excelled or struggled (e.g., "Excelled in Hard Programming tasks but struggled with Medium SQL queries").
+- If MCQ scores are high but practical scores (Programming/SQL) are low, highlight the gap between theory and practice.
+- If integrity score is low, mention the "Area to Watch" accordingly.
 - Ensure the summary reflects the specific technical context of the assessment.
+- DO NOT mention "Programming" if it wasn't part of the test (N/A). Stick to what was actually tested.
 
 **Response JSON Format:**
 {
   "assessmentSummary": [
     "Overall performance overview (max 25 words)",
-    "MCQ performance summary (max 25 words)", 
-    "Programming performance summary (max 25 words)"
+    "Section performance summary 1 (max 25 words)", 
+    "Section performance summary 2 (max 25 words)"
   ],
-  "communicationClarity": 85, (Estimate based on overall coherence if not measured directly)
-  "analyticalThinking": ${
-    scores.programmingCodeQualityScore || scores.mcqScore || 50
-  },
-  "problemSolvingAbility": ${
-    scores.programmingTestCaseScore || scores.mcqScore || 50
-  },
   "fitScorePointers": [
     "✅ Fit for Role Type: [Specific fit assessment and recommended action]",
     "⚡ Primary Strength: [Specific strength observed]",

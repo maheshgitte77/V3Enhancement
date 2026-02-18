@@ -38,6 +38,9 @@ const responseCache = new Map(); // Stores aggregated responses by requestId -> 
 // Server-side tracking of used Programming logic categories per assessment
 const categoryTracker = require("./utils/categoryTracker");
 const { identifyCategoryFromTitle } = require("./utils/programmingCategories");
+const {
+  conceptSignatureFromTitle,
+} = require("./utils/programmingDuplicateAvoidance");
 
 const ensureTopics = async () => {
   const admin = kafka.admin();
@@ -93,14 +96,26 @@ const ensureTopics = async () => {
             return;
           }
 
-          // Handle error responses
+          // Handle error responses (count as received so client gets a response)
           if (responseData.error) {
             console.error(
               `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`,
             );
             const requestInfo = pendingRequests.get(key);
             if (requestInfo) {
-              // Track error but continue waiting for other responses
+              if (
+                requestInfo.requestMode === "boilerplate" &&
+                responseData.questionType === "Boilerplate"
+              ) {
+                if (requestInfo.timeoutId) clearTimeout(requestInfo.timeoutId);
+                requestInfo.res.status(500).json({
+                  message:
+                    responseData.message || "Boilerplate generation failed",
+                  requestId: key,
+                });
+                pendingRequests.delete(key);
+                return;
+              }
               if (!requestInfo.errors) {
                 requestInfo.errors = [];
               }
@@ -109,6 +124,35 @@ const ensureTopics = async () => {
                 questionType: responseData.questionType,
                 message: responseData.message,
               });
+              requestInfo.receivedResponseCount =
+                (requestInfo.receivedResponseCount || 0) + 1;
+              if (
+                requestInfo.receivedResponseCount ===
+                requestInfo.expectedResponses
+              ) {
+                console.log(
+                  `✅ All responses received for Request ID: ${key} (including errors) - sending back to client`,
+                );
+                const categoryCache = responseCache.get(key) || {};
+                const questionsArray = Object.values(categoryCache).map(
+                  (cat) => ({
+                    skillName: cat.skillName,
+                    skillType: cat.skillType,
+                    questions: cat.questions,
+                  }),
+                );
+                if (requestInfo.timeoutId) {
+                  clearTimeout(requestInfo.timeoutId);
+                }
+                requestInfo.res.status(200).json({
+                  requestId: key,
+                  questions: questionsArray,
+                  tokenUsage: requestInfo.tokenUsage || null,
+                  errors: requestInfo.errors,
+                });
+                pendingRequests.delete(key);
+                responseCache.delete(key);
+              }
             }
             return;
           }
@@ -116,6 +160,20 @@ const ensureTopics = async () => {
           const requestInfo = pendingRequests.get(key);
           if (!requestInfo) {
             console.error(`❌ No pending request found for requestId: ${key}`);
+            return;
+          }
+
+          if (
+            requestInfo.requestMode === "boilerplate" &&
+            responseData.questionType === "Boilerplate"
+          ) {
+            if (requestInfo.timeoutId) {
+              clearTimeout(requestInfo.timeoutId);
+            }
+            requestInfo.res
+              .status(200)
+              .json(responseData.boilerplateResponse || {});
+            pendingRequests.delete(key);
             return;
           }
 
@@ -202,7 +260,9 @@ const ensureTopics = async () => {
               Array.isArray(questionObj.Programming)
             ) {
               const clientId = requestInfo.clientId;
-              if (clientId) {
+              const jobId = requestInfo.jobId;
+              const trackingId = jobId || clientId;
+              if (trackingId) {
                 // Extract logic categories from responseData if provided, otherwise identify from titles
                 let generatedCategories = responseData.logicCategories || [];
 
@@ -225,14 +285,17 @@ const ensureTopics = async () => {
                   generatedCategories = Array.from(identifiedCategoriesSet);
                 }
 
-                // Store tracked categories and refresh timestamp
+                // Store tracked categories and refresh timestamp (Redis or in-memory)
                 if (generatedCategories.length > 0) {
-                  categoryTracker.addUsedCategories(
-                    clientId,
+                  await categoryTracker.addUsedCategories(
+                    trackingId,
                     categoryName,
                     generatedCategories,
                   );
-                  categoryTracker.refreshTracking(clientId, categoryName); // Refresh timestamp
+                  await categoryTracker.refreshTracking(
+                    trackingId,
+                    categoryName,
+                  ); // Refresh timestamp
                   console.log(
                     `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(
                       ", ",
@@ -240,19 +303,34 @@ const ensureTopics = async () => {
                   );
                 } else {
                   // Even if no categories identified, refresh tracking to extend expiration
-                  categoryTracker.refreshTracking(clientId, categoryName);
+                  await categoryTracker.refreshTracking(
+                    trackingId,
+                    categoryName,
+                  );
+                }
+
+                // Track used concepts (logic signatures) to block duplicates like repeated "min element" / "palindrome"
+                const conceptSigs = questionObj.Programming.map((q) =>
+                  conceptSignatureFromTitle(q.questionTitle),
+                ).filter(Boolean);
+                if (conceptSigs.length > 0) {
+                  await categoryTracker.addUsedConcepts(
+                    trackingId,
+                    categoryName,
+                    conceptSigs,
+                  );
                 }
               }
             }
           }
 
-          // Check if we've received all expected responses
-          const receivedCount = Object.values(categoryCache).reduce(
-            (sum, cat) => sum + cat.questions.length,
-            0,
-          );
+          requestInfo.receivedResponseCount =
+            (requestInfo.receivedResponseCount || 0) + 1;
 
-          if (receivedCount === requestInfo.expectedResponses) {
+          // Check if we've received all expected responses (success + error)
+          if (
+            requestInfo.receivedResponseCount === requestInfo.expectedResponses
+          ) {
             console.log(`✅ All responses received for Request ID: ${key}`);
 
             // Log token usage summary
@@ -272,21 +350,21 @@ const ensureTopics = async () => {
 
               if (clientId && (inputTokens > 0 || outputTokens > 0)) {
                 try {
-                  await CreditServiceClient.deductAiUsage(
+                  await CreditServiceClient.deductAiUsage({
                     clientId,
-                    "gemini-2.0-flash", // Assuming default model across questions
-                    `ai_questions_${key}`,
+                    modelId: "gemini-2.0-flash",
+                    referenceId: `ai_questions_${key}`,
                     inputTokens,
                     outputTokens,
-                    {
+                    meta: {
                       type: "screening_question_generation",
                       requestId: key,
                       categories: Object.keys(categoryCache).join(","),
-                      service_key: "AI_QUESTION_GENERATION",
+                      serviceKey: "AI_QUESTION_GENERATION",
                     },
                     channelId,
                     jobId,
-                  );
+                  });
                   console.log(channelId, "channelId");
                   console.log(jobId, "jobId");
                   console.log(
@@ -326,6 +404,9 @@ const ensureTopics = async () => {
               questions: cat.questions,
             }));
 
+            if (requestInfo.timeoutId) {
+              clearTimeout(requestInfo.timeoutId);
+            }
             requestInfo.res.json({
               requestId: key,
               questions: questionsArray,
@@ -336,7 +417,7 @@ const ensureTopics = async () => {
             responseCache.delete(key);
           } else {
             console.log(
-              `📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`,
+              `📊 Progress for Request ID: ${key}: ${requestInfo.receivedResponseCount}/${requestInfo.expectedResponses} responses received`,
             );
           }
         } catch (error) {
@@ -350,10 +431,11 @@ const ensureTopics = async () => {
   }
 })();
 
-// Middleware to inject Kafka producer
+// Middleware to inject Kafka producer and caches (for timeout cleanup)
 app.use((req, res, next) => {
   req.producer = producer;
   req.pendingRequests = pendingRequests;
+  req.responseCache = responseCache;
   next();
 });
 

@@ -74,52 +74,100 @@ const parseAIResponse = (aiResponse) => {
 };
 
 /**
+ * Build a detailed technical breakdown of question performance for the AI prompt
+ */
+const buildTechnicalContext = (assessmentResult, aiLogics = []) => {
+  let context = "### Candidate Technical Performance Breakdown\n\n";
+
+  if (assessmentResult.testQuestions?.skills) {
+    assessmentResult.testQuestions.skills.forEach((skill) => {
+      context += `#### Skill Area: ${skill.skillName || "General"}\n`;
+
+      ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
+        (type) => {
+          const questions = skill[type];
+          if (!questions) return;
+
+          const typeLabel = type.replace("Questions", "").toUpperCase();
+          ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
+            (level) => {
+              const qList = questions[level];
+              if (qList && qList.length > 0) {
+                qList.forEach((q, idx) => {
+                  const status = q.isAttempted ? "Attempted" : "Not Attempted";
+                  const max =
+                    q.question?.marks ||
+                    (type === "programmingQuestions" ? 100 : 1);
+                  const score = q.isAttempted
+                    ? `${q.obtainedScore}/${max}`
+                    : "0/" + max;
+
+                  context += `- [${typeLabel}] [${level
+                    .replace("Questions", "")
+                    .toUpperCase()}] Result: ${status}, Score: ${score}\n`;
+
+                  // Add AI Reasoning for programming questions if available
+                  if (type === "programmingQuestions" && q.isAttempted) {
+                    const qId = q.question?._id || q.question;
+                    const aiLogic = aiLogics.find(
+                      (a) => a.questionId?.toString() === qId?.toString(),
+                    );
+                    if (aiLogic) {
+                      context += `  - AI Logical Quality: ${aiLogic.logicalCorrectness?.score || 0}% | Code Quality: ${aiLogic.codeQuality?.score || 0}%\n`;
+                      context += `  - AI Analysis: ${aiLogic.logicalCorrectness?.reasoning || "Logic matches requirements."}\n`;
+                    }
+                  }
+                });
+              }
+            },
+          );
+        },
+      );
+      context += "\n";
+    });
+  } else {
+    context += "No question-level data available.\n";
+  }
+
+  return context;
+};
+
+/**
  * Calculate candidate fit score from MCQ and Programming questions
  * @param {Object} assessmentResult - Assessment result object
  * @returns {number} Average fit score (0-100)
  */
 const calculateCandidateFitScore = (assessmentResult) => {
-  let scores = [];
+  let totalObtained = 0;
+  let totalMax = 0;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
-      // MCQ scores
-      const mcqQuestions = skill.mcqQuestions || {};
-      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
-        if (mcqQuestions[level]) {
-          mcqQuestions[level].forEach((mcq) => {
-            if (mcq.isAttempted && mcq.obtainedScore !== undefined) {
-              const maxScore = mcq.question?.marks || 1;
-              const percentage = (mcq.obtainedScore / maxScore) * 100;
-              scores.push(percentage);
-            }
-          });
-        }
-      });
-
-      // Programming scores
-      const programmingQuestions = skill.programmingQuestions || {};
-      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
-        if (programmingQuestions[level]) {
-          programmingQuestions[level].forEach((prog) => {
-            if (prog.isAttempted && prog.obtainedScore !== undefined) {
-              const maxScore = prog.question?.marks || 100;
-              const percentage = (prog.obtainedScore / maxScore) * 100;
-              scores.push(percentage);
-            }
-          });
-        }
-      });
+      ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
+        (type) => {
+          const questions = skill[type] || {};
+          ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
+            (level) => {
+              if (questions[level]) {
+                questions[level].forEach((q) => {
+                  const max =
+                    q.question?.marks ||
+                    q.question?.score ||
+                    (type === "programmingQuestions" ? 100 : 1);
+                  totalMax += max;
+                  if (q.isAttempted && q.obtainedScore !== undefined) {
+                    totalObtained += Math.min(q.obtainedScore, max);
+                  }
+                });
+              }
+            },
+          );
+        },
+      );
     });
   }
 
-  const candidateFitScore = scores.length
-    ? parseFloat(
-        (scores.reduce((sum, val) => sum + val, 0) / scores.length).toFixed(2)
-      )
-    : 0;
-
-  return candidateFitScore;
+  return totalMax > 0 ? Math.round((totalObtained / totalMax) * 100) : 0;
 };
 
 /**
@@ -128,12 +176,14 @@ const calculateCandidateFitScore = (assessmentResult) => {
  * @returns {number} Integrity score (0-100)
  */
 const calculateIntegrityScore = (assessmentResult) => {
-  let totalCheatingFlags = 0;
   let totalFullScreenExits = assessmentResult.fullScreenExitCount || 0;
   let totalTabSwitches = assessmentResult.tabSwitchCount || 0;
-  let totalQuestions = assessmentResult.totalQuestions || 0;
 
-  // Count cheating indicators across all questions
+  // Count cheating indicators and attempted questions across all questions
+  let attemptedQuestions = 0;
+  let questionsWithCheating = 0;
+  let totalHighLevelFlags = 0;
+
   assessmentResult.testQuestions?.skills?.forEach((skill) => {
     ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
       (questionType) => {
@@ -141,44 +191,81 @@ const calculateIntegrityScore = (assessmentResult) => {
         ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach(
           (level) => {
             questions[level]?.forEach((question) => {
+              // Count attempted questions
+              if (question.isAttempted) {
+                attemptedQuestions++;
+              }
+
+              // Count unique high-level flags per question
+              let questionFlagCount = 0;
               if (questionType === "programmingQuestions") {
-                totalCheatingFlags += question.cheatingFlags?.length || 0;
+                // For programming: count detected flags from cheatingAnalysis
+                const flagResults =
+                  question.cheatingAnalysis?.flagResults || [];
+                questionFlagCount = flagResults.filter(
+                  (f) => f.detected,
+                ).length;
               } else {
-                totalCheatingFlags += question.detectedCheatings?.length || 0;
+                // For MCQ/SQL: count detectedCheatings
+                questionFlagCount = question.detectedCheatings?.length || 0;
+              }
+
+              if (questionFlagCount > 0) {
+                questionsWithCheating++;
+                totalHighLevelFlags += questionFlagCount;
               }
             });
-          }
+          },
         );
-      }
+      },
     );
   });
 
+  // Use attempted questions for normalization; fallback to totalQuestions
+  const effectiveQuestions =
+    attemptedQuestions > 0
+      ? attemptedQuestions
+      : assessmentResult.totalQuestions || 0;
+
   // Safety check
-  if (totalQuestions === 0) {
+  if (effectiveQuestions === 0) {
+    // No questions attempted — if there are global indicators, penalize
+    if (totalFullScreenExits > 0 || totalTabSwitches > 0) {
+      const exitPen = Math.min(totalFullScreenExits * 10, 30);
+      const switchPen = Math.min(totalTabSwitches * 10, 30);
+      return Math.max(0, Math.round(100 - exitPen - switchPen));
+    }
     return 100;
   }
 
-  const maxExpectedFlags = totalQuestions * 2;
-  const maxExpectedExits = totalQuestions * 1;
-  const maxExpectedSwitches = totalQuestions * 1;
+  // Cheating flags penalty (40% weight):
+  // Based on proportion of questions with cheating detected
+  const cheatingRatio = questionsWithCheating / effectiveQuestions;
+  const flagsPenalty = Math.min(cheatingRatio * 40, 40);
 
-  const flagsPenalty = Math.min(
-    (totalCheatingFlags / maxExpectedFlags) * 40,
-    40
-  );
+  // Full-screen exits penalty (30% weight):
+  // Normalize against attempted questions
   const exitsPenalty = Math.min(
-    (totalFullScreenExits / maxExpectedExits) * 30,
-    30
-  );
-  const switchesPenalty = Math.min(
-    (totalTabSwitches / maxExpectedSwitches) * 30,
-    30
+    (totalFullScreenExits / effectiveQuestions) * 30,
+    30,
   );
 
-  const integrityScore = Math.max(
-    0,
-    Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty)
+  // Tab switches penalty (30% weight):
+  // Normalize against attempted questions
+  const switchesPenalty = Math.min(
+    (totalTabSwitches / effectiveQuestions) * 30,
+    30,
   );
+
+  let integrityScore = Math.max(
+    0,
+    Math.round(100 - flagsPenalty - exitsPenalty - switchesPenalty),
+  );
+
+  // Minimum penalty floor: if cheating IS detected, score can't be above 85
+  if (questionsWithCheating > 0 && integrityScore > 85) {
+    integrityScore = 85;
+  }
 
   return isNaN(integrityScore) ? 100 : integrityScore;
 };
@@ -189,8 +276,9 @@ const calculateIntegrityScore = (assessmentResult) => {
  * @returns {number|null} MCQ score or null
  */
 const calculateMcqScore = (assessmentResult) => {
-  let totalMcqScore = 0;
-  let mcqCount = 0;
+  let totalScore = 0;
+  let maxPossible = 0;
+  let hasQuestions = false;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -198,11 +286,11 @@ const calculateMcqScore = (assessmentResult) => {
       ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
         if (mcqQuestions[level]) {
           mcqQuestions[level].forEach((mcq) => {
+            hasQuestions = true;
+            const max = mcq.question?.marks || mcq.question?.score || 1;
+            maxPossible += max;
             if (mcq.isAttempted && mcq.obtainedScore !== undefined) {
-              const maxScore = mcq.question?.marks || 1;
-              const percentage = (mcq.obtainedScore / maxScore) * 100;
-              totalMcqScore += percentage;
-              mcqCount++;
+              totalScore += Math.min(mcq.obtainedScore, max);
             }
           });
         }
@@ -210,7 +298,8 @@ const calculateMcqScore = (assessmentResult) => {
     });
   }
 
-  return mcqCount > 0 ? Math.round(totalMcqScore / mcqCount) : null;
+  if (!hasQuestions) return null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
 };
 
 /**
@@ -219,8 +308,9 @@ const calculateMcqScore = (assessmentResult) => {
  * @returns {number|null} Average test case score or null
  */
 const calculateProgrammingTestCaseScore = (assessmentResult) => {
-  let totalEarnedScore = 0;
-  let programmingQuestionCount = 0;
+  let totalScore = 0;
+  let maxPossible = 0;
+  let hasQuestions = false;
 
   if (assessmentResult.testQuestions?.skills) {
     assessmentResult.testQuestions.skills.forEach((skill) => {
@@ -228,11 +318,12 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
       ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
         if (programmingQuestions[level]) {
           programmingQuestions[level].forEach((prog) => {
+            hasQuestions = true;
+            const maxScore =
+              prog.question?.marks || prog.question?.score || 100;
+            maxPossible += maxScore;
             if (prog.isAttempted && prog.obtainedScore !== undefined) {
-              const maxScore = prog.question?.marks || 100;
-              const percentage = (prog.obtainedScore / maxScore) * 100;
-              totalEarnedScore += percentage;
-              programmingQuestionCount++;
+              totalScore += Math.min(prog.obtainedScore, maxScore);
             }
           });
         }
@@ -240,9 +331,40 @@ const calculateProgrammingTestCaseScore = (assessmentResult) => {
     });
   }
 
-  return programmingQuestionCount > 0
-    ? Math.round(totalEarnedScore / programmingQuestionCount)
-    : null;
+  if (!hasQuestions) return null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
+};
+
+/**
+ * Calculate SQL performance score
+ * @param {Object} assessmentResult - Assessment result object
+ * @returns {number|null} SQL score or null
+ */
+const calculateSqlScore = (assessmentResult) => {
+  let totalScore = 0;
+  let maxPossible = 0;
+  let hasQuestions = false;
+
+  if (assessmentResult.testQuestions?.skills) {
+    assessmentResult.testQuestions.skills.forEach((skill) => {
+      const sqlQuestions = skill.sqlQuestions || {};
+      ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
+        if (sqlQuestions[level]) {
+          sqlQuestions[level].forEach((sql) => {
+            hasQuestions = true;
+            const maxScore = sql.question?.marks || sql.question?.score || 1;
+            maxPossible += maxScore;
+            if (sql.isAttempted && sql.obtainedScore !== undefined) {
+              totalScore += Math.min(sql.obtainedScore, maxScore);
+            }
+          });
+        }
+      });
+    });
+  }
+
+  if (!hasQuestions) return null;
+  return maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
 };
 
 /**
@@ -313,9 +435,9 @@ const calculateTimeEfficiencyScore = (assessmentResult) => {
                 questionTimeEfficiency.push(efficiency);
               }
             });
-          }
+          },
         );
-      }
+      },
     );
   });
 
@@ -331,7 +453,7 @@ const calculateTimeEfficiencyScore = (assessmentResult) => {
       : 100;
 
   const timeEfficiencyScore = Math.round(
-    avgQuestionEfficiency * 0.7 + overallEfficiency * 0.3
+    avgQuestionEfficiency * 0.7 + overallEfficiency * 0.3,
   );
 
   return isNaN(timeEfficiencyScore) ? 100 : Math.min(timeEfficiencyScore, 100);
@@ -362,43 +484,165 @@ const processAssessmentSummary = async (requestData) => {
       throw new Error("Assessment result not found");
     }
 
-    // 2. Calculate initial scores
+    // 2. Calculate Base Scores
     const candidateFitScore = calculateCandidateFitScore(assessmentResult);
     const integrityScore = calculateIntegrityScore(assessmentResult);
     const timeEfficiencyScore = calculateTimeEfficiencyScore(assessmentResult);
-    const mcqScore = calculateMcqScore(assessmentResult);
+    const mcqScore = calculateMcqScore(assessmentResult); // Null if no MCQ
     const programmingTestCaseScore =
-      calculateProgrammingTestCaseScore(assessmentResult);
-    const programmingCodeQualityScore =
-      await calculateProgrammingCodeQualityScore(candidateAssessmentId);
+      calculateProgrammingTestCaseScore(assessmentResult); // Null if no Programming
+    const sqlScore = calculateSqlScore(assessmentResult); // Null if no SQL
+    const programmingCodeQuality = await calculateProgrammingCodeQualityScore(
+      candidateAssessmentId,
+    ); // Null if no AI analysis
+
+    // -------------------------------------------------------------------------
+    // NEW METRICS CALCULATION
+    // -------------------------------------------------------------------------
+
+    // A. Technical Accuracy (The "What")
+    // Formula: Weighted average of MCQ Accuracy and Programming Test Case Accuracy
+    let validComponents = 0;
+    let totalAccuracySum = 0;
+
+    if (mcqScore !== null) {
+      totalAccuracySum += mcqScore;
+      validComponents++;
+    }
+    if (programmingTestCaseScore !== null) {
+      totalAccuracySum += programmingTestCaseScore;
+      validComponents++;
+    }
+    if (sqlScore !== null) {
+      totalAccuracySum += sqlScore;
+      validComponents++;
+    }
+
+    const technicalAccuracy =
+      validComponents > 0 ? Math.round(totalAccuracySum / validComponents) : 0;
+
+    // B. Code Quality Score (The "How")
+    // Formula: Uses AI 'codeQuality' score. If pure MCQ, we use technical accuracy as a proxy for "Theoretical Quality".
+    let codeQualityScore = 0;
+    if (programmingCodeQuality !== null) {
+      codeQualityScore = programmingCodeQuality;
+    } else if (programmingTestCaseScore === null && mcqScore !== null) {
+      // Pure MCQ Assessment: "Quality" is inferred from theoretical depth
+      codeQualityScore = technicalAccuracy;
+    }
+
+    // C. Reasoning Score (The "Why")
+    // Formula: Heavily weights Hard/Medium questions + AI Logic Score
+    let totalReasoningPoints = 0;
+    let totalReasoningMax = 0;
+
+    assessmentResult.testQuestions?.skills?.forEach((skill) => {
+      ["mcqQuestions", "programmingQuestions", "sqlQuestions"].forEach(
+        (type) => {
+          const questions = skill[type];
+          if (!questions) return;
+
+          // Easy: Weight 1x
+          if (questions.easyQuestions) {
+            questions.easyQuestions.forEach((q) => {
+              const max =
+                q.question?.marks ||
+                (type === "programmingQuestions" ? 100 : 1);
+              totalReasoningMax += 1;
+              if (q.isAttempted) {
+                const scorePct = (q.obtainedScore || 0) / max;
+                totalReasoningPoints += Math.min(scorePct, 1) * 1;
+              }
+            });
+          }
+          // Medium: Weight 2x (Reasoning is tested more here)
+          if (questions.mediumQuestions) {
+            questions.mediumQuestions.forEach((q) => {
+              const max =
+                q.question?.marks ||
+                (type === "programmingQuestions" ? 100 : 1);
+              totalReasoningMax += 2;
+              if (q.isAttempted) {
+                const scorePct = (q.obtainedScore || 0) / max;
+                totalReasoningPoints += Math.min(scorePct, 1) * 2;
+              }
+            });
+          }
+          // Hard: Weight 3x (Strongest indicator of reasoning)
+          if (questions.hardQuestions) {
+            questions.hardQuestions.forEach((q) => {
+              const max =
+                q.question?.marks ||
+                (type === "programmingQuestions" ? 100 : 1);
+              totalReasoningMax += 3;
+              if (q.isAttempted) {
+                const scorePct = (q.obtainedScore || 0) / max;
+                totalReasoningPoints += Math.min(scorePct, 1) * 3;
+              }
+            });
+          }
+        },
+      );
+    });
+
+    let reasoningScore = 0;
+    if (totalReasoningMax > 0) {
+      reasoningScore = Math.round(
+        (totalReasoningPoints / totalReasoningMax) * 100,
+      );
+    }
+
+    // Boost reasoning with AI logical correctness if available
+    // If we have AI analysis, it accounts for 40% of the reasoning score
+    const aiLogics = await AssessmentProgrammingAnalysis.find({
+      candidateAssessmentId: candidateAssessmentId,
+    });
+    if (aiLogics && aiLogics.length > 0) {
+      let totalAiLogic = 0;
+      let count = 0;
+      aiLogics.forEach((a) => {
+        if (a.logicalCorrectness?.score) {
+          totalAiLogic += a.logicalCorrectness.score;
+          count++;
+        }
+      });
+      if (count > 0) {
+        const avgAiLogic = totalAiLogic / count;
+        logger.info(
+          `Reasoning Score Adjustment: Base=${reasoningScore}, AI_Logic=${avgAiLogic}`,
+        );
+        // 60% Execution Performance (Weighted Hard/Med), 40% AI Logic Analysis
+        reasoningScore = Math.round(reasoningScore * 0.6 + avgAiLogic * 0.4);
+      }
+    }
+
+    // Final safety clamp
+    reasoningScore = Math.min(reasoningScore, 100);
 
     const scores = {
       mcqScore,
       programmingTestCaseScore,
-      programmingCodeQualityScore,
+      programmingCodeQuality, // raw AI score
+      sqlScore,
       timeEfficiencyScore,
+      // New Metrics for Prompt
+      technicalAccuracy,
+      codeQualityScore,
+      reasoningScore,
     };
 
     const recommendation = calculateRecommendation(
       candidateFitScore,
-      integrityScore
+      integrityScore,
     );
 
     // 3. Generate AI summary using Gemini
     let aiSummaryData = {
-      assessmentSummary: [
-        "Assessment completed across theoretical and practical stages.",
-        "Theory performance shows candidate's knowledge base.",
-        "Programming section evaluates implementation capability.",
-      ],
-      fitScorePointers: [
-        `✅ Fit for Role: ${recommendation}`,
-        "⚡ Primary Strength: Identified through scoring",
-        "🛠️ Area to Watch: Integrity and performance patterns",
-      ],
-      communicationClarity: 80,
-      analyticalThinking: candidateFitScore,
-      problemSolvingAbility: programmingTestCaseScore || candidateFitScore,
+      assessmentSummary: ["Assessment analysis pending."],
+      fitScorePointers: [`Fit: ${recommendation}`],
+      technicalAccuracy: technicalAccuracy,
+      codeQualityScore: codeQualityScore,
+      reasoningScore: reasoningScore,
     };
 
     let totalTokensUsed = 0;
@@ -406,12 +650,20 @@ const processAssessmentSummary = async (requestData) => {
     let outputTokens = 0;
 
     try {
+      const metadata = {
+        hasMcq: mcqScore !== null,
+        hasProgramming: programmingTestCaseScore !== null,
+        hasSql: sqlScore !== null,
+        technicalContext: buildTechnicalContext(assessmentResult, aiLogics),
+      };
+
       const prompt = generateAssessmentSummaryPrompt(
         candidateFitScore,
         assessmentResult,
         scores,
         recommendation,
-        integrityScore
+        integrityScore,
+        metadata,
       );
 
       const aiStartTime = Date.now();
@@ -424,16 +676,18 @@ const processAssessmentSummary = async (requestData) => {
 
       const parsedAiResponse = parseAIResponse(text);
       if (parsedAiResponse) {
-        aiSummaryData = parsedAiResponse;
+        aiSummaryData = {
+          ...aiSummaryData,
+          ...parsedAiResponse, // Overwrite summary text, keep calculated scores
+        };
       }
 
-      // Extract token usage if available
+      // Extract token usage
       if (result.usageMetadata) {
         inputTokens = result.usageMetadata.promptTokenCount || 0;
         outputTokens = result.usageMetadata.candidatesTokenCount || 0;
         totalTokensUsed = result.usageMetadata.totalTokenCount || 0;
       } else {
-        // Fallback estimation
         inputTokens = Math.ceil(prompt.length / 4);
         outputTokens = Math.ceil(text.length / 4);
         totalTokensUsed = inputTokens + outputTokens;
@@ -446,25 +700,28 @@ const processAssessmentSummary = async (requestData) => {
       });
     } catch (aiError) {
       logger.error(
-        "AI Generation failed for assessment summary, using fallback",
+        "AI Generation failed for assessment summary, using calculated values",
         {
           error: aiError.message,
           candidateAssessmentId,
-        }
+        },
       );
-      // Continue with fallback summary
     }
 
-    // 4. Update CandidateAssessmentResult
+    // 4. Update CandidateAssessmentResult with NEW FIELDS
     await CandidateAssessmentResult.updateOne(
       { candidateAssessmentId },
       {
         $set: {
           assessmentSummary: aiSummaryData.assessmentSummary,
           fitScorePointers: aiSummaryData.fitScorePointers,
-          communicationClarity: aiSummaryData.communicationClarity,
-          analyticalThinking: aiSummaryData.analyticalThinking,
-          problemSolvingAbility: aiSummaryData.problemSolvingAbility,
+
+          // NEW FIELDS ---------------------
+          technicalAccuracy: technicalAccuracy,
+          codeQualityScore: codeQualityScore,
+          reasoningScore: reasoningScore,
+          // --------------------------------
+
           candidateFitScore,
           integrityScore,
           recommendation,
@@ -474,7 +731,7 @@ const processAssessmentSummary = async (requestData) => {
           inputTokens,
           outputTokens,
         },
-      }
+      },
     );
 
     // 5. Deduct credits for AI usage (fire and forget)
@@ -518,7 +775,9 @@ const processAssessmentSummary = async (requestData) => {
       scores: {
         candidateFitScore,
         integrityScore,
-        ...scores,
+        technicalAccuracy,
+        codeQualityScore,
+        reasoningScore,
       },
       summary: aiSummaryData.assessmentSummary,
     };
