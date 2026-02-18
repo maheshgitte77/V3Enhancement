@@ -25,10 +25,10 @@ const LANGUAGE_RULES = {
     match: ["java"],
     instruction: [
       "Class name must be public class Main.",
-      "Use Scanner(System.in) with nextInt()/next()/hasNext().",
-      "Avoid calling nextLine() after nextInt() unless properly handled.",
-      "Do not print prompts.",
-      "Output only via System.out.print/println.",
+      "Implementation block must be a single solve method: use public static int solve(...) (or appropriate return type) inside Main; do not nest a separate class Solution with solve inside.",
+      "Markers HC_IMPLEMENTATION_BLOCK_START/END must wrap the solve method body only (marker line, then method signature line, then body, then closing brace).",
+      "Use Scanner(System.in) with nextInt()/next()/hasNext(). Avoid nextLine() after nextInt() unless handled.",
+      "Do not print prompts. Output only via System.out.print/println.",
     ].join(" "),
   },
 
@@ -57,10 +57,9 @@ const LANGUAGE_RULES = {
   python: {
     match: ["python"],
     instruction: [
-      "Use input() or sys.stdin.read().",
-      "Do not use interactive prompts.",
-      "Handle whitespace and newlines safely.",
-      "Output using print only.",
+      "MANDATORY for Judge0: use sys.stdin for input (e.g. n = int(sys.stdin.readline()), arr = list(map(int, sys.stdin.readline().split()))). Do not use input() so execution is non-interactive.",
+      "Implementation block: markers HC_IMPLEMENTATION_BLOCK_START/END must wrap the solve function (marker line, then def solve(...):, then body). Use 4-space indent for body.",
+      "Do not use interactive prompts. Output using print only.",
     ].join(" "),
   },
 

@@ -67,7 +67,14 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
     if (/javascript|node/i.test(String(langName))) {
       cleaned = normalizeJavaScriptJudge0Input(cleaned);
     } else if (/python/i.test(String(langName))) {
-      // Guard against invalid empty function body after TODO comment.
+      if (/^[^i]*\binput\s*\(/m.test(cleaned) && !/sys\.stdin/.test(cleaned)) {
+        if (!/^\s*import\s+sys\b/m.test(cleaned)) {
+          cleaned = cleaned.replace(/^/, "import sys\n\n");
+        }
+        cleaned = cleaned.replace(/\bint\s*\(\s*input\s*\(\s*\)\s*\)/g, "int(sys.stdin.readline())");
+        cleaned = cleaned.replace(/\binput\s*\(\s*\)\s*\.split\s*\(\s*\)/g, "sys.stdin.readline().split()");
+        cleaned = cleaned.replace(/\binput\s*\(\s*\)/g, "sys.stdin.readline().strip()");
+      }
       cleaned = cleaned.replace(
         /(def\s+solve\s*\([^)]*\)\s*:\s*\n\s*#\s*TODO[^\n]*\n)(?=\s*(?:if __name__|[A-Za-z_]+\s*=|print\(|for |while |$))/i,
         "$1    pass\n",
@@ -149,14 +156,12 @@ Global constraints:
 2) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
 3) MUST keep two explicit sections in each language:
    A) Input section in entrypoint (main) wrapped by markers ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
-   B) Implementation section as separate solve(...) function/method with TODO wrapped by markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd}
-4) main/entrypoint must call solve(...) and print the result.
-5) Keep code Judge0 non-interactive.
-6) Java must be 'public class Main' and avoid unsafe nextLine() after nextInt().
-7) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();
-8) ABSOLUTE BAN for JavaScript: no readline/createInterface/readline.on.
-9) Use real newline chars in code.
-10) Output ONLY the JSON object: no text before/after, no markdown fences, no comments outside the code.
+   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function (first line after start marker = function signature, e.g. int solve(...) { or def solve(...):, then body with TODO, then closing brace). Do NOT put a whole class or extra wrappers between the markers; the content between markers must be exactly one solve function.
+4) Java: use public class Main with public static int solve(...) (or appropriate return type) inside Main; do not use a nested class Solution.
+5) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input().
+6) main/entrypoint must call solve(...) and print the result. Keep boilerplate minimal; avoid long comment blocks.
+7) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); ABSOLUTE BAN: no readline/createInterface/readline.on.
+8) Use real newline chars in code. Output ONLY the JSON object: no text before/after, no markdown fences.
 
 Return ONLY valid JSON:
 {

@@ -1,4 +1,8 @@
 const axios = require("axios");
+const {
+    getLanguageInstruction,
+    buildLanguageInstructionsBlock,
+} = require("../utils/judge0LanguageInstructions");
 
 const DEFAULT_MODEL =
     process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash";
@@ -203,10 +207,21 @@ const findSolveInvocationLineIndex = (lines = []) => {
     return -1;
 };
 
+const normalizePythonStdin = (code = "") => {
+    let c = String(code);
+    if (!/\binput\s*\(/m.test(c) || /sys\.stdin/.test(c)) return c;
+    if (!/^\s*import\s+sys\b/m.test(c)) c = c.replace(/^/, "import sys\n\n");
+    c = c.replace(/\bint\s*\(\s*input\s*\(\s*\)\s*\)/g, "int(sys.stdin.readline())");
+    c = c.replace(/\binput\s*\(\s*\)\s*\.split\s*\(\s*\)/g, "sys.stdin.readline().split()");
+    c = c.replace(/\binput\s*\(\s*\)/g, "sys.stdin.readline().strip()");
+    return c;
+};
+
 const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
     const family = detectLanguageFamily(languageName);
     if (!codeSnippet) return codeSnippet;
     let code = String(codeSnippet);
+    if (family === "python") code = normalizePythonStdin(code);
     let lines = code.split("\n");
 
     const hasImplMarkers =
@@ -394,8 +409,13 @@ const checkBoilerplateContract = (codeSnippet = "", languageName = "", skipTodoC
     };
 };
 
-const buildBoilerplateRepairPrompt = ({ question, language, testCases }) => `
+const buildBoilerplateRepairPrompt = ({ question, language, testCases }) => {
+    const langInstruction = getLanguageInstruction(language.languageName);
+    return `
 You are repairing a programming boilerplate skeleton for ${language.languageName}.
+
+Judge0 / language rule for this language:
+${langInstruction}
 
 Return ONLY JSON:
 {
@@ -403,21 +423,15 @@ Return ONLY JSON:
 }
 
 Requirements:
-1) MUST include ACTUAL executable code, not just markers:
-   - JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();
-   - JavaScript: console.log(...) for output
-   - JavaScript: function solve(...) { ... } with actual function body
-2) Must include TWO blocks with markers:
-   - Input/Output block in entrypoint (main) wrapped with markers:
-     ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
-   - Separate implementation block function/method named solve(...) containing TODO placeholder, wrapped with markers:
-     ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd}
-3) Entrypoint must call solve(...) and print the solve return/output.
-4) Keep it minimal and syntactically correct.
-5) No markdown fences.
-6) JavaScript: MUST use fs.readFileSync(0, 'utf8').trim(); DO NOT use readline/createInterface/readline.on.
-7) Java: avoid unsafe nextLine() right after nextInt() unless strictly necessary and guarded.
-8) CRITICAL: Generate COMPLETE runnable code with actual input/output/function code, not just marker comments.
+1) MUST include ACTUAL executable code, not just markers.
+2) TWO blocks with markers:
+   - Input block in entrypoint wrapped with ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
+   - Implementation block: ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap the solve function only (marker line, then function signature line, then body with TODO, then closing brace). Do not put markers inside a class or inside the method; the block content must be exactly the solve function (signature + body).
+3) Java: use public class Main and public static int solve(...) (or appropriate type) in Main; do not use a nested class Solution.
+4) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input(). Implementation block: marker line, then def solve(...):, then body with TODO.
+5) JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); DO NOT use readline/createInterface.
+6) Entrypoint must call solve(...) and print the result. Keep boilerplate minimal; avoid long comment blocks.
+7) No markdown fences.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -428,10 +442,15 @@ ${language.codeSnippet || ""}
 Testcases:
 ${JSON.stringify(testCases, null, 2)}
 `;
+};
 
-const buildLogicBlockPrompt = ({ question, testCases, language }) => `
+const buildLogicBlockPrompt = ({ question, testCases, language }) => {
+    const langInstruction = getLanguageInstruction(language.languageName);
+    return `
 You are given a boilerplate skeleton for ${language.languageName}.
 Generate ONLY the implementation body that goes INSIDE the solve function between ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd}.
+
+Language rule: ${langInstruction}
 
 Return ONLY JSON:
 {
@@ -442,8 +461,7 @@ Rules:
 1) todoReplacement = only the executable body lines (what goes inside solve). No def solve, no function solve, no closing }.
 2) Do not return full file, main, or any code outside the solve body.
 3) Must pass provided test cases when this body is inserted into the boilerplate.
-4) No markdown fences. No extra comments or text. Output only the JSON.
-
+4) Minimize comments. No markdown fences. Output only the JSON.
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -454,6 +472,7 @@ ${language.codeSnippet || ""}
 Testcases:
 ${JSON.stringify(testCases, null, 2)}
 `;
+};
 
 const indentLines = (text, spaces) =>
     String(text || "")
@@ -504,19 +523,25 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
         if (blockLines.length === 0) {
             code = String(code || "");
         } else {
-            const signatureLine = blockLines[0];
+            const isPython = family === "python";
+            const signaturePattern = isPython
+                ? /^\s*def\s+solve\s*\([^)]*\)\s*:/
+                : /\bsolve\s*\([^)]*\)\s*\{/;
+            const signatureIdx = blockLines.findIndex((line) => signaturePattern.test(line));
+            const sigIdx = signatureIdx >= 0 ? signatureIdx : 0;
+            const signatureLine = blockLines[sigIdx];
             const hasClosingBrace =
-                family !== "python" &&
-                blockLines.length > 1 &&
+                !isPython &&
+                blockLines.length > sigIdx + 1 &&
                 /^\s*\}\s*$/.test(blockLines[blockLines.length - 1]);
             const closingLine = hasClosingBrace ? blockLines[blockLines.length - 1] : "";
             const bodyLines = hasClosingBrace
-                ? blockLines.slice(1, blockLines.length - 1)
-                : blockLines.slice(1);
+                ? blockLines.slice(sigIdx + 1, blockLines.length - 1)
+                : blockLines.slice(sigIdx + 1);
             const bodyIndent =
                 bodyLines.length > 0 && bodyLines[0].match(/^(\s*)/)
                     ? (bodyLines[0].match(/^(\s*)/) || [null, "    "])[1].length
-                    : family === "python"
+                    : isPython
                         ? 4
                         : 4;
             const logicNormalized = normalizeMinIndent(logic);
@@ -580,14 +605,38 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
     return { mergedCode: code, injected: true };
 };
 
+const buildFailureSummaryForFix = (executionResults = []) => {
+    return (Array.isArray(executionResults) ? executionResults : []).map((entry) => {
+        const out = {
+            languageId: entry.languageId,
+            languageName: entry.languageName,
+            message: entry.summary?.message || entry.error || "",
+            stderr: "",
+            compileOutput: "",
+        };
+        const results = entry.results || entry.caseResults || [];
+        for (const r of results) {
+            if (r.stderr && !out.stderr) out.stderr = String(r.stderr).trim().slice(0, 2000);
+            const compileOut = r.compile_output ?? r.compileOutput;
+            if (compileOut && !out.compileOutput) out.compileOutput = String(compileOut).trim().slice(0, 2000);
+            if (out.stderr && out.compileOutput) break;
+        }
+        return out;
+    });
+};
+
 const buildRootCauseFixPrompt = ({
     question,
     failures,
     testCases,
     languages,
     fixMode,
-}) => `
+}) => {
+    const failureSummary = buildFailureSummaryForFix(failures);
+    const instructionsBlock = buildLanguageInstructionsBlock(languages || []);
+    return `
 You are fixing an AI-generated programming question package after Judge0 failures.
+Minimize comments in boilerplate and logic; long comment blocks cause verification issues.
 
 Return ONLY JSON with this exact shape:
 {
@@ -612,8 +661,10 @@ Rules:
    - ${BLOCK_MARKERS.inputStart} ... ${BLOCK_MARKERS.inputEnd}
    - ${BLOCK_MARKERS.implStart} ... ${BLOCK_MARKERS.implEnd}
 7) logicBlocks entries must contain ONLY implementation lines to place inside ${BLOCK_MARKERS.implStart}/${BLOCK_MARKERS.implEnd}.
-8) Keep response minimal; omit fields you are not changing.
-9) No markdown fences.
+8) Keep response minimal; omit fields you are not changing. No markdown fences.
+
+Language-wise Judge0 rules (follow for boilerplate and logic):
+${instructionsBlock}
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -624,9 +675,10 @@ ${JSON.stringify(languages, null, 2)}
 Current testcases:
 ${JSON.stringify(testCases, null, 2)}
 
-Judge0 failures:
-${JSON.stringify(failures, null, 2)}
+Judge0 failures (errors sent for fix; use stderr/compileOutput to correct code):
+${JSON.stringify(failureSummary.length ? failureSummary : failures, null, 2)}
 `;
+};
 
 const buildExecutionHeaders = () => {
     const headers = { "Content-Type": "application/json" };
@@ -1034,10 +1086,34 @@ const generateFixes = async ({
     languages,
     fixMode,
 }) => {
+    const failureSummary = buildFailureSummaryForFix(failures);
     vLog("fix-generate", "Generating fixes from failure analysis", {
         failedLanguages: Array.isArray(failures) ? failures.length : 0,
         fixMode,
     });
+    vLog("repair-input", "Judge0 errors sent for fix", {
+        fixMode,
+        perLanguage: failureSummary.map((f) => ({
+            lang: f.languageName,
+            message: f.message,
+            hasStderr: !!f.stderr,
+            hasCompileOutput: !!f.compileOutput,
+        })),
+    });
+    if (VERIFICATION_LOG_ENABLED && failureSummary.some((f) => f.stderr || f.compileOutput)) {
+        console.log(
+            "[ProgrammingVerification][repair-input] Judge0 stderr/compile_output sample:",
+            JSON.stringify(
+                failureSummary.map((f) => ({
+                    languageName: f.languageName,
+                    stderr: (f.stderr || "").slice(0, 500),
+                    compileOutput: (f.compileOutput || "").slice(0, 500),
+                })),
+                null,
+                2,
+            ),
+        );
+    }
     const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
     const response = await withRetry(
         () =>
