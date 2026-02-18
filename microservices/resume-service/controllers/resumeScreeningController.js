@@ -832,8 +832,7 @@ const updateCandidate = async (req, res) => {
 
     if (!requestId || !id || !newEmail || !status || !jobId) {
       return res.status(400).json({
-        error:
-          "requestId, id, newEmail, status, and jobId are required",
+        error: "requestId, id, newEmail, status, and jobId are required",
       });
     }
 
@@ -848,8 +847,9 @@ const updateCandidate = async (req, res) => {
       const trimmedMobile = String(newMobile).trim();
       const mobileRegex = /^\d{7,15}$/;
       if (trimmedMobile && !mobileRegex.test(trimmedMobile)) {
-        return res.status(400).json({ 
-          error: "Invalid mobile number format. Mobile number must be 7-15 digits." 
+        return res.status(400).json({
+          error:
+            "Invalid mobile number format. Mobile number must be 7-15 digits.",
         });
       }
     }
@@ -988,6 +988,22 @@ const deleteCandidates = async (req, res) => {
   }
 };
 
+const checkAutofillCredit = async (req, res) => {
+  try {
+    const { clientId } = req.query;
+    if (!clientId) {
+      return res.status(400).json({ error: "clientId is required" });
+    }
+    const validation =
+      await ActionCreditValidator.validateResumeAnalysisCredits(clientId, 1);
+    return res.json({ available: validation.sufficient });
+  } catch (error) {
+    console.error("Error checking autofill credit:", error.message);
+    // Fail open — don't hide the feature if the credit service is down
+    return res.json({ available: true });
+  }
+};
+
 module.exports = {
   analyzeResumes,
   getRequestData,
@@ -996,4 +1012,5 @@ module.exports = {
   approveCandidates,
   updateCandidate,
   deleteCandidates,
+  checkAutofillCredit,
 };

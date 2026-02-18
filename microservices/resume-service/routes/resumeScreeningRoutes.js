@@ -8,11 +8,13 @@ const {
   approveCandidates,
   updateCandidate,
   deleteCandidates,
+  checkAutofillCredit,
 } = require("../controllers/resumeScreeningController");
 
 const router = express.Router();
 
 router.post("/analyzeResumes", analyzeResumes);
+router.get("/check-autofill-credit", checkAutofillCredit);
 
 router.get("/getRequestData/:requestId", getRequestData);
 router.post("/addToJobApplication/:requestId", addToJobApplication);
