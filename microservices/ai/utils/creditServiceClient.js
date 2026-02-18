@@ -86,6 +86,59 @@ class CreditServiceClient {
       return null; // Non-blocking
     }
   }
+
+  /**
+   * Estimate cost for a single AI action
+   * @param {string} modelId - AI model identifier (e.g., 'gemini-2.0-flash')
+   * @param {string} actionKey - Action key (e.g., 'AI_JOB_DESCRIPTION_GENERATION')
+   * @returns {Promise<Object>} Estimation response with estimatedCost, breakdown, etc.
+   */
+  static async estimateActionCost(modelId, actionKey) {
+    try {
+      const baseUrl = process.env.CREDIT_SERVICE_URL;
+      const response = await axios.get(
+        `${baseUrl}/ai-action-benchmarks/estimate/${modelId}/${actionKey}`,
+        {
+          headers: {
+            "x-service-key": process.env.CREDIT_SERVICE_KEY,
+          },
+        },
+      );
+      return response.data?.data || null;
+    } catch (error) {
+      console.error(
+        `❌ Cost estimation failed for ${actionKey}:`,
+        error.response?.data || error.message,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Estimate costs for multiple actions in parallel
+   * @param {Array<{modelId: string, actionKey: string, count?: number}>} actions
+   * @returns {Promise<Array<Object>>} Array of estimation responses
+   */
+  static async estimateActionCostBatch(actions) {
+    try {
+      const estimationPromises = actions.map((action) =>
+        CreditServiceClient.estimateActionCost(
+          action.modelId,
+          action.actionKey,
+        ).then((estimate) => ({
+          ...estimate,
+          actionKey: action.actionKey,
+          count: action.count || 1,
+        })),
+      );
+
+      const estimates = await Promise.all(estimationPromises);
+      return estimates;
+    } catch (error) {
+      console.error(`❌ Batch cost estimation failed:`, error.message);
+      throw error;
+    }
+  }
 }
 
 module.exports = CreditServiceClient;

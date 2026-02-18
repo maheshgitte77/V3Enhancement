@@ -63,6 +63,7 @@ let logger = console;
 
 // Credit service for deducting AI usage
 const creditServiceClient = require("../utils/creditServiceClient");
+const ActionCreditValidator = require("../middleware/ActionCreditValidator.middleware");
 
 // Service key mapping for credit deduction
 const SERVICE_KEY_MAP = {
@@ -155,7 +156,7 @@ const initializeKafkaConsumer = async (dependencies) => {
 const startConsuming = async () => {
   if (!isConnected) {
     throw new Error(
-      "Kafka consumer not initialized. Call initializeKafkaConsumer first."
+      "Kafka consumer not initialized. Call initializeKafkaConsumer first.",
     );
   }
 
@@ -230,6 +231,35 @@ const handleAnalysisRequest = async (request) => {
   const startTime = Date.now();
 
   try {
+    // ✅ PRE-EXECUTION VALIDATION (NEW)
+    const validation =
+      await ActionCreditValidator.validateKafkaAnalysisCredits(request);
+
+    if (!validation.sufficient) {
+      logger.error("Insufficient credits for Kafka analysis request", {
+        correlationId,
+        candidateScreeningId,
+        questionId,
+        required: validation.estimatedCost?.totalCost,
+        available: validation.balance,
+        actionKey: validation.actionKey,
+      });
+
+      // Publish failure instead of processing
+      await publishFailure(
+        request,
+        new Error("Insufficient credits for this operation"),
+      );
+      return;
+    }
+
+    logger.info("Credit validation passed for Kafka analysis", {
+      correlationId,
+      actionKey: validation.actionKey,
+      estimatedCost: validation.estimatedCost?.totalCost,
+    });
+
+    // Process as normal
     switch (jobType) {
       case "media-analysis":
         // Route to video or audio processor based on type
@@ -341,10 +371,50 @@ const handleSummaryRequest = async (request) => {
   } = request;
 
   try {
+    // ✅ PRE-EXECUTION VALIDATION (NEW)
+    const validation =
+      await ActionCreditValidator.validateKafkaSummaryCredits(request);
+
+    if (!validation.sufficient) {
+      logger.error("Insufficient credits for Kafka summary request", {
+        correlationId,
+        candidateScreeningId,
+        required: validation.estimatedCost?.totalCost,
+        available: validation.balance,
+        actionKey: validation.actionKey,
+      });
+
+      // Publish failure
+      await producer.send({
+        topic: TOPICS.SUMMARY_RESULTS,
+        messages: [
+          {
+            key: candidateScreeningId,
+            value: JSON.stringify({
+              correlationId,
+              timestamp: new Date().toISOString(),
+              success: false,
+              candidateScreeningId,
+              errorMessage: "Insufficient credits for this operation",
+              errorCode: "INSUFFICIENT_CREDITS",
+            }),
+          },
+        ],
+      });
+      return;
+    }
+
+    logger.info("Credit validation passed for Kafka summary", {
+      correlationId,
+      actionKey: validation.actionKey,
+      estimatedCost: validation.estimatedCost?.totalCost,
+    });
+
     // Use V2_5_CONFIG as fallback if not provided in request
     const { V2_5_CONFIG } = require("./orchestrator");
     const config = request.v2_5Config || V2_5_CONFIG;
 
+    // Process as normal
     const result = await summaryProcessor.processScreeningSummary({
       candidateScreeningId,
       screeningAssessmentId,

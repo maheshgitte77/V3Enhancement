@@ -4,10 +4,7 @@ const cors = require("cors");
 const questionRoutes = require("./routes/questionsRoutes");
 const jobDescriptionRoutes = require("./routes/jobDescriptionRoutes");
 const CreditServiceClient = require("./utils/creditServiceClient");
-const {
-  requireCredits,
-  checkCredits,
-} = require("./middleware/CreditCheck.Middleware");
+
 require("dotenv").config();
 
 const app = express();
@@ -23,10 +20,10 @@ app.use(
       "https://hirecorrecto.com",
     ],
     credentials: true,
-  })
+  }),
 );
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
-  broker.trim()
+  broker.trim(),
 );
 console.log(`🔗 Connecting to Kafka Brokers:`, kafkaBrokers);
 
@@ -99,7 +96,7 @@ const ensureTopics = async () => {
           // Handle error responses
           if (responseData.error) {
             console.error(
-              `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`
+              `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`,
             );
             const requestInfo = pendingRequests.get(key);
             if (requestInfo) {
@@ -217,7 +214,7 @@ const ensureTopics = async () => {
                     if (q.questionTitle) {
                       // Use robust category identification function
                       const identifiedCategory = identifyCategoryFromTitle(
-                        q.questionTitle
+                        q.questionTitle,
                       );
                       if (identifiedCategory) {
                         identifiedCategoriesSet.add(identifiedCategory);
@@ -233,13 +230,13 @@ const ensureTopics = async () => {
                   categoryTracker.addUsedCategories(
                     clientId,
                     categoryName,
-                    generatedCategories
+                    generatedCategories,
                   );
                   categoryTracker.refreshTracking(clientId, categoryName); // Refresh timestamp
                   console.log(
                     `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(
-                      ", "
-                    )}`
+                      ", ",
+                    )}`,
                   );
                 } else {
                   // Even if no categories identified, refresh tracking to extend expiration
@@ -252,7 +249,7 @@ const ensureTopics = async () => {
           // Check if we've received all expected responses
           const receivedCount = Object.values(categoryCache).reduce(
             (sum, cat) => sum + cat.questions.length,
-            0
+            0,
           );
 
           if (receivedCount === requestInfo.expectedResponses) {
@@ -262,7 +259,7 @@ const ensureTopics = async () => {
             if (requestInfo.tokenUsage) {
               console.log(`\n📊 Token Usage Summary for Request ${key}:`);
               console.log(
-                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`
+                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`,
               );
 
               // --- Credit System Integration ---
@@ -288,17 +285,17 @@ const ensureTopics = async () => {
                       service_key: "AI_QUESTION_GENERATION",
                     },
                     channelId,
-                    jobId
+                    jobId,
                   );
                   console.log(channelId, "channelId");
                   console.log(jobId, "jobId");
                   console.log(
-                    `💰 AI Credits deducted for Request ${key} (ClientId: ${clientId})`
+                    `💰 AI Credits deducted for Request ${key} (ClientId: ${clientId})`,
                   );
                 } catch (creditError) {
                   console.error(
                     `❌ AI Credit deduction failed for Request ${key}:`,
-                    creditError.message
+                    creditError.message,
                   );
                 }
               }
@@ -308,17 +305,17 @@ const ensureTopics = async () => {
               Object.entries(requestInfo.tokenUsage.byType).forEach(
                 ([type, usage]) => {
                   console.log(
-                    `  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`
+                    `  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`,
                   );
                   if (usage.batches && usage.batches.length > 0) {
                     console.log(`    Batches:`);
                     usage.batches.forEach((batch) => {
                       console.log(
-                        `      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`
+                        `      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`,
                       );
                     });
                   }
-                }
+                },
               );
             }
 
@@ -339,7 +336,7 @@ const ensureTopics = async () => {
             responseCache.delete(key);
           } else {
             console.log(
-              `📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`
+              `📊 Progress for Request ID: ${key}: ${receivedCount}/${requestInfo.expectedResponses} responses received`,
             );
           }
         } catch (error) {
@@ -360,7 +357,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/questions", requireCredits, questionRoutes);
+app.use("/api/questions", questionRoutes);
 app.use("/api/jobDescription", jobDescriptionRoutes);
 
 module.exports = app;

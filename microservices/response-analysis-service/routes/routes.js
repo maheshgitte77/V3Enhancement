@@ -20,6 +20,7 @@ const {
   analyzeProgrammingHTTP,
   generateAssessmentSummaryHTTP,
 } = require("../controllers/controllers");
+const ActionCreditValidator = require("../middleware/ActionCreditValidator.middleware");
 
 /**
  * Express router instance
@@ -76,7 +77,12 @@ const uploadNone = upload.none(); // For text-only requests
  * @returns {Object} data - Analysis results
  * @returns {Object} metadata - Processing metadata (duration, cost, stages)
  */
-router.post("/analyzeMediaResponse", uploadSingle, analyzeMediaResponseV2_5);
+router.post(
+  "/analyzeMediaResponse",
+  uploadSingle,
+  ActionCreditValidator.validateMediaAnalysisCredit,
+  analyzeMediaResponseV2_5,
+);
 
 /**
  * @route POST /api/response/v2.5/analyzeSubjective
@@ -107,7 +113,12 @@ router.post("/analyzeMediaResponse", uploadSingle, analyzeMediaResponseV2_5);
  *
  * @returns {Object} V2.5 response with multi-stage analysis including baseAnswerComparison
  */
-router.post("/analyzeSubjective", uploadNone, analyzeSubjectiveV2_5);
+router.post(
+  "/analyzeSubjective",
+  uploadNone,
+  ActionCreditValidator.validateSubjectiveAnalysisCredit,
+  analyzeSubjectiveV2_5,
+);
 
 /**
  * @route POST /api/response/v2.5/analyzeScreening
@@ -133,7 +144,11 @@ router.post("/analyzeSubjective", uploadNone, analyzeSubjectiveV2_5);
  * @returns {number} failedAnalyses - Number of failed analyses
  * @returns {Array} results - Individual response results
  */
-router.post("/analyzeScreening", analyzeScreeningV2_5);
+router.post(
+  "/analyzeScreening",
+  ActionCreditValidator.validateScreeningSummaryCredit,
+  analyzeScreeningV2_5,
+);
 
 /**
  * @route POST /api/response/v2.5/analyzeProgramming
@@ -163,7 +178,12 @@ router.post("/analyzeScreening", analyzeScreeningV2_5);
  *
  * @returns {Object} Immediate acceptance response (202)
  */
-router.post("/analyzeProgramming", uploadNone, analyzeProgrammingHTTP);
+router.post(
+  "/analyzeProgramming",
+  uploadNone,
+  ActionCreditValidator.validateProgrammingAnalysisCredit,
+  analyzeProgrammingHTTP,
+);
 
 /**
  * @route POST /api/response/v2.5/assessmentSummary
@@ -185,7 +205,12 @@ router.post("/analyzeProgramming", uploadNone, analyzeProgrammingHTTP);
  *
  * @returns {Object} Immediate acceptance response (202)
  */
-router.post("/assessmentSummary", uploadNone, generateAssessmentSummaryHTTP);
+router.post(
+  "/assessmentSummary",
+  uploadNone,
+  ActionCreditValidator.validateAssessmentSummaryCredit,
+  generateAssessmentSummaryHTTP,
+);
 
 /**
  * @route GET /api/response/v2.5/health

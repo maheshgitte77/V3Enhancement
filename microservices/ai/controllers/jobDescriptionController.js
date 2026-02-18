@@ -1,7 +1,6 @@
 const model = require("../utils/googleGenerativeAI");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
-const { calculateProcessingCost } = require("../utils/costCalculator");
 const CreditServiceClient = require("../utils/creditServiceClient");
 
 // Configure multer to handle file uploads
@@ -15,7 +14,7 @@ const generateJobDescription = async (req, res) => {
 
     // ✅ Create a structured prompt for the AI
     const prompt = `Generate a structured job description for a ${jobDetails.seniority.join(
-      ", "
+      ", ",
     )} ${jobDetails.jobTitle} in the ${
       jobDetails.domain
     } domain. Format it with proper headings, bullet points, and a professional tone.
@@ -75,7 +74,7 @@ const generateJobDescription = async (req, res) => {
     } catch (creditError) {
       console.error(
         `❌ AI Credit deduction failed (Non-blocking):`,
-        creditError.message
+        creditError.message,
       );
     }
     // ---------------------------------
@@ -102,7 +101,7 @@ const generateJobDescriptionForJobOverview = async (req, res) => {
     // ✅ Create a structured prompt for AI with Typography
     const prompt = `
 Generate a professional job description for a ${jobDetails.seniority.join(
-      ", "
+      ", ",
     )} ${jobDetails.jobTitle} in the ${jobDetails.domain} domain.
 
 **Output must include only the following sections:**
@@ -140,26 +139,6 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     const inputTokens = usageMetadata.promptTokenCount || 0;
     const outputTokens = usageMetadata.candidatesTokenCount || 0;
 
-    let processingCost = null;
-    if (inputTokens > 0 || outputTokens > 0) {
-      processingCost = calculateProcessingCost(
-        inputTokens,
-        outputTokens,
-        "text" // This is text-only processing
-      );
-
-      console.log(
-        `💰 Job Description (short) processing cost: $${processingCost.totalCost.toFixed(
-          6
-        )}`,
-        {
-          inputTokens,
-          outputTokens,
-          totalCost: processingCost.totalCost,
-        }
-      );
-    }
-
     // --- Credit System Integration ---
     try {
       const clientId = req.body.clientId;
@@ -186,7 +165,7 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     } catch (creditError) {
       console.error(
         `❌ AI Credit deduction failed (Non-blocking):`,
-        creditError.message
+        creditError.message,
       );
     }
     // ---------------------------------
@@ -194,7 +173,6 @@ Generate a professional job description for a ${jobDetails.seniority.join(
     return res.status(200).json({
       message: "Job description generated successfully",
       jobDescription, // This contains only the required sections
-      ...(processingCost && { processingCost }),
     });
   } catch (error) {
     console.error("❌ Error in generateJobDescriptionForJobOverview:", error);
@@ -247,7 +225,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
       const clientId = req.body.clientId;
       const tempId = req.body.tempId || req.body.temp_id;
       console.log(
-        `🔍 JD Skills Debug: clientId="${clientId}", tempId="${tempId}"`
+        `🔍 JD Skills Debug: clientId="${clientId}", tempId="${tempId}"`,
       );
       if (clientId && (inputTokens > 0 || outputTokens > 0)) {
         // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
@@ -270,7 +248,7 @@ Ensure **no duplication** from the given skills. Only extract meaningful and job
     } catch (creditError) {
       console.error(
         `❌ AI Credit deduction failed (Non-blocking):`,
-        creditError.message
+        creditError.message,
       );
     }
     // ---------------------------------
@@ -325,65 +303,42 @@ const generateJobDescriptionFormFile = async (req, res) => {
       const inputTokens = usageMetadata.promptTokenCount || 0;
       const outputTokens = usageMetadata.candidatesTokenCount || 0;
 
-      let processingCost = null;
-      if (inputTokens > 0 || outputTokens > 0) {
-        processingCost = calculateProcessingCost(
-          inputTokens,
-          outputTokens,
-          "text" // Text processing (PDF content is extracted as text)
-        );
-
-        console.log(
-          `💰 Job Description (from file) processing cost: $${processingCost.totalCost.toFixed(
-            6
-          )}`,
-          {
-            fileName: req.file.originalname,
-            numPages: pdfData.numpages,
+      // --- Credit System Integration ---
+      try {
+        const clientId = req.body.clientId;
+        const channelId = req.body.channelId;
+        const tempId = req.body.tempId || req.body.temp_id;
+        if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+          // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
+          const referenceId = `jd_file_${Date.now()}`;
+          await CreditServiceClient.deductAiUsage({
+            clientId,
+            modelId: "gemini-2.0-flash",
+            referenceId,
             inputTokens,
             outputTokens,
-            totalCost: processingCost.totalCost,
-          }
-        );
-
-        // --- Credit System Integration ---
-        try {
-          const clientId = req.body.clientId;
-          const channelId = req.body.channelId;
-          const tempId = req.body.tempId || req.body.temp_id;
-          if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-            // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
-            const referenceId = `jd_file_${Date.now()}`;
-            await CreditServiceClient.deductAiUsage({
-              clientId,
-              modelId: "gemini-2.0-flash",
-              referenceId,
-              inputTokens,
-              outputTokens,
-              meta: {
-                type: "jd_generation_from_file",
-                fileName: req.file.originalname,
-                serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
-              },
-              channelId,
-              tempId,
-            });
-          }
-        } catch (creditError) {
-          console.error(
-            `❌ AI Credit deduction failed (Non-blocking):`,
-            creditError.message
-          );
+            meta: {
+              type: "jd_generation_from_file",
+              fileName: req.file.originalname,
+              serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
+            },
+            channelId,
+            tempId,
+          });
         }
-        // ---------------------------------
+      } catch (creditError) {
+        console.error(
+          `❌ AI Credit deduction failed (Non-blocking):`,
+          creditError.message,
+        );
       }
+      // ---------------------------------
 
       return res.json({
         formattedText,
         documentType: "Analyzed by AI",
         numPages: pdfData.numpages,
         metadata: pdfData.metadata,
-        ...(processingCost && { processingCost }),
       });
     } else {
       return res.json({

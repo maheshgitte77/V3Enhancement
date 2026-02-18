@@ -14,7 +14,7 @@ const Candidate =
   mongoose.models.Candidate || mongoose.model("Candidate", CandidateSchema);
 const CandidateJourney = require("../model/CandidateJourney");
 const creditServiceClient = require("../utils/creditServiceClient");
-const { validateCredits } = require("../middleware/CreditCheck.Middleware");
+const ActionCreditValidator = require("../middleware/ActionCreditValidator.middleware");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -45,8 +45,8 @@ const storage = multer.diskStorage({
     cb(
       null,
       `${file.fieldname}-${uuidv4()}-${Date.now()}${path.extname(
-        file.originalname
-      )}`
+        file.originalname,
+      )}`,
     );
   },
 });
@@ -57,8 +57,8 @@ const validateFiles = (files) => {
   return files.filter(
     (file) =>
       supportedExtensions.has(
-        path.extname(file.originalname).slice(1).toLowerCase()
-      ) && allowedMimeTypes.has(file.mimetype)
+        path.extname(file.originalname).slice(1).toLowerCase(),
+      ) && allowedMimeTypes.has(file.mimetype),
   );
 };
 
@@ -102,9 +102,33 @@ const analyzeResumes = async (req, res) => {
         channelId,
       } = req.body;
 
-      //Check credits - returns false if insufficient (response already sent)
-      const hasCredits = await validateCredits(req, res);
-      if (!hasCredits) return;
+      // Estimate and validate credits for resume analysis
+      const validation =
+        await ActionCreditValidator.validateResumeAnalysisCredits(
+          clientId,
+          validFiles.length,
+        );
+
+      if (!validation.sufficient) {
+        return res.status(402).json({
+          success: false,
+          message: "Insufficient credits for this operation",
+          error: {
+            code: "INSUFFICIENT_CREDITS",
+            required: validation.estimatedCost.totalCost,
+            available: validation.balance,
+            shortfall: validation.estimatedCost.totalCost - validation.balance,
+          },
+          estimatedCost: validation.estimatedCost,
+        });
+      }
+
+      // Attach estimate for logging
+      if (validation.estimatedCost) {
+        console.log(
+          `✅ Credit validation passed for resume analysis (Client: ${clientId}, Resumes: ${validFiles.length}, Estimated: $${validation.estimatedCost.totalCost.toFixed(6)})`,
+        );
+      }
 
       // Use existing mongoose connection for schemaless operations
       const db = mongoose.connection.db;
@@ -118,7 +142,7 @@ const analyzeResumes = async (req, res) => {
         .collection("clients")
         .findOne(
           { _id: clientObjectId },
-          { projection: { coolingPeriod: 1, companyName: 1 } }
+          { projection: { coolingPeriod: 1, companyName: 1 } },
         );
       const job = await db
         .collection("jobs")
@@ -138,10 +162,10 @@ const analyzeResumes = async (req, res) => {
       const isLive = live ? live : false;
 
       const primarySkillList = new Set(
-        primarySkills?.split(",").map((s) => s.trim())
+        primarySkills?.split(",").map((s) => s.trim()),
       );
       const secondarySkillList = new Set(
-        secondarySkills?.split(",").map((s) => s.trim())
+        secondarySkills?.split(",").map((s) => s.trim()),
       );
 
       // Send immediate acknowledgment only for multiple resumes
@@ -153,7 +177,7 @@ const analyzeResumes = async (req, res) => {
               activeRequestId: requestId,
               requestStatus: "Pending",
             },
-          }
+          },
         );
         res.status(200).json({
           message: "Resume processing initiated",
@@ -227,7 +251,7 @@ const analyzeResumes = async (req, res) => {
             channelId, // For credit tracking
           },
           "resume-screening",
-          validFiles.indexOf(file)
+          validFiles.indexOf(file),
         );
       }
 
@@ -249,7 +273,7 @@ const analyzeResumes = async (req, res) => {
 const addJobApplicationJourneyStage = async (
   jobApplicationId,
   stage,
-  addedBy
+  addedBy,
 ) => {
   try {
     if (!jobApplicationId) return;
@@ -299,7 +323,7 @@ const addJobApplicationJourneyStage = async (
           $set: {
             updatedAt: new Date(),
           },
-        }
+        },
       );
     }
   } catch (error) {
@@ -360,7 +384,7 @@ const addToJobApplication = async (req, res) => {
           (record.email === email &&
             record.jobId === jobId &&
             record.status === "Valid") ||
-          changeStatus === "Valid"
+          changeStatus === "Valid",
       );
 
       if (matchingRecord) {
@@ -438,7 +462,7 @@ const addToJobApplication = async (req, res) => {
       console.error(
         "Error adding CandidateJourney entries:",
         error.message,
-        error.stack
+        error.stack,
       );
     }
 
@@ -560,11 +584,11 @@ const addToJobApplication = async (req, res) => {
               preferredJobRole: toArray(record.preferredJobRole),
               preferredSalary: normalizeSalary(
                 record.preferredSalary ?? record.expectedSalary,
-                record.currency
+                record.currency,
               ),
               currentSalary: normalizeSalary(
                 record.currentSalary,
-                record.currency
+                record.currency,
               ),
               hrSource: record.hrSource?.trim() || undefined,
               willingnessToRelocate:
@@ -599,7 +623,7 @@ const addToJobApplication = async (req, res) => {
             // Ensure we have at least name and email
             if (!candidateDoc.name || !candidateDoc.email) {
               console.warn(
-                `Missing required fields for candidate: ${record.email}`
+                `Missing required fields for candidate: ${record.email}`,
               );
               return null; // Skip this record
             }
@@ -615,7 +639,7 @@ const addToJobApplication = async (req, res) => {
           } catch (recordError) {
             console.error(
               `Error processing candidate record for ${record.email}:`,
-              recordError.message
+              recordError.message,
             );
             return null; // Skip this record
           }
@@ -629,7 +653,7 @@ const addToJobApplication = async (req, res) => {
         } catch (bulkWriteError) {
           console.error(
             "Error in bulk write operation:",
-            bulkWriteError.message
+            bulkWriteError.message,
           );
           // Try individual operations as fallback
           for (const op of candidateBulkOps) {
@@ -638,7 +662,7 @@ const addToJobApplication = async (req, res) => {
             } catch (individualError) {
               console.error(
                 `Failed to process individual candidate operation:`,
-                individualError.message
+                individualError.message,
               );
             }
           }
@@ -648,7 +672,7 @@ const addToJobApplication = async (req, res) => {
       console.error(
         "Error adding to Candidate collection:",
         error.message,
-        error.stack
+        error.stack,
       );
     }
 
@@ -659,7 +683,7 @@ const addToJobApplication = async (req, res) => {
       .collection("jobs")
       .updateOne(
         { _id: new ObjectId(jobId) },
-        { $set: { activeRequestId: "", requestStatus: "Completed" } }
+        { $set: { activeRequestId: "", requestStatus: "Completed" } },
       );
 
     // Prepare candidate list for notification API
@@ -677,27 +701,27 @@ const addToJobApplication = async (req, res) => {
           expiryDate: ExpiredOn,
           candidateList,
           channelId, // For credit tracking
-        }
+        },
       );
     } catch (error) {
       console.error(
         "Error notifying external service:",
         error.message,
-        error.stack
+        error.stack,
       );
     }
     res.status(200).json({
       message: "Successfully added records to JobApplication",
       addedRecords: recordsToAdd.length,
       notFoundEmails: notFoundEmails.filter(
-        (email) => !recordsToAdd.some((record) => record.email === email)
+        (email) => !recordsToAdd.some((record) => record.email === email),
       ),
     });
   } catch (error) {
     console.error(
       "Error adding to JobApplication:",
       error.message,
-      error.stack
+      error.stack,
     );
     res.status(500).json({ error: "Failed to add records to JobApplication" });
   }
@@ -777,8 +801,8 @@ const approveCandidates = async (req, res) => {
 
     notFoundEmails.push(
       ...emails.filter(
-        (email) => !updatedRecords.some((record) => record.email === email)
-      )
+        (email) => !updatedRecords.some((record) => record.email === email),
+      ),
     );
 
     if (updatedRecords.length === 0) {
@@ -854,7 +878,7 @@ const updateCandidate = async (req, res) => {
 
     const candidateIndex = jobDataList.findIndex(
       (record) =>
-        record.resumeFileId?.toString() === id && record.jobId === jobId
+        record.resumeFileId?.toString() === id && record.jobId === jobId,
     );
 
     if (candidateIndex === -1) {
@@ -942,7 +966,7 @@ const deleteCandidates = async (req, res) => {
             activeRequestId: "",
             requestStatus: "Completed",
           },
-        }
+        },
       );
     }
 
