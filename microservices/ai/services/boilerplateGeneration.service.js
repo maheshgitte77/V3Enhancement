@@ -156,6 +156,7 @@ Global constraints:
 7) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim();
 8) ABSOLUTE BAN for JavaScript: no readline/createInterface/readline.on.
 9) Use real newline chars in code.
+10) Output ONLY the JSON object: no text before/after, no markdown fences, no comments outside the code.
 
 Return ONLY valid JSON:
 {
