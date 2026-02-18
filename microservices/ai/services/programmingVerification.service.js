@@ -469,27 +469,57 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
 
   const implStartIdx = code.indexOf(BLOCK_MARKERS.implStart);
   const implEndIdx = code.indexOf(BLOCK_MARKERS.implEnd);
-  if (implStartIdx !== -1 && implEndIdx !== -1 && implEndIdx > implStartIdx) {
+  const startLineEnd = code.indexOf("\n", implStartIdx);
+  const endLineStart = code.lastIndexOf("\n", implEndIdx);
+  if (
+    implStartIdx !== -1 &&
+    implEndIdx !== -1 &&
+    implEndIdx > implStartIdx &&
+    startLineEnd !== -1 &&
+    endLineStart >= 0 &&
+    endLineStart > startLineEnd
+  ) {
     const beforeStart = code.substring(0, implStartIdx);
-    const startLineEnd = code.indexOf("\n", implStartIdx);
-    const endLineStart = code.lastIndexOf("\n", implEndIdx);
-    const startLine = code.substring(
+    const startMarkerLine = code.substring(
       implStartIdx,
-      startLineEnd === -1 ? implStartIdx + BLOCK_MARKERS.implStart.length : startLineEnd,
+      startLineEnd === -1 ? code.length : startLineEnd,
     );
-    const endLine = code.substring(endLineStart + 1, code.length);
-    const indent = (() => {
-      const afterStart = code.substring(startLineEnd + 1, endLineStart);
-      const match = afterStart.match(/\n(\s*)\S/);
-      if (match?.[1] !== undefined) return match[1].length;
-      const startIndent = (startLine.match(/^(\s*)/) || [null, ""])[1];
-      return startIndent.length + (family === "python" ? 4 : 2);
-    })();
-    const replacement = `${startLine}\n${indentLines(logic, indent)}\n${endLine}`;
-    return {
-      mergedCode: `${beforeStart}${replacement}`,
-      injected: true,
-    };
+    const endMarkerLine = code.substring(endLineStart + 1, code.length);
+    // Block content = everything between the two marker lines (the solve function body + signature + closing brace)
+    const blockContent = code.substring(startLineEnd + 1, endLineStart);
+    const blockLines = blockContent.split("\n").filter((l) => l !== undefined);
+    if (blockLines.length === 0) {
+      code = String(code || "");
+    } else {
+      const signatureLine = blockLines[0];
+      const hasClosingBrace =
+        family !== "python" &&
+        blockLines.length > 1 &&
+        /^\s*\}\s*$/.test(blockLines[blockLines.length - 1]);
+      const closingLine = hasClosingBrace ? blockLines[blockLines.length - 1] : "";
+      const bodyLines = hasClosingBrace
+        ? blockLines.slice(1, blockLines.length - 1)
+        : blockLines.slice(1);
+      const bodyIndent =
+        bodyLines.length > 0 && bodyLines[0].match(/^(\s*)/)
+          ? (bodyLines[0].match(/^(\s*)/) || [null, "    "])[1].length
+          : family === "python"
+            ? 4
+            : 4;
+      const replacement =
+        startMarkerLine +
+        "\n" +
+        signatureLine +
+        "\n" +
+        indentLines(logic, bodyIndent) +
+        (closingLine ? "\n" + closingLine : "") +
+        "\n" +
+        endMarkerLine;
+      return {
+        mergedCode: `${beforeStart}${replacement}`,
+        injected: true,
+      };
+    }
   }
 
   code = String(code || "");
