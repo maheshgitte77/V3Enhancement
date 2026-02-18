@@ -506,6 +506,49 @@ const normalizePythonBodyForInjection = (text) => {
         .trim();
 };
 
+/**
+ * Fix Python merged code indentation before sending to Judge0.
+ * Ensures: after any line ending with ':', the next non-empty line is indented more (fixes "expected an indented block").
+ * Does not pad elif/else/except/finally (sibling clauses); only pads lines that are missing body indent.
+ */
+const fixPythonIndentationForJudge0 = (code) => {
+    if (!code || typeof code !== "string") return code;
+    const lines = code.split("\n");
+    const out = [];
+    let requiredIndent = null;
+    const siblingBlockStart = /^(elif|else|except|finally)\b/;
+    for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) {
+            out.push(raw);
+            continue;
+        }
+        const currentIndent = raw.match(/^(\s*)/)[1].length;
+        const content = raw.trimStart();
+        let indentToUse = currentIndent;
+        if (requiredIndent !== null && currentIndent < requiredIndent) {
+            if (siblingBlockStart.test(content)) {
+                indentToUse = currentIndent;
+                out.push(raw);
+            } else {
+                indentToUse = requiredIndent;
+                out.push(" ".repeat(indentToUse) + content);
+            }
+        } else {
+            out.push(raw);
+        }
+        if (trimmed.startsWith("#")) {
+            requiredIndent = null;
+        } else if (trimmed.endsWith(":")) {
+            requiredIndent = indentToUse + 4;
+        } else {
+            requiredIndent = null;
+        }
+    }
+    return out.join("\n");
+};
+
 const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName }) => {
     const family = detectLanguageFamily(languageName);
     const logic = sanitizeText(todoReplacement);
@@ -1328,11 +1371,16 @@ const verifyOneProgrammingQuestion = async ({
 
         const runnableExecutions = languageStates
             .filter((ls) => ls.mergedCode && ls.mergedCode.length > 0)
-            .map((ls) => ({
-                languageId: ls.languageId,
-                languageName: ls.languageName,
-                code: ls.mergedCode,
-            }));
+            .map((ls) => {
+                const isPython = detectLanguageFamily(ls.languageName) === "python";
+                const codeToSend =
+                    isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+                return {
+                    languageId: ls.languageId,
+                    languageName: ls.languageName,
+                    code: codeToSend,
+                };
+            });
 
         // Log boilerplate, solution block, and full merged code per language for analysis/debugging
         languageStates.forEach((ls) => {
@@ -1350,12 +1398,14 @@ const verifyOneProgrammingQuestion = async ({
                 ls.languageId,
                 ls.logicBlock,
             );
+            const isPython = detectLanguageFamily(ls.languageName) === "python";
+            const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
             vLogCode(
                 "code-merged-judge0",
                 "MERGED_CODE_SENT_TO_JUDGE0",
                 ls.languageName,
                 ls.languageId,
-                ls.mergedCode,
+                loggedMerged,
             );
         });
 
