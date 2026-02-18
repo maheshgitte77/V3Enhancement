@@ -166,7 +166,7 @@ const generateScreeningQuestion = async (req, res) => {
 
     console.log("Question Generation Temp Id", tempId);
 
-    const REQUEST_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes (question gen + verification)
+    const REQUEST_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (question gen + verification)
     const timeoutId = setTimeout(() => {
       const info = req.pendingRequests.get(requestId);
       if (info) {

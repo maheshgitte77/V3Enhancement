@@ -1269,6 +1269,19 @@ const generateCompleteSolutionWithBoilerplate = async ({
     language,
 }) => {
     const langInstruction = getLanguageInstruction(language.languageName);
+    const isPython = detectLanguageFamily(language.languageName) === "python";
+    const pythonIndentWarning = isPython ? `
+CRITICAL PYTHON INDENTATION RULES:
+- Python uses indentation (spaces) to define code blocks - this is MANDATORY
+- All code inside a function must be indented relative to the function definition
+- All code inside loops/conditionals must be indented relative to the loop/conditional statement
+- Use 4 spaces per indentation level (consistent with the boilerplate)
+- Ensure ALL lines of code inside the solve function are properly indented
+- Helper functions defined inside solve() must be indented correctly
+- Every line after a colon (:) must be indented
+- DO NOT place code outside function definitions - all logic must be inside the solve function
+` : "";
+    
     const prompt = `
 You are completing a programming solution using the provided boilerplate code.
 
@@ -1278,7 +1291,7 @@ CRITICAL INSTRUCTIONS:
 - ONLY add the solution logic inside the implementation block (between HC_IMPLEMENTATION_BLOCK_START and HC_IMPLEMENTATION_BLOCK_END)
 - The boilerplate code is correct and must remain exactly as provided
 - Complete the solution by implementing the logic inside the solve function/method
-
+${pythonIndentWarning}
 Question:
 ${sanitizeText(question.question || "")}
 
@@ -1294,6 +1307,7 @@ ${langInstruction}
 
 Return ONLY the complete solution code (boilerplate + your solution logic merged together).
 The boilerplate code must remain EXACTLY as provided, with only the solution logic added inside the implementation block.
+${isPython ? "CRITICAL: Ensure all Python code is properly indented - every line inside functions/loops/conditionals must be indented correctly." : ""}
 
 Return ONLY JSON:
 {
@@ -1629,11 +1643,16 @@ const verifyOneProgrammingQuestion = async ({
         summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
     });
 
+    // Check if any language passes all test cases (5/5) - if so, test cases are correct, skip re-evaluation
+    const hasAnyFullPass = languagePassSummary.some((lang) => lang.passed === lang.total && lang.total > 0);
+    
     // Check if any language doesn't pass all test cases (even if 70%+)
     const hasPartialPass = languagePassSummary.some((lang) => lang.passed < lang.total && lang.total > 0);
     
-    // PHASE 3.5: Re-evaluate test cases if any language has partial pass
-    if (hasPartialPass) {
+    // PHASE 3.5: Re-evaluate test cases ONLY if:
+    // 1. Some languages have partial pass (not all 5/5)
+    // 2. AND no language has full pass (5/5) - if any language passes 5/5, test cases are correct
+    if (hasPartialPass && !hasAnyFullPass) {
         vLog("verify-question", "Phase 3.5: Re-evaluating test cases (some languages have partial pass)", {
             requestId,
             consumerId,
@@ -1706,12 +1725,18 @@ const verifyOneProgrammingQuestion = async ({
                 });
             }
         } catch (error) {
-            vLog("verify-question", "Test case re-evaluation failed", {
+            vLog("verify-question", "Phase 3.5: Test case re-evaluation failed", {
                 requestId,
                 consumerId,
                 error: error.message,
             });
         }
+    } else if (hasAnyFullPass) {
+        vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (at least one language passed 5/5 - test cases are correct)", {
+            requestId,
+            consumerId,
+            languagesWithFullPass: languagePassSummary.filter((lang) => lang.passed === lang.total).map((lang) => lang.languageName).join(", "),
+        });
     }
 
     // PHASE 3.6: Generate complete solution for failed languages using original boilerplate
