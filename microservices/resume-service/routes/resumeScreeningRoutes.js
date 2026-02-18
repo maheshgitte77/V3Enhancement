@@ -13,6 +13,7 @@ const {
 const router = express.Router();
 
 router.post("/analyzeResumes", analyzeResumes);
+
 router.get("/getRequestData/:requestId", getRequestData);
 router.post("/addToJobApplication/:requestId", addToJobApplication);
 router.post("/removeData/:requestId", removeData);

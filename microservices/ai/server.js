@@ -4,10 +4,7 @@ const cors = require("cors");
 const questionRoutes = require("./routes/questionsRoutes");
 const jobDescriptionRoutes = require("./routes/jobDescriptionRoutes");
 const CreditServiceClient = require("./utils/creditServiceClient");
-const {
-  requireCredits,
-  checkCredits,
-} = require("./middleware/CreditCheck.Middleware");
+
 require("dotenv").config();
 
 const app = express();
@@ -23,10 +20,10 @@ app.use(
       "https://hirecorrecto.com",
     ],
     credentials: true,
-  })
+  }),
 );
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
-  broker.trim()
+  broker.trim(),
 );
 console.log(`🔗 Connecting to Kafka Brokers:`, kafkaBrokers);
 
@@ -102,7 +99,7 @@ const ensureTopics = async () => {
           // Handle error responses (count as received so client gets a response)
           if (responseData.error) {
             console.error(
-              `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`
+              `❌ Error response received for requestId: ${key}, category: ${responseData.category}, questionType: ${responseData.questionType}`,
             );
             const requestInfo = pendingRequests.get(key);
             if (requestInfo) {
@@ -112,7 +109,8 @@ const ensureTopics = async () => {
               ) {
                 if (requestInfo.timeoutId) clearTimeout(requestInfo.timeoutId);
                 requestInfo.res.status(500).json({
-                  message: responseData.message || "Boilerplate generation failed",
+                  message:
+                    responseData.message || "Boilerplate generation failed",
                   requestId: key,
                 });
                 pendingRequests.delete(key);
@@ -133,7 +131,7 @@ const ensureTopics = async () => {
                 requestInfo.expectedResponses
               ) {
                 console.log(
-                  `✅ All responses received for Request ID: ${key} (including errors) - sending back to client`
+                  `✅ All responses received for Request ID: ${key} (including errors) - sending back to client`,
                 );
                 const categoryCache = responseCache.get(key) || {};
                 const questionsArray = Object.values(categoryCache).map(
@@ -141,7 +139,7 @@ const ensureTopics = async () => {
                     skillName: cat.skillName,
                     skillType: cat.skillType,
                     questions: cat.questions,
-                  })
+                  }),
                 );
                 if (requestInfo.timeoutId) {
                   clearTimeout(requestInfo.timeoutId);
@@ -172,7 +170,9 @@ const ensureTopics = async () => {
             if (requestInfo.timeoutId) {
               clearTimeout(requestInfo.timeoutId);
             }
-            requestInfo.res.status(200).json(responseData.boilerplateResponse || {});
+            requestInfo.res
+              .status(200)
+              .json(responseData.boilerplateResponse || {});
             pendingRequests.delete(key);
             return;
           }
@@ -259,10 +259,10 @@ const ensureTopics = async () => {
               questionObj.Programming &&
               Array.isArray(questionObj.Programming)
             ) {
-                const clientId = requestInfo.clientId;
-                const jobId = requestInfo.jobId;
-                const trackingId = jobId || clientId;
-                if (trackingId) {
+              const clientId = requestInfo.clientId;
+              const jobId = requestInfo.jobId;
+              const trackingId = jobId || clientId;
+              if (trackingId) {
                 // Extract logic categories from responseData if provided, otherwise identify from titles
                 let generatedCategories = responseData.logicCategories || [];
 
@@ -274,7 +274,7 @@ const ensureTopics = async () => {
                     if (q.questionTitle) {
                       // Use robust category identification function
                       const identifiedCategory = identifyCategoryFromTitle(
-                        q.questionTitle
+                        q.questionTitle,
                       );
                       if (identifiedCategory) {
                         identifiedCategoriesSet.add(identifiedCategory);
@@ -290,28 +290,34 @@ const ensureTopics = async () => {
                   await categoryTracker.addUsedCategories(
                     trackingId,
                     categoryName,
-                    generatedCategories
+                    generatedCategories,
                   );
-                  await categoryTracker.refreshTracking(trackingId, categoryName); // Refresh timestamp
+                  await categoryTracker.refreshTracking(
+                    trackingId,
+                    categoryName,
+                  ); // Refresh timestamp
                   console.log(
                     `📊 Tracked Programming categories for ${categoryName}: ${generatedCategories.join(
-                      ", "
-                    )}`
+                      ", ",
+                    )}`,
                   );
                 } else {
                   // Even if no categories identified, refresh tracking to extend expiration
-                  await categoryTracker.refreshTracking(trackingId, categoryName);
+                  await categoryTracker.refreshTracking(
+                    trackingId,
+                    categoryName,
+                  );
                 }
 
                 // Track used concepts (logic signatures) to block duplicates like repeated "min element" / "palindrome"
                 const conceptSigs = questionObj.Programming.map((q) =>
-                  conceptSignatureFromTitle(q.questionTitle)
+                  conceptSignatureFromTitle(q.questionTitle),
                 ).filter(Boolean);
                 if (conceptSigs.length > 0) {
                   await categoryTracker.addUsedConcepts(
                     trackingId,
                     categoryName,
-                    conceptSigs
+                    conceptSigs,
                   );
                 }
               }
@@ -323,8 +329,7 @@ const ensureTopics = async () => {
 
           // Check if we've received all expected responses (success + error)
           if (
-            requestInfo.receivedResponseCount ===
-            requestInfo.expectedResponses
+            requestInfo.receivedResponseCount === requestInfo.expectedResponses
           ) {
             console.log(`✅ All responses received for Request ID: ${key}`);
 
@@ -332,7 +337,7 @@ const ensureTopics = async () => {
             if (requestInfo.tokenUsage) {
               console.log(`\n📊 Token Usage Summary for Request ${key}:`);
               console.log(
-                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`
+                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`,
               );
 
               // --- Credit System Integration ---
@@ -363,12 +368,12 @@ const ensureTopics = async () => {
                   console.log(channelId, "channelId");
                   console.log(jobId, "jobId");
                   console.log(
-                    `💰 AI Credits deducted for Request ${key} (ClientId: ${clientId})`
+                    `💰 AI Credits deducted for Request ${key} (ClientId: ${clientId})`,
                   );
                 } catch (creditError) {
                   console.error(
                     `❌ AI Credit deduction failed for Request ${key}:`,
-                    creditError.message
+                    creditError.message,
                   );
                 }
               }
@@ -378,17 +383,17 @@ const ensureTopics = async () => {
               Object.entries(requestInfo.tokenUsage.byType).forEach(
                 ([type, usage]) => {
                   console.log(
-                    `  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`
+                    `  ${type}: ${usage.totalTokens} tokens (Prompt: ${usage.promptTokens}, Completion: ${usage.completionTokens})`,
                   );
                   if (usage.batches && usage.batches.length > 0) {
                     console.log(`    Batches:`);
                     usage.batches.forEach((batch) => {
                       console.log(
-                        `      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`
+                        `      Batch ${batch.batchIndex}: ${batch.totalTokens} tokens (Prompt: ${batch.promptTokens}, Completion: ${batch.completionTokens})`,
                       );
                     });
                   }
-                }
+                },
               );
             }
 
@@ -412,7 +417,7 @@ const ensureTopics = async () => {
             responseCache.delete(key);
           } else {
             console.log(
-              `📊 Progress for Request ID: ${key}: ${requestInfo.receivedResponseCount}/${requestInfo.expectedResponses} responses received`
+              `📊 Progress for Request ID: ${key}: ${requestInfo.receivedResponseCount}/${requestInfo.expectedResponses} responses received`,
             );
           }
         } catch (error) {
@@ -434,7 +439,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/questions", requireCredits, questionRoutes);
+app.use("/api/questions", questionRoutes);
 app.use("/api/jobDescription", jobDescriptionRoutes);
 
 module.exports = app;

@@ -6,13 +6,23 @@ const {
   generateJobDescriptionFormFile,
   upload,
 } = require("../controllers/jobDescriptionController");
-const { requireCredits } = require("../middleware/CreditCheck.Middleware");
+const {
+  validateJobDescriptionCredit,
+} = require("../middleware/ActionCreditValidator.middleware");
 
 const router = express.Router();
 
-router.post("/generate", requireCredits, generateJobDescription);
-router.post("/skills", requireCredits, generateSkillsFromJobDescription);
-router.post("/short", requireCredits, generateJobDescriptionForJobOverview);
+router.post("/generate", validateJobDescriptionCredit, generateJobDescription);
+router.post(
+  "/skills",
+  validateJobDescriptionCredit,
+  generateSkillsFromJobDescription,
+);
+router.post(
+  "/short",
+  validateJobDescriptionCredit,
+  generateJobDescriptionForJobOverview,
+);
 // Note: /file route doesn't use requireCredits middleware because multer needs to parse
 // the multipart form data first. Credit deduction is handled in the controller.
 router.post("/file", upload.single("pdfFile"), generateJobDescriptionFormFile);
