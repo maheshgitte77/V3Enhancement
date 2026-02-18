@@ -1257,6 +1257,66 @@ const isLanguageVerified = (languageResult) => {
 };
 
 /**
+ * Re-evaluate test cases when any language doesn't pass all test cases
+ * Returns: { testCasesCorrect: boolean, correctedTestCases?: [], reason: "" }
+ */
+const reEvaluateTestCases = async ({
+    genAI,
+    modelName,
+    question,
+    testCases,
+    languagePassSummary,
+}) => {
+    // Prepare language summary for AI (only languageName, passed, total)
+    const langSummary = languagePassSummary.map((lang) => ({
+        languageName: lang.languageName,
+        passed: lang.passed,
+        total: lang.total,
+    }));
+
+    const prompt = `
+You are analyzing test cases for a programming question. Multiple languages are showing partial test case failures (not all 5 test cases passed).
+
+Question:
+${sanitizeText(question.question || "")}
+
+Current Test Cases:
+${JSON.stringify(testCases || [], null, 2)}
+
+Language Execution Results:
+${JSON.stringify(langSummary, null, 2)}
+
+Analyze: Are the test cases correct? If multiple languages are failing the same test cases, or if the expected outputs don't match the problem description, the test cases may be incorrect.
+
+Return ONLY JSON:
+{
+  "testCasesCorrect": true or false,
+  "correctedTestCases": [...], // Only if testCasesCorrect is false, array of { input: "...", output: "..." }
+  "reason": "explanation"
+}
+
+Rules:
+- testCasesCorrect = true if test cases are correct and failures are due to code issues
+- testCasesCorrect = false if test cases have wrong expected outputs
+- correctedTestCases: Array of test case objects with input and output fields (same count as original)
+- If test cases are correct, return empty array for correctedTestCases
+`;
+    
+    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
+    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
+    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const parsed = safeJsonParse(text);
+    
+    return {
+        testCasesCorrect: parsed?.testCasesCorrect === true,
+        correctedTestCases: Array.isArray(parsed?.correctedTestCases) && parsed.correctedTestCases.length > 0
+            ? parsed.correctedTestCases
+            : null,
+        reason: parsed?.reason || "Analysis completed",
+    };
+};
+
+/**
  * Analyze failure to determine if issue is with test cases or boilerplate code
  * Returns: { issueType: "testCase" | "boilerplate", correctedTestCases?: [], correctedBoilerplate?: "", reason: "" }
  */
@@ -1504,7 +1564,91 @@ const verifyOneProgrammingQuestion = async ({
         summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
     });
 
-    // Early exit: If all languages verified, return immediately
+    // Check if any language doesn't pass all test cases (even if 70%+)
+    const hasPartialPass = languagePassSummary.some((lang) => lang.passed < lang.total && lang.total > 0);
+    
+    // PHASE 3.5: Re-evaluate test cases if any language has partial pass
+    if (hasPartialPass) {
+        vLog("verify-question", "Phase 3.5: Re-evaluating test cases (some languages have partial pass)", {
+            requestId,
+            consumerId,
+            languagesWithPartialPass: languagePassSummary.filter((lang) => lang.passed < lang.total).length,
+        });
+
+        try {
+            const testCaseEvaluation = await reEvaluateTestCases({
+                genAI,
+                modelName,
+                question: workingQuestion,
+                testCases: workingQuestion.testCases,
+                languagePassSummary,
+            });
+
+            if (!testCaseEvaluation.testCasesCorrect && testCaseEvaluation.correctedTestCases) {
+                vLog("verify-question", "Test cases are incorrect, applying corrections", {
+                    requestId,
+                    consumerId,
+                    reason: testCaseEvaluation.reason,
+                    correctedCount: testCaseEvaluation.correctedTestCases.length,
+                });
+
+                // Replace test cases
+                workingQuestion.testCases = normalizeTestCases(testCaseEvaluation.correctedTestCases);
+
+                // Re-execute all languages with corrected test cases
+                const reExecResults = await executeAgainstJudge({
+                    languageExecutions: runnableExecutions,
+                    testCases: workingQuestion.testCases,
+                    timeLimit: workingQuestion.timeLimit,
+                    memoryLimit: workingQuestion.memoryLimit,
+                });
+
+                // Re-analyze results
+                const { allPass: reAllPass, languagePassSummary: reLanguagePassSummary } = summarizeResults(reExecResults);
+                const reExecutionMap = new Map(reExecResults.map((res) => [Number(res.languageId), res]));
+
+                // Update verified languages
+                verifiedLanguageIds.clear();
+                failingLanguages.length = 0;
+
+                reLanguagePassSummary.forEach((langResult) => {
+                    if (isLanguageVerified(langResult)) {
+                        verifiedLanguageIds.add(langResult.languageId);
+                        const langState = languageStates.find((ls) => ls.languageId === langResult.languageId);
+                        if (langState) langState.verified = true;
+                    } else {
+                        failingLanguages.push(langResult);
+                    }
+                });
+
+                // Update languagePassSummary for final status
+                languagePassSummary.length = 0;
+                languagePassSummary.push(...reLanguagePassSummary);
+
+                vLog("verify-question", "Re-execution completed after test case correction", {
+                    requestId,
+                    consumerId,
+                    verifiedAfterCorrection: verifiedLanguageIds.size,
+                    failingAfterCorrection: failingLanguages.length,
+                    summary: reLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+                });
+            } else {
+                vLog("verify-question", "Test cases are correct, failures are due to code issues", {
+                    requestId,
+                    consumerId,
+                    reason: testCaseEvaluation.reason,
+                });
+            }
+        } catch (error) {
+            vLog("verify-question", "Test case re-evaluation failed", {
+                requestId,
+                consumerId,
+                error: error.message,
+            });
+        }
+    }
+
+    // Early exit: If all languages verified after test case correction, return immediately
     if (failingLanguages.length === 0) {
         const allLanguagesVerified = languagePassSummary.length > 0 && languagePassSummary.every((lang) =>
             verifiedLanguageIds.has(lang.languageId),
