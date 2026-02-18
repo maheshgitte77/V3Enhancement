@@ -37,6 +37,21 @@ const vLog = (step, message, meta = {}) => {
   );
 };
 
+const MAX_CODE_LOG_CHARS = 8000;
+
+const vLogCode = (step, blockType, languageName, languageId, code) => {
+  if (!VERIFICATION_LOG_ENABLED) return;
+  const raw = String(code || "").trim();
+  const truncated = raw.length > MAX_CODE_LOG_CHARS;
+  const content = truncated ? raw.slice(0, MAX_CODE_LOG_CHARS) + "\n... (truncated)" : raw;
+  console.log(
+    `[ProgrammingVerification][${step}] ${blockType} | language=${languageName} languageId=${languageId} length=${raw.length}`,
+  );
+  console.log("---BEGIN CODE---");
+  console.log(content);
+  console.log("---END CODE---");
+};
+
 vLog("config", "Verification execution endpoints resolved", {
   bulkUrl: BULK_EXECUTION_URL,
   singleUrl: SINGLE_EXECUTION_URL,
@@ -1185,6 +1200,31 @@ const verifyOneProgrammingQuestion = async ({
         languageName: ls.languageName,
         code: ls.mergedCode,
       }));
+
+    // Log boilerplate, solution block, and full merged code per language for analysis/debugging
+    languageStates.forEach((ls) => {
+      vLogCode(
+        "code-boilerplate",
+        "BOILERPLATE",
+        ls.languageName,
+        ls.languageId,
+        ls.codeSnippet,
+      );
+      vLogCode(
+        "code-solution-block",
+        "SOLUTION_BLOCK",
+        ls.languageName,
+        ls.languageId,
+        ls.logicBlock,
+      );
+      vLogCode(
+        "code-merged-judge0",
+        "MERGED_CODE_SENT_TO_JUDGE0",
+        ls.languageName,
+        ls.languageId,
+        ls.mergedCode,
+      );
+    });
 
     let executionResults = [];
     if (runnableExecutions.length > 0) {
