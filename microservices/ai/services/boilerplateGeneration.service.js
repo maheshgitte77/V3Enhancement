@@ -17,6 +17,57 @@ const sanitize = (value) =>
     .replace(/\r/g, "\n")
     .trim();
 
+/** Strip commented example/pseudo-solution lines from implementation block for clean boilerplate. */
+const stripCommentedExampleCode = (code) => {
+  const implStart = BLOCK_MARKERS.implStart;
+  const implEnd = BLOCK_MARKERS.implEnd;
+  const startIdx = code.indexOf(implStart);
+  const endIdx = code.indexOf(implEnd);
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return code;
+
+  const before = code.substring(0, startIdx);
+  const after = code.substring(endIdx);
+  const blockContent = code.substring(startIdx, endIdx);
+  const lines = blockContent.split("\n");
+  const cleaned = [];
+  let seenTodo = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    const isMarker = trimmed.includes(implStart) || trimmed.includes(implEnd);
+    const isTodo = /TODO|Implement the solution/i.test(trimmed);
+    const isCommentLike = /^\s*(\/\/|#|\*|--|%|\(\*)/.test(line) || trimmed.startsWith("*/");
+    const isExampleComment =
+      isCommentLike &&
+      /Example\s*:|Example\s+loop|potentialBalance|currentBalance|OVERDRAFT_FEE|Transaction declined|Apply overdraft|Return the final/i.test(
+        trimmed
+      );
+    const isLongExplanatory =
+      isCommentLike &&
+      (/problem asks|track the balance|non-negative value|withdrawal would cause|overdraft fee|overdraftLimit/i.test(
+        trimmed
+      ) ||
+        (trimmed.length > 55 && !isTodo));
+
+    if (isMarker || !isCommentLike) {
+      cleaned.push(line);
+    } else if (isExampleComment || isLongExplanatory) {
+      continue;
+    } else if (isTodo && !seenTodo) {
+      seenTodo = true;
+      cleaned.push(line);
+    } else if (isCommentLike && !isTodo) {
+      continue;
+    } else {
+      cleaned.push(line);
+    }
+  }
+
+  return before + cleaned.join("\n") + after;
+};
+
 const normalizeJavaScriptJudge0Input = (code = "") => {
   const source = String(code || "");
   const hasReadline =
@@ -88,6 +139,8 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
           `${indent}${commentPrefix} ${BLOCK_MARKERS.implStart}\n${indent}${commentPrefix} TODO: Implement the solution here\n${indent}${commentPrefix} ${BLOCK_MARKERS.implEnd}`,
       );
     }
+    cleaned = stripCommentedExampleCode(cleaned);
+
     if (!cleaned.includes(BLOCK_MARKERS.inputStart)) {
       const lines = cleaned.split("\n");
       const inputLine = lines.findIndex((line) =>
@@ -152,16 +205,17 @@ Language-wise Judge0 instructions:
 ${instructionsBlock}
 
 Global constraints:
-1) Do NOT include solution logic.
-2) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
-3) MUST keep two explicit sections in each language:
+1) Do NOT include solution logic. NO commented example code, pseudo-solutions, or explanatory comments.
+2) Implementation block must be MINIMAL: only function signature, one line "// TODO: Implement the solution", and placeholder return (e.g. return 0; or pass). Do NOT add "Example:", "Example loop:", or any commented pseudo-code - it can cause execution issues.
+3) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
+4) MUST keep two explicit sections in each language:
    A) Input section in entrypoint (main) wrapped by markers ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
-   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function (first line after start marker = function signature, e.g. int solve(...) { or def solve(...):, then body with TODO, then closing brace). Do NOT put a whole class or extra wrappers between the markers; the content between markers must be exactly one solve function.
-4) Java: use public class Main with public static int solve(...) (or appropriate return type) inside Main; do not use a nested class Solution.
-5) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input().
-6) main/entrypoint must call solve(...) and print the result. Keep boilerplate minimal; avoid long comment blocks.
-7) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); ABSOLUTE BAN: no readline/createInterface/readline.on.
-8) Use real newline chars in code. Output ONLY the JSON object: no text before/after, no markdown fences.
+   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function (first line after start marker = function signature, then minimal body with TODO and placeholder return, then closing brace). Do NOT put a whole class or extra wrappers between the markers.
+5) Java: use public class Main with public static int solve(...) (or appropriate return type) inside Main; do not use a nested class Solution.
+6) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input().
+7) main/entrypoint must call solve(...) and print the result. Keep boilerplate clean - no example comments.
+8) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); ABSOLUTE BAN: no readline/createInterface/readline.on.
+9) Use real newline chars in code. Output ONLY the JSON object: no text before/after, no markdown fences.
 
 Return ONLY valid JSON:
 {
