@@ -11,9 +11,13 @@ const EXECUTION_TIMEOUT_MS = Number(process.env.QUESTION_TEST_EXECUTION_TIMEOUT_
 const VERIFICATION_QUESTION_TIMEOUT_MS = Number(process.env.VERIFICATION_QUESTION_TIMEOUT_MS) || 0; // 0 = no timeout, wait for full verification (default). Set e.g. 300000 for 5 min cap.
 const VERIFICATION_LOG_ENABLED =
     process.env.PROGRAMMING_VERIFICATION_LOGS !== "false";
-// Fast mode: skip Phase 3.7 (re-verification) and Phase 3.8 (boilerplate regen) - saves ~1-2 min when languages fail
-const ENABLE_PHASE_37 = process.env.ENABLE_VERIFICATION_PHASE_37 !== "false" && process.env.VERIFICATION_FAST_MODE !== "true";
-const ENABLE_PHASE_38 = process.env.ENABLE_VERIFICATION_PHASE_38 !== "false" && process.env.VERIFICATION_FAST_MODE !== "true";
+// Skip Phase 3.7 (re-verification) and Phase 3.8 (boilerplate regen) - saves ~1-2 min per failing question.
+// Default: true (skip for faster response). Set to "false" to run full recovery for all questions.
+const SKIP_RECOVERY_PHASES =
+    process.env.SKIP_VERIFICATION_RECOVERY_PHASES !== "false" ||
+    process.env.VERIFICATION_FAST_MODE === "true";
+const ENABLE_PHASE_37 = !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION_PHASE_37 !== "false";
+const ENABLE_PHASE_38 = !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION_PHASE_38 !== "false";
 // Max concurrent questions verified in parallel (0 = unlimited). Reduces rate limits when many questions.
 const QUESTION_CONCURRENCY = Math.max(0, parseInt(process.env.VERIFICATION_QUESTION_CONCURRENCY, 10) || 0);
 
@@ -67,6 +71,7 @@ vLog("config", "Verification execution endpoints resolved", {
     singleUrl: SINGLE_EXECUTION_URL,
     timeoutMs: EXECUTION_TIMEOUT_MS,
     questionTimeoutMs: VERIFICATION_QUESTION_TIMEOUT_MS || "none (wait for full verification)",
+    skipRecoveryPhases: SKIP_RECOVERY_PHASES,
     phase37: ENABLE_PHASE_37,
     phase38: ENABLE_PHASE_38,
     questionConcurrency: QUESTION_CONCURRENCY || "unlimited",
@@ -1377,7 +1382,14 @@ const verifyOneProgrammingQuestion = async ({
     }
 
     // PHASE 3.7: Re-verification (run full verification once more with same boilerplate)
-    // Skip if VERIFICATION_FAST_MODE or ENABLE_VERIFICATION_PHASE_37=false
+    // Skip if SKIP_VERIFICATION_RECOVERY_PHASES=true (default) or ENABLE_VERIFICATION_PHASE_37=false
+    if (failingLanguages.length > 0 && !ENABLE_PHASE_37) {
+        vLog("verify-question", "Phase 3.7: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_37=false)", {
+            requestId,
+            consumerId,
+            failingCount: failingLanguages.length,
+        });
+    }
     if (failingLanguages.length > 0 && ENABLE_PHASE_37) {
         vLog("verify-question", "Phase 3.7: Re-verification (one attempt with same boilerplate)", {
             requestId,
@@ -1558,7 +1570,7 @@ const verifyOneProgrammingQuestion = async ({
     // PHASE 3.8: Regenerate boilerplate for failed languages only, then run full verification once
     // Skip if VERIFICATION_FAST_MODE or ENABLE_VERIFICATION_PHASE_38=false
     if (!ENABLE_PHASE_38) {
-        vLog("verify-question", "Phase 3.8: Skipped (VERIFICATION_FAST_MODE or ENABLE_VERIFICATION_PHASE_38=false)", {
+        vLog("verify-question", "Phase 3.8: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_38=false)", {
             requestId,
             consumerId,
         });
