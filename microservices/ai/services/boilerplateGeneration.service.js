@@ -153,6 +153,35 @@ const parseJson = (text) => {
   return JSON.parse(cleaned);
 };
 
+/**
+ * Find boilerplate code for a language. AI sometimes returns shortened keys
+ * (e.g. "C++" instead of "C++ (GCC 13.2.0)"). Try exact match first, then
+ * fallback to partial/fuzzy match.
+ */
+const getBoilerplateForLanguage = (boilerplateCode, languageName) => {
+  if (!boilerplateCode || typeof boilerplateCode !== "object") return "";
+  const exact = boilerplateCode[languageName];
+  if (exact && String(exact).trim()) return exact;
+
+  const langLower = String(languageName || "").toLowerCase();
+  const baseLang = String(languageName || "").split(" ")[0] || "";
+
+  for (const key of Object.keys(boilerplateCode)) {
+    const code = boilerplateCode[key];
+    if (!code || !String(code).trim()) continue;
+    const keyLower = key.toLowerCase();
+    if (
+      keyLower === langLower ||
+      langLower.startsWith(keyLower) ||
+      keyLower.startsWith(baseLang.toLowerCase()) ||
+      langLower.includes(keyLower)
+    ) {
+      return code;
+    }
+  }
+  return "";
+};
+
 const generateBoilerplateWithGemini = async ({
   genAI,
   modelName = process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
@@ -161,13 +190,19 @@ const generateBoilerplateWithGemini = async ({
   testCases,
   languages,
 }) => {
-  const languageNames = (languages || [])
+  const languageList = languages || [];
+  const languageNames = languageList
     .map((lang) => lang.languageName || lang.name)
-    .join(", ");
-  const instructionsBlock = buildLanguageInstructionsBlock(languages || []);
+    .filter(Boolean);
+  const languageNamesStr = languageNames.join(", ");
+  const instructionsBlock = buildLanguageInstructionsBlock(languageList);
+
+  const expectedKeysExample = languageNames.length
+    ? languageNames.map((n) => `"${n}": "code for ${n.split(" ")[0]}"`).join(",\n    ")
+    : '"Language Name": "code"';
 
   const prompt = `
-Generate boilerplate code for: ${languageNames}
+Generate boilerplate code for these EXACT languages (use these strings as JSON keys): ${languageNamesStr}
 
 Problem Title: ${questionTitle}
 Problem Statement:
@@ -191,11 +226,12 @@ Global constraints:
 7) main/entrypoint must call solve(...) and print the result. Keep boilerplate clean - no example comments.
 8) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); ABSOLUTE BAN: no readline/createInterface/readline.on.
 9) Use real newline chars in code. Output ONLY the JSON object: no text before/after, no markdown fences.
+10) CRITICAL: The boilerplateCode object keys MUST exactly match the language names above (e.g. "${languageNames[0] || "C++ (GCC 13.2.0)"}" not "C++").
 
-Return ONLY valid JSON:
+Return ONLY valid JSON with EXACT keys:
 {
   "boilerplateCode": {
-    "Language Name": "code"
+    ${expectedKeysExample}
   }
 }
 `;
@@ -218,4 +254,4 @@ Return ONLY valid JSON:
   };
 };
 
-module.exports = { generateBoilerplateWithGemini };
+module.exports = { generateBoilerplateWithGemini, getBoilerplateForLanguage };

@@ -2,7 +2,10 @@ const axios = require("axios");
 const {
     getLanguageInstruction,
 } = require("../utils/judge0LanguageInstructions");
-const { generateBoilerplateWithGemini } = require("./boilerplateGeneration.service");
+const {
+    generateBoilerplateWithGemini,
+    getBoilerplateForLanguage,
+} = require("./boilerplateGeneration.service");
 
 const DEFAULT_MODEL =
     process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash";
@@ -1818,7 +1821,7 @@ const verifyOneProgrammingQuestion = async ({
 
         const bpMap = bpResult.boilerplateCode || {};
         failedLangStates.forEach((ls) => {
-            const newCode = bpMap[ls.languageName] || ls.codeSnippet;
+            const newCode = getBoilerplateForLanguage(bpMap, ls.languageName) || ls.codeSnippet;
             ls.codeSnippet = ensureBoilerplateMarkers(newCode, ls.languageName);
             originalBoilerplates.set(ls.languageId, ls.codeSnippet);
         });
@@ -2060,7 +2063,9 @@ const verifyGeneratedBoilerplate = async ({
         supportedLanguages: (languages || []).map((lang) => ({
             languageId: lang.languageId,
             languageName: lang.languageName || lang.name,
-            codeSnippet: sanitizeText(boilerplateCode?.[lang.languageName || lang.name] || ""),
+            codeSnippet: sanitizeText(
+                getBoilerplateForLanguage(boilerplateCode, lang.languageName || lang.name) || "",
+            ),
         })),
         timeLimit: 5,
         memoryLimit: 128,

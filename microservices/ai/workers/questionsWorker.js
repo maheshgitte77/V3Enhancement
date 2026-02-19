@@ -23,6 +23,7 @@ const {
 } = require("../utils/programmingDuplicateAvoidance");
 const {
   generateBoilerplateWithGemini,
+  getBoilerplateForLanguage,
 } = require("../services/boilerplateGeneration.service");
 
 require("dotenv").config();
@@ -3485,8 +3486,20 @@ const createConsumer = async (id) => {
                   });
                   question.supportedLanguages = supportedLanguages.map((lang) => ({
                     ...lang,
-                    codeSnippet: bp.boilerplateCode?.[lang.languageName] || "",
+                    codeSnippet:
+                      getBoilerplateForLanguage(
+                        bp.boilerplateCode,
+                        lang.languageName || lang.name,
+                      ) || "",
                   }));
+                  const emptyCount = question.supportedLanguages.filter(
+                    (l) => !l.codeSnippet || !String(l.codeSnippet).trim(),
+                  ).length;
+                  if (emptyCount > 0) {
+                    console.warn(
+                      `⚠️ Boilerplate: ${emptyCount}/${supportedLanguages.length} languages have empty codeSnippet for "${question.questionTitle}" - AI keys may not match. Available keys: ${Object.keys(bp.boilerplateCode || {}).join(", ")}`,
+                    );
+                  }
                 } catch (bpErr) {
                   console.error(
                     `❌ Boilerplate generation failed in Consumer ${id} for ${question.questionTitle}:`,
