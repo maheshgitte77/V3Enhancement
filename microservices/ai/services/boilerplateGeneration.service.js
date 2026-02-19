@@ -17,57 +17,6 @@ const sanitize = (value) =>
     .replace(/\r/g, "\n")
     .trim();
 
-/** Strip commented example/pseudo-solution lines from implementation block for clean boilerplate. */
-const stripCommentedExampleCode = (code) => {
-  const implStart = BLOCK_MARKERS.implStart;
-  const implEnd = BLOCK_MARKERS.implEnd;
-  const startIdx = code.indexOf(implStart);
-  const endIdx = code.indexOf(implEnd);
-  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return code;
-
-  const before = code.substring(0, startIdx);
-  const after = code.substring(endIdx);
-  const blockContent = code.substring(startIdx, endIdx);
-  const lines = blockContent.split("\n");
-  const cleaned = [];
-  let seenTodo = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    const isMarker = trimmed.includes(implStart) || trimmed.includes(implEnd);
-    const isTodo = /TODO|Implement the solution/i.test(trimmed);
-    const isCommentLike = /^\s*(\/\/|#|\*|--|%|\(\*)/.test(line) || trimmed.startsWith("*/");
-    const isExampleComment =
-      isCommentLike &&
-      /Example\s*:|Example\s+loop|potentialBalance|currentBalance|OVERDRAFT_FEE|Transaction declined|Apply overdraft|Return the final/i.test(
-        trimmed
-      );
-    const isLongExplanatory =
-      isCommentLike &&
-      (/problem asks|track the balance|non-negative value|withdrawal would cause|overdraft fee|overdraftLimit/i.test(
-        trimmed
-      ) ||
-        (trimmed.length > 55 && !isTodo));
-
-    if (isMarker || !isCommentLike) {
-      cleaned.push(line);
-    } else if (isExampleComment || isLongExplanatory) {
-      continue;
-    } else if (isTodo && !seenTodo) {
-      seenTodo = true;
-      cleaned.push(line);
-    } else if (isCommentLike && !isTodo) {
-      continue;
-    } else {
-      cleaned.push(line);
-    }
-  }
-
-  return before + cleaned.join("\n") + after;
-};
-
 const normalizeJavaScriptJudge0Input = (code = "") => {
   const source = String(code || "");
   const hasReadline =
@@ -139,8 +88,6 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
           `${indent}${commentPrefix} ${BLOCK_MARKERS.implStart}\n${indent}${commentPrefix} TODO: Implement the solution here\n${indent}${commentPrefix} ${BLOCK_MARKERS.implEnd}`,
       );
     }
-    cleaned = stripCommentedExampleCode(cleaned);
-
     if (!cleaned.includes(BLOCK_MARKERS.inputStart)) {
       const lines = cleaned.split("\n");
       const inputLine = lines.findIndex((line) =>
