@@ -17,6 +17,32 @@ const sanitize = (value) =>
     .replace(/\r/g, "\n")
     .trim();
 
+const getMarkerPrefix = (langName) => {
+  const v = String(langName || "").toLowerCase();
+  if (/python|ruby|r\s*\(/.test(v)) return "#";
+  if (/lua|haskell/.test(v)) return "--";
+  if (/octave|prolog|erlang/.test(v)) return "%";
+  return "//";
+};
+
+/** Fix malformed markers: AI sometimes outputs }HC_IMPLEMENTATION_BLOCK_END or return 0HC_IMPLEMENTATION_BLOCK_END without newline/comment. */
+const ensureBlockMarkersOnOwnLine = (code, langName) => {
+  const prefix = getMarkerPrefix(langName);
+  const implEnd = BLOCK_MARKERS.implEnd;
+  const inputEnd = BLOCK_MARKERS.inputEnd;
+  let fixed = code;
+  const endOfStmt = "[}\\d\\w]";
+  const implEndReplacement = `$1\n${prefix} ${implEnd}`;
+  const inputEndReplacement = `$1\n${prefix} ${inputEnd}`;
+  if (fixed.includes(implEnd)) {
+    fixed = fixed.replace(new RegExp(`(${endOfStmt})\\s*${implEnd}`, "g"), implEndReplacement);
+  }
+  if (fixed.includes(inputEnd)) {
+    fixed = fixed.replace(new RegExp(`(${endOfStmt})\\s*${inputEnd}`, "g"), inputEndReplacement);
+  }
+  return fixed;
+};
+
 const normalizeJavaScriptJudge0Input = (code = "") => {
   const source = String(code || "");
   const hasReadline =
@@ -80,6 +106,8 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
         "$1    pass\n",
       );
     }
+    cleaned = ensureBlockMarkersOnOwnLine(cleaned, langName);
+
     const markerPrefix = /python/i.test(String(langName)) ? "#" : "//";
     if (!cleaned.includes(BLOCK_MARKERS.implStart) && /TODO|Implement the solution here/i.test(cleaned)) {
       cleaned = cleaned.replace(
@@ -157,7 +185,7 @@ Global constraints:
 3) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
 4) MUST keep two explicit sections in each language:
    A) Input section in entrypoint (main) wrapped by markers ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
-   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function (first line after start marker = function signature, then minimal body with TODO and placeholder return, then closing brace). Do NOT put a whole class or extra wrappers between the markers.
+   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function. Each marker MUST be on its own line with the language's comment prefix (e.g. // HC_IMPLEMENTATION_BLOCK_END for C++/Java/JS, # HC_IMPLEMENTATION_BLOCK_END for Python). First line after start marker = function signature, then minimal body with TODO and placeholder return, then closing brace, then end marker on new line.
 5) Java: use public class Main with public static int solve(...) (or appropriate return type) inside Main; do not use a nested class Solution.
 6) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input().
 7) main/entrypoint must call solve(...) and print the result. Keep boilerplate clean - no example comments.
