@@ -8,7 +8,7 @@ const DEFAULT_MODEL =
     process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash";
 const MAX_VERIFICATION_ATTEMPTS = 3;
 const EXECUTION_TIMEOUT_MS = Number(process.env.QUESTION_TEST_EXECUTION_TIMEOUT_MS) || 15000; // Judge0 API timeout (default 15s)
-const VERIFICATION_QUESTION_TIMEOUT_MS = Number(process.env.VERIFICATION_QUESTION_TIMEOUT_MS) || 120000; // Per-question max (default 2 min)
+const VERIFICATION_QUESTION_TIMEOUT_MS = Number(process.env.VERIFICATION_QUESTION_TIMEOUT_MS) || 0; // 0 = no timeout, wait for full verification (default). Set e.g. 300000 for 5 min cap.
 const VERIFICATION_LOG_ENABLED =
     process.env.PROGRAMMING_VERIFICATION_LOGS !== "false";
 // Fast mode: skip Phase 3.7 (re-verification) and Phase 3.8 (boilerplate regen) - saves ~1-2 min when languages fail
@@ -66,7 +66,7 @@ vLog("config", "Verification execution endpoints resolved", {
     bulkUrl: BULK_EXECUTION_URL,
     singleUrl: SINGLE_EXECUTION_URL,
     timeoutMs: EXECUTION_TIMEOUT_MS,
-    questionTimeoutMs: VERIFICATION_QUESTION_TIMEOUT_MS,
+    questionTimeoutMs: VERIFICATION_QUESTION_TIMEOUT_MS || "none (wait for full verification)",
     phase37: ENABLE_PHASE_37,
     phase38: ENABLE_PHASE_38,
     questionConcurrency: QUESTION_CONCURRENCY || "unlimited",
@@ -842,31 +842,20 @@ const reEvaluateTestCases = async ({
     }));
 
     const prompt = `
-You are analyzing test cases for a programming question. Multiple languages are showing partial test case failures (not all 5 test cases passed).
+Analyze test cases for a programming question. Languages show partial failures.
 
-Question:
-${sanitizeText(question.question || "")}
+Question: ${sanitizeText((question.question || "").slice(0, 1500))}
 
-Current Test Cases:
-${JSON.stringify(testCases || [], null, 2)}
+Test Cases: ${JSON.stringify(testCases || [])}
 
-Language Execution Results:
-${JSON.stringify(langSummary, null, 2)}
+Results: ${JSON.stringify(langSummary)}
 
-Analyze: Are the test cases correct? If multiple languages are failing the same test cases, or if the expected outputs don't match the problem description, the test cases may be incorrect.
+Rules: If expected outputs are wrong per problem, set testCasesCorrect=false and provide correctedTestCases. Otherwise true.
 
-Return ONLY JSON:
-{
-  "testCasesCorrect": true or false,
-  "correctedTestCases": [...], // Only if testCasesCorrect is false, array of { input: "...", output: "..." }
-  "reason": "explanation"
-}
+Return ONLY this JSON (no explanation, no markdown). Reason: 1 sentence max.
+{"testCasesCorrect":boolean,"correctedTestCases":[{"input":"...","output":"..."}],"reason":"One sentence."}
 
-Rules:
-- testCasesCorrect = true if test cases are correct and failures are due to code issues
-- testCasesCorrect = false if test cases have wrong expected outputs
-- correctedTestCases: Array of test case objects with input and output fields (same count as original)
-- If test cases are correct, return empty array for correctedTestCases
+If correct: correctedTestCases=[]. If wrong: same-length array with fixed output values.
 `;
 
     const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
@@ -1131,6 +1120,7 @@ const verifyOneProgrammingQuestion = async ({
             workingQuestion.testCases = normalizeTestCases(testCaseEvaluation.correctedTestCases);
             testCasesWereUpdated = true;
 
+            // Re-execute with EXISTING merged code (boilerplate + solution from Phase 1) using corrected test cases
             const reExecResults = await executeAgainstJudge({
                 languageExecutions: runnableExecutions,
                 testCases: workingQuestion.testCases,
@@ -1762,19 +1752,21 @@ const verifyProgrammingQuestions = async ({
     const verifyOne = async (question) => {
         const title = question.questionTitle || "Untitled";
         try {
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Verification timeout (${VERIFICATION_QUESTION_TIMEOUT_MS}ms)`)), VERIFICATION_QUESTION_TIMEOUT_MS),
-            );
-            const result = await Promise.race([
-                verifyOneProgrammingQuestion({
-                    question,
-                    genAI,
-                    modelName,
-                    requestId,
-                    consumerId,
-                }),
-                timeoutPromise,
-            ]);
+            const verifyPromise = verifyOneProgrammingQuestion({
+                question,
+                genAI,
+                modelName,
+                requestId,
+                consumerId,
+            });
+            const result = VERIFICATION_QUESTION_TIMEOUT_MS > 0
+                ? await Promise.race([
+                    verifyPromise,
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error(`Verification timeout (${VERIFICATION_QUESTION_TIMEOUT_MS}ms)`)), VERIFICATION_QUESTION_TIMEOUT_MS),
+                    ),
+                ])
+                : await verifyPromise;
             return stripInternalFields(result.question);
         } catch (error) {
             vLog("verify-batch", "Question verification crashed", {
