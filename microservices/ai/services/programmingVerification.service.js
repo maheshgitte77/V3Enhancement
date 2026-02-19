@@ -181,6 +181,22 @@ const normalizeTestCases = (testCases) =>
         weightage: Number(tc?.weightage || 0),
     }));
 
+/**
+ * Redistribute weightage across test cases so total equals 100%.
+ * E.g. 3 cases -> 34, 33, 33; 4 cases -> 25, 25, 25, 25.
+ */
+const redistributeWeightageTo100 = (testCases) => {
+    const arr = Array.isArray(testCases) ? [...testCases] : [];
+    if (arr.length === 0) return arr;
+    const n = arr.length;
+    const base = Math.floor(100 / n);
+    const remainder = 100 - base * n;
+    return arr.map((tc, i) => ({
+        ...tc,
+        weightage: i < remainder ? base + 1 : base,
+    }));
+};
+
 const normalizeSupportedLanguages = (question) => {
     const languageList = Array.isArray(question?.supportedLanguages)
         ? question.supportedLanguages
@@ -1299,7 +1315,20 @@ const verifyOneProgrammingQuestion = async ({
                 consumerId,
                 reason: testCaseEvaluation.reason,
             });
-            workingQuestion.testCases = normalizeTestCases(testCaseEvaluation.correctedTestCases);
+            const originalTcs = workingQuestion.testCases;
+            const merged = testCaseEvaluation.correctedTestCases.map((corr, i) => {
+                const orig = originalTcs[i] || {};
+                return {
+                    input: corr.input ?? orig.input,
+                    output: corr.output ?? orig.output,
+                    explanation: orig.explanation ?? "",
+                    visible: orig.visible !== undefined ? orig.visible : true,
+                    weightage: orig.weightage ?? 0,
+                };
+            });
+            workingQuestion.testCases = normalizeTestCases(
+                redistributeWeightageTo100(merged),
+            );
             testCasesWereUpdated = true;
 
             // Re-execute with EXISTING merged code (boilerplate + solution from Phase 1) using corrected test cases
@@ -1485,7 +1514,9 @@ const verifyOneProgrammingQuestion = async ({
             if (indicesToRemove.length > 0 && indicesToRemove.length < workingQuestion.testCases.length) {
                 const newTestCases = [...workingQuestion.testCases];
                 indicesToRemove.forEach((i) => newTestCases.splice(i, 1));
-                workingQuestion.testCases = normalizeTestCases(newTestCases);
+                workingQuestion.testCases = normalizeTestCases(
+                    redistributeWeightageTo100(newTestCases),
+                );
                 const newTotal = workingQuestion.testCases.length;
                 languagePassSummary.forEach((langResult) => {
                     const entry = allResults.find((r) => Number(r?.languageId) === Number(langResult.languageId));
