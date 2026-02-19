@@ -20,6 +20,8 @@ const ENABLE_PHASE_37 = !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION
 const ENABLE_PHASE_38 = !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION_PHASE_38 !== "false";
 // Max concurrent questions verified in parallel (0 = unlimited). Reduces rate limits when many questions.
 const QUESTION_CONCURRENCY = Math.max(0, parseInt(process.env.VERIFICATION_QUESTION_CONCURRENCY, 10) || 0);
+// Remove failed test cases when 70%+ languages have same partial pass (e.g. 4/5 -> 4/4). Default: true.
+const REMOVE_FAILED_TEST_CASES = process.env.REMOVE_FAILED_TEST_CASES !== "false";
 
 const QUESTION_SERVICE_URL =
     process.env.QUESTION_SERVICE_URL ||
@@ -74,6 +76,7 @@ vLog("config", "Verification execution endpoints resolved", {
     skipRecoveryPhases: SKIP_RECOVERY_PHASES,
     phase37: ENABLE_PHASE_37,
     phase38: ENABLE_PHASE_38,
+    removeFailedTestCases: REMOVE_FAILED_TEST_CASES,
     questionConcurrency: QUESTION_CONCURRENCY || "unlimited",
 });
 
@@ -746,6 +749,34 @@ const summarizeResults = (executionResults = []) => {
 };
 
 /**
+ * Identify test case indices that fail for >= threshold fraction of languages.
+ * Uses per-test-case results from Judge0 (results[i].status !== "Passed").
+ * @returns number[] - indices to remove (0-based), sorted descending for safe splice
+ */
+const getFailedTestCaseIndicesToRemove = (executionResults, threshold = 0.7) => {
+    const totalLangs = executionResults.length;
+    if (totalLangs === 0) return [];
+    const firstResult = executionResults[0];
+    const resultsArray = Array.isArray(firstResult?.results) ? firstResult.results : [];
+    const totalTests = resultsArray.length;
+    if (totalTests === 0) return [];
+    const failCountByIndex = new Array(totalTests).fill(0);
+    executionResults.forEach((entry) => {
+        const perTc = Array.isArray(entry?.results) ? entry.results : [];
+        perTc.forEach((r, i) => {
+            if (i < totalTests && String(r?.status || "").toLowerCase() !== "passed") {
+                failCountByIndex[i]++;
+            }
+        });
+    });
+    const toRemove = [];
+    failCountByIndex.forEach((count, i) => {
+        if (count >= Math.ceil(totalLangs * threshold)) toRemove.push(i);
+    });
+    return toRemove.sort((a, b) => b - a); // descending for splice
+};
+
+/**
  * Check if language passes verification threshold (70% or 100%)
  */
 const isLanguageVerified = (languageResult) => {
@@ -1295,6 +1326,53 @@ const verifyOneProgrammingQuestion = async ({
                 failingAfterCompleteSolution: failingLanguages.length,
                 summary: finalLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
             });
+        }
+    }
+
+    // PHASE 3.65: Remove failed test cases when 70%+ languages have same partial pass (e.g. 4/5 -> 4/4)
+    if (REMOVE_FAILED_TEST_CASES && workingQuestion.testCases.length > 1) {
+        const allResults = Array.from(executionMap.values());
+        const partialPassLangs = languagePassSummary.filter((l) => l.passed < l.total && l.passed > 0);
+        const partialThreshold = Math.ceil(languagePassSummary.length * 0.7);
+        if (partialPassLangs.length >= partialThreshold && allResults.length > 0) {
+            const indicesToRemove = getFailedTestCaseIndicesToRemove(allResults, 0.7);
+            if (indicesToRemove.length > 0 && indicesToRemove.length < workingQuestion.testCases.length) {
+                const newTestCases = [...workingQuestion.testCases];
+                indicesToRemove.forEach((i) => newTestCases.splice(i, 1));
+                workingQuestion.testCases = normalizeTestCases(newTestCases);
+                const newTotal = workingQuestion.testCases.length;
+                languagePassSummary.forEach((langResult) => {
+                    const entry = allResults.find((r) => Number(r?.languageId) === Number(langResult.languageId));
+                    const perTc = Array.isArray(entry?.results) ? entry.results : [];
+                    let passedAfterRemoval = langResult.passed;
+                    indicesToRemove.forEach((idx) => {
+                        if (perTc[idx] && String(perTc[idx]?.status || "").toLowerCase() === "passed") {
+                            passedAfterRemoval--;
+                        }
+                    });
+                    langResult.passed = Math.max(0, passedAfterRemoval);
+                    langResult.total = newTotal;
+                    langResult.success = langResult.passed === langResult.total;
+                });
+                verifiedLanguageIds.clear();
+                failingLanguages.length = 0;
+                languagePassSummary.forEach((lang) => {
+                    if (lang.passed === lang.total) {
+                        verifiedLanguageIds.add(lang.languageId);
+                        const ls = languageStates.find((l) => l.languageId === lang.languageId);
+                        if (ls) ls.verified = true;
+                    } else {
+                        failingLanguages.push(lang);
+                    }
+                });
+                vLog("verify-question", "Phase 3.65: Removed failed test cases for perfect pass", {
+                    requestId,
+                    consumerId,
+                    removedCount: indicesToRemove.length,
+                    newTotal,
+                    summary: languagePassSummary.map((l) => `${l.languageName}:${l.passed}/${l.total}`).join(", "),
+                });
+            }
         }
     }
 
