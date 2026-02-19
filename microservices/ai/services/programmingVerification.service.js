@@ -45,43 +45,8 @@ const joinUrl = (base, path) =>
 const BULK_EXECUTION_URL = joinUrl(QUESTION_SERVICE_URL, BULK_EXECUTION_PATH);
 const SINGLE_EXECUTION_URL = joinUrl(QUESTION_SERVICE_URL, SINGLE_EXECUTION_PATH);
 
-const vLog = (step, message, meta = {}) => {
-    if (!VERIFICATION_LOG_ENABLED) return;
-    const context = Object.entries(meta)
-        .filter(([, value]) => value !== undefined && value !== null && value !== "")
-        .map(([key, value]) => `${key}=${value}`)
-        .join(" ");
-    console.log(
-        `[ProgrammingVerification][${step}] ${message}${context ? ` | ${context}` : ""}`,
-    );
-};
-
-const MAX_CODE_LOG_CHARS = 8000;
-
-const vLogCode = (step, blockType, languageName, languageId, code) => {
-    if (!VERIFICATION_LOG_ENABLED) return;
-    const raw = String(code || "").trim();
-    const truncated = raw.length > MAX_CODE_LOG_CHARS;
-    const content = truncated ? raw.slice(0, MAX_CODE_LOG_CHARS) + "\n... (truncated)" : raw;
-    console.log(
-        `[ProgrammingVerification][${step}] ${blockType} | language=${languageName} languageId=${languageId} length=${raw.length}`,
-    );
-    console.log("---BEGIN CODE---");
-    console.log(content);
-    console.log("---END CODE---");
-};
-
-vLog("config", "Verification execution endpoints resolved", {
-    bulkUrl: BULK_EXECUTION_URL,
-    singleUrl: SINGLE_EXECUTION_URL,
-    timeoutMs: EXECUTION_TIMEOUT_MS,
-    questionTimeoutMs: VERIFICATION_QUESTION_TIMEOUT_MS || "none (wait for full verification)",
-    skipRecoveryPhases: SKIP_RECOVERY_PHASES,
-    phase37: ENABLE_PHASE_37,
-    phase38: ENABLE_PHASE_38,
-    removeFailedTestCases: REMOVE_FAILED_TEST_CASES,
-    questionConcurrency: QUESTION_CONCURRENCY || "unlimited",
-});
+// const vLog = () => {};
+// const vLogCode = () => {};
 
 const sanitizeText = (value) =>
     String(value || "")
@@ -701,16 +666,16 @@ const executeBulk = async ({
         memoryLimit: safeMemoryLimit,
     };
 
-    vLog("judge0-bulk", "Calling bulk execution API", {
-        bulkUrl: BULK_EXECUTION_URL,
-        languages: languageExecutions.length,
-        testCases: testCases.length,
-        timeLimit: safeTimeLimit,
-        memoryLimit: safeMemoryLimit,
-        languageIdTypes: payload.codeSubmissions
-            .map((x) => typeof x.languageId)
-            .join(","),
-    });
+    // vLog("judge0-bulk", "Calling bulk execution API", {
+    //     bulkUrl: BULK_EXECUTION_URL,
+    //     languages: languageExecutions.length,
+    //     testCases: testCases.length,
+    //     timeLimit: safeTimeLimit,
+    //     memoryLimit: safeMemoryLimit,
+    //     languageIdTypes: payload.codeSubmissions
+    //         .map((x) => typeof x.languageId)
+    //         .join(","),
+    // });
     try {
         const response = await axios.post(BULK_EXECUTION_URL, payload, {
             timeout: EXECUTION_TIMEOUT_MS,
@@ -719,7 +684,7 @@ const executeBulk = async ({
         return response.data;
     } catch (error) {
         const { status, details } = extractHttpErrorDetails(error);
-        vLog("judge0-bulk", "Bulk execution API failed", { status, details });
+        // vLog("judge0-bulk", "Bulk execution API failed", { status, details });
         throw error;
     }
 };
@@ -729,13 +694,13 @@ const executeSingle = async ({ code, languageId, testCases, timeLimit, memoryLim
     const safeMemoryLimit = Number.isFinite(Number(memoryLimit))
         ? Number(memoryLimit)
         : 128;
-    vLog("judge0-single", "Calling single execution API", {
-        singleUrl: SINGLE_EXECUTION_URL,
-        languageId,
-        testCases: testCases.length,
-        timeLimit: safeTimeLimit,
-        memoryLimit: safeMemoryLimit,
-    });
+    // vLog("judge0-single", "Calling single execution API", {
+    //     singleUrl: SINGLE_EXECUTION_URL,
+    //     languageId,
+    //     testCases: testCases.length,
+    //     timeLimit: safeTimeLimit,
+    //     memoryLimit: safeMemoryLimit,
+    // });
     try {
         const response = await axios.post(
             SINGLE_EXECUTION_URL,
@@ -754,11 +719,11 @@ const executeSingle = async ({ code, languageId, testCases, timeLimit, memoryLim
         return response.data;
     } catch (error) {
         const { status, details } = extractHttpErrorDetails(error);
-        vLog("judge0-single", "Single execution API failed", {
-            status,
-            languageId,
-            details,
-        });
+        // vLog("judge0-single", "Single execution API failed", {
+        //     status,
+        //     languageId,
+        //     details,
+        // });
         throw error;
     }
 };
@@ -769,10 +734,10 @@ const executeAgainstJudge = async ({
     timeLimit,
     memoryLimit,
 }) => {
-    vLog("judge0-start", "Starting Judge0 execution phase", {
-        languages: languageExecutions.length,
-        testCases: testCases.length,
-    });
+    // vLog("judge0-start", "Starting Judge0 execution phase", {
+    //     languages: languageExecutions.length,
+    //     testCases: testCases.length,
+    // });
     try {
         const bulkResult = await withRetry(
             () =>
@@ -787,17 +752,17 @@ const executeAgainstJudge = async ({
         );
         const results = Array.isArray(bulkResult?.results) ? bulkResult.results : [];
         if (results.length > 0) {
-            vLog("judge0-bulk", "Bulk execution succeeded", { resultCount: results.length });
+            // vLog("judge0-bulk", "Bulk execution succeeded", { resultCount: results.length });
             return results;
         }
-        vLog("judge0-bulk", "Bulk execution returned empty results, using fallback");
+        // vLog("judge0-bulk", "Bulk execution returned empty results, using fallback");
     } catch (error) {
         const { status, details } = extractHttpErrorDetails(error);
-        vLog("judge0-bulk", "Bulk execution failed, using single fallback", {
-            error: error.message,
-            status,
-            details,
-        });
+        // vLog("judge0-bulk", "Bulk execution failed, using single fallback", {
+        //     error: error.message,
+        //     status,
+        //     details,
+        // });
     }
 
     const singleResults = await Promise.all(
@@ -833,9 +798,9 @@ const executeAgainstJudge = async ({
         }),
     );
 
-    vLog("judge0-single", "Single execution fallback completed", {
-        resultCount: singleResults.length,
-    });
+    // vLog("judge0-single", "Single execution fallback completed", {
+    //     resultCount: singleResults.length,
+    // });
     return singleResults;
 };
 
@@ -846,10 +811,10 @@ const generateLogicBlockOnly = async ({
     testCases,
     language,
 }) => {
-    vLog("solution-generate", "Generating solution for language", {
-        language: language.languageName,
-        languageId: language.languageId,
-    });
+    // vLog("solution-generate", "Generating solution for language", {
+    //     language: language.languageName,
+    //     languageId: language.languageId,
+    // });
     const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
     const response = await withRetry(
         () => model.generateContent(buildLogicBlockPrompt({ question, testCases, language })),
@@ -861,9 +826,9 @@ const generateLogicBlockOnly = async ({
     if (!parsed?.todoReplacement || typeof parsed.todoReplacement !== "string") {
         throw new Error(`Invalid logic block for ${language.languageName}`);
     }
-    vLog("solution-generate", "Generated solution successfully", {
-        language: language.languageName,
-    });
+    // vLog("solution-generate", "Generated solution successfully", {
+    //     language: language.languageName,
+    // });
     return sanitizeText(parsed.todoReplacement);
 };
 
@@ -1082,11 +1047,11 @@ const verifyOneProgrammingQuestion = async ({
     workingQuestion.supportedLanguages = normalizeSupportedLanguages(workingQuestion);
 
     if (!workingQuestion.supportedLanguages.length || !workingQuestion.testCases.length) {
-        vLog("verify-question", "Skipping verification due to missing inputs", {
-            requestId,
-            consumerId,
-            title: workingQuestion.questionTitle || "Untitled",
-        });
+        // vLog("verify-question", "Skipping verification due to missing inputs", {
+        //     requestId,
+        //     consumerId,
+        //     title: workingQuestion.questionTitle || "Untitled",
+        // });
         return {
             question: {
                 ...workingQuestion,
@@ -1098,13 +1063,13 @@ const verifyOneProgrammingQuestion = async ({
         };
     }
 
-    vLog("verify-question", "Starting restructured single-attempt verification", {
-        requestId,
-        consumerId,
-        title: workingQuestion.questionTitle || "Untitled",
-        languages: workingQuestion.supportedLanguages.length,
-        testCases: workingQuestion.testCases.length,
-    });
+    // vLog("verify-question", "Starting restructured single-attempt verification", {
+    //     requestId,
+    //     consumerId,
+    //     title: workingQuestion.questionTitle || "Untitled",
+    //     languages: workingQuestion.supportedLanguages.length,
+    //     testCases: workingQuestion.testCases.length,
+    // });
 
     // Initialize language states
     const languageStates = (workingQuestion.supportedLanguages || []).map((lang) => ({
@@ -1116,12 +1081,12 @@ const verifyOneProgrammingQuestion = async ({
         verified: false,
     }));
 
-    // PHASE 1: Generate solution blocks and inject into boilerplate
-    vLog("verify-question", "Phase 1: Generating solution blocks", {
-        requestId,
-        consumerId,
-        languages: languageStates.length,
-    });
+    // // PHASE 1: Generate solution blocks and inject into boilerplate
+    // vLog("verify-question", "Phase 1: Generating solution blocks", {
+    //     requestId,
+    //     consumerId,
+    //     languages: languageStates.length,
+    // });
 
     const generationResults = await Promise.allSettled(
         languageStates.map(async (state) => {
@@ -1166,18 +1131,18 @@ const verifyOneProgrammingQuestion = async ({
         }
     });
 
-    // Log code blocks
-    languageStates.forEach((ls) => {
-        vLogCode("code-boilerplate", "BOILERPLATE", ls.languageName, ls.languageId, ls.codeSnippet);
-        if (ls.logicBlock) {
-            vLogCode("code-solution-block", "SOLUTION_BLOCK", ls.languageName, ls.languageId, ls.logicBlock);
-        }
-        if (ls.mergedCode) {
-            const isPython = detectLanguageFamily(ls.languageName) === "python";
-            const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
-            vLogCode("code-merged-judge0", "MERGED_CODE_SENT_TO_JUDGE0", ls.languageName, ls.languageId, loggedMerged);
-        }
-    });
+    // // Log code blocks
+    // languageStates.forEach((ls) => {
+    //     vLogCode("code-boilerplate", "BOILERPLATE", ls.languageName, ls.languageId, ls.codeSnippet);
+    //     if (ls.logicBlock) {
+    //         vLogCode("code-solution-block", "SOLUTION_BLOCK", ls.languageName, ls.languageId, ls.logicBlock);
+    //     }
+    //     if (ls.mergedCode) {
+    //         const isPython = detectLanguageFamily(ls.languageName) === "python";
+    //         const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+    //         vLogCode("code-merged-judge0", "MERGED_CODE_SENT_TO_JUDGE0", ls.languageName, ls.languageId, loggedMerged);
+    //     }
+    // });
 
     // PHASE 2: Execute merged code with Judge0 (single execution)
     const runnableExecutions = languageStates
@@ -1194,12 +1159,12 @@ const verifyOneProgrammingQuestion = async ({
 
     let executionResults = [];
     if (runnableExecutions.length > 0) {
-        vLog("verify-question", "Phase 2: Executing merged code with Judge0", {
-            requestId,
-            consumerId,
-            languages: runnableExecutions.length,
-            testCases: workingQuestion.testCases.length,
-        });
+        // vLog("verify-question", "Phase 2: Executing merged code with Judge0", {
+        //     requestId,
+        //     consumerId,
+        //     languages: runnableExecutions.length,
+        //     testCases: workingQuestion.testCases.length,
+        // });
         executionResults = await executeAgainstJudge({
             languageExecutions: runnableExecutions,
             testCases: workingQuestion.testCases,
@@ -1235,13 +1200,13 @@ const verifyOneProgrammingQuestion = async ({
         }
     });
 
-    vLog("verify-question", "Phase 3: Initial verification results", {
-        requestId,
-        consumerId,
-        verifiedCount: verifiedLanguageIds.size,
-        failingCount: failingLanguages.length,
-        summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
-    });
+    // vLog("verify-question", "Phase 3: Initial verification results", {
+    //     requestId,
+    //     consumerId,
+    //     verifiedCount: verifiedLanguageIds.size,
+    //     failingCount: failingLanguages.length,
+    //     summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+    // });
 
     // Check if any language passes all test cases (5/5) - if so, test cases are correct, skip re-evaluation
     const hasAnyFullPass = languagePassSummary.some((lang) => lang.passed === lang.total && lang.total > 0);
@@ -1260,10 +1225,10 @@ const verifyOneProgrammingQuestion = async ({
     // 3. AND NOT all failing have 0/total - if all fail with 0, code didn't execute, we don't know if test cases are correct
     // PARALLEL: Run Phase 3.5 and speculative Phase 3.6 (complete solutions with originalTestCases) together when both apply
     if (hasPartialPass && !hasAnyFullPass && !allFailingHaveZeroPass && failingLanguages.length > 0) {
-        vLog("verify-question", "Phase 3.5+3.6: Running test case re-evaluation and complete solution generation in parallel", {
-            requestId,
-            consumerId,
-        });
+        // vLog("verify-question", "Phase 3.5+3.6: Running test case re-evaluation and complete solution generation in parallel", {
+        //     requestId,
+        //     consumerId,
+        // });
 
         const phase35Promise = reEvaluateTestCases({
             genAI,
@@ -1303,18 +1268,18 @@ const verifyOneProgrammingQuestion = async ({
         const [testCaseEvaluation, speculativeResults] = await Promise.all([phase35Promise, phase36SpeculativePromise]);
 
         if (testCaseEvaluation && testCaseEvaluation._error) {
-            vLog("verify-question", "Phase 3.5: Test case re-evaluation failed", {
-                requestId,
-                consumerId,
-                error: testCaseEvaluation._error?.message,
-            });
+            // vLog("verify-question", "Phase 3.5: Test case re-evaluation failed", {
+            //     requestId,
+            //     consumerId,
+            //     error: testCaseEvaluation._error?.message,
+            // });
             speculativeCompleteSolutions = speculativeResults;
         } else if (!testCaseEvaluation?.testCasesCorrect && testCaseEvaluation?.correctedTestCases) {
-            vLog("verify-question", "Test cases are incorrect, applying corrections (discarding speculative Phase 3.6)", {
-                requestId,
-                consumerId,
-                reason: testCaseEvaluation.reason,
-            });
+            // vLog("verify-question", "Test cases are incorrect, applying corrections (discarding speculative Phase 3.6)", {
+            //     requestId,
+            //     consumerId,
+            //     reason: testCaseEvaluation.reason,
+            // });
             const originalTcs = workingQuestion.testCases;
             const merged = testCaseEvaluation.correctedTestCases.map((corr, i) => {
                 const orig = originalTcs[i] || {};
@@ -1354,32 +1319,32 @@ const verifyOneProgrammingQuestion = async ({
                 }
             });
             speculativeCompleteSolutions = null;
-            vLog("verify-question", "Re-execution completed after test case correction", {
-                requestId,
-                consumerId,
-                verifiedAfterCorrection: verifiedLanguageIds.size,
-                failingAfterCorrection: failingLanguages.length,
-            });
+            // vLog("verify-question", "Re-execution completed after test case correction", {
+            //     requestId,
+            //     consumerId,
+            //     verifiedAfterCorrection: verifiedLanguageIds.size,
+            //     failingAfterCorrection: failingLanguages.length,
+            // });
         } else {
-            vLog("verify-question", "Test cases are correct, using speculative Phase 3.6 results", {
-                requestId,
-                consumerId,
-                reason: testCaseEvaluation?.reason,
-            });
+            // vLog("verify-question", "Test cases are correct, using speculative Phase 3.6 results", {
+            //     requestId,
+            //     consumerId,
+            //     reason: testCaseEvaluation?.reason,
+            // });
             speculativeCompleteSolutions = speculativeResults;
         }
     } else if (hasAnyFullPass) {
-        vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (at least one language passed 5/5 - test cases are correct)", {
-            requestId,
-            consumerId,
-            languagesWithFullPass: languagePassSummary.filter((lang) => lang.passed === lang.total).map((lang) => lang.languageName).join(", "),
-        });
+        // vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (at least one language passed 5/5 - test cases are correct)", {
+        //     requestId,
+        //     consumerId,
+        //     languagesWithFullPass: languagePassSummary.filter((lang) => lang.passed === lang.total).map((lang) => lang.languageName).join(", "),
+        // });
     } else if (allFailingHaveZeroPass) {
-        vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (all failing languages have 0/total - code did not execute, cannot determine if test cases are correct)", {
-            requestId,
-            consumerId,
-            failingCount: failingLanguages.length,
-        });
+        // vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (all failing languages have 0/total - code did not execute, cannot determine if test cases are correct)", {
+        //     requestId,
+        //     consumerId,
+        //     failingCount: failingLanguages.length,
+        // });
     }
 
     // PHASE 3.6: Generate complete solution for failed languages using original boilerplate
@@ -1397,20 +1362,20 @@ const verifyOneProgrammingQuestion = async ({
                 languageName: langState.languageName,
                 code: completeSolution,
             }));
-            vLog("verify-question", "Phase 3.6: Using speculative complete solutions from parallel run", {
-                requestId,
-                consumerId,
-                count: completeSolutionExecutions.length,
-            });
+            // vLog("verify-question", "Phase 3.6: Using speculative complete solutions from parallel run", {
+            //     requestId,
+            //     consumerId,
+            //     count: completeSolutionExecutions.length,
+            // });
         } else {
-            vLog("verify-question", "Phase 3.6: Generating complete solutions for failed languages", {
-                requestId,
-                consumerId,
-                failedCount: failingLanguages.length,
-                usingOriginalBoilerplate: true,
-                usingUpdatedTestCases: testCasesWereUpdated,
-                testCasesCount: testCasesToUse.length,
-            });
+            // vLog("verify-question", "Phase 3.6: Generating complete solutions for failed languages", {
+            //     requestId,
+            //     consumerId,
+            //     failedCount: failingLanguages.length,
+            //     usingOriginalBoilerplate: true,
+            //     usingUpdatedTestCases: testCasesWereUpdated,
+            //     testCasesCount: testCasesToUse.length,
+            // });
 
             const completeSolutionResults = await Promise.allSettled(
                 failingLanguages.map(async (failingLang) => {
@@ -1419,11 +1384,11 @@ const verifyOneProgrammingQuestion = async ({
 
                     const originalBoilerplate = originalBoilerplates.get(failingLang.languageId) || langState.codeSnippet;
 
-                    vLog("verify-question", "Generating complete solution for failed language", {
-                        requestId,
-                        consumerId,
-                        language: failingLang.languageName,
-                    });
+                    // vLog("verify-question", "Generating complete solution for failed language", {
+                    //     requestId,
+                    //     consumerId,
+                    //     language: failingLang.languageName,
+                    // });
 
                     const completeSolution = await generateCompleteSolutionWithBoilerplate({
                         genAI,
@@ -1449,13 +1414,13 @@ const verifyOneProgrammingQuestion = async ({
         }
 
         if (completeSolutionExecutions && completeSolutionExecutions.length > 0) {
-            vLog("verify-question", "Executing complete solutions", {
-                requestId,
-                consumerId,
-                languages: completeSolutionExecutions.length,
-                testCases: testCasesToUse.length,
-                usingUpdatedTestCases: testCasesWereUpdated,
-            });
+            // vLog("verify-question", "Executing complete solutions", {
+            //     requestId,
+            //     consumerId,
+            //     languages: completeSolutionExecutions.length,
+            //     testCases: testCasesToUse.length,
+            //     usingUpdatedTestCases: testCasesWereUpdated,
+            // });
 
             const completeExecResults = await executeAgainstJudge({
                 languageExecutions: completeSolutionExecutions,
@@ -1494,13 +1459,13 @@ const verifyOneProgrammingQuestion = async ({
             languagePassSummary.length = 0;
             languagePassSummary.push(...finalLanguagePassSummary);
 
-            vLog("verify-question", "Complete solution execution completed", {
-                requestId,
-                consumerId,
-                verifiedAfterCompleteSolution: verifiedLanguageIds.size,
-                failingAfterCompleteSolution: failingLanguages.length,
-                summary: finalLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
-            });
+            // vLog("verify-question", "Complete solution execution completed", {
+            //     requestId,
+            //     consumerId,
+            //     verifiedAfterCompleteSolution: verifiedLanguageIds.size,
+            //     failingAfterCompleteSolution: failingLanguages.length,
+            //     summary: finalLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+            // });
         }
     }
 
@@ -1542,13 +1507,13 @@ const verifyOneProgrammingQuestion = async ({
                         failingLanguages.push(lang);
                     }
                 });
-                vLog("verify-question", "Phase 3.65: Removed failed test cases for perfect pass", {
-                    requestId,
-                    consumerId,
-                    removedCount: indicesToRemove.length,
-                    newTotal,
-                    summary: languagePassSummary.map((l) => `${l.languageName}:${l.passed}/${l.total}`).join(", "),
-                });
+                // vLog("verify-question", "Phase 3.65: Removed failed test cases for perfect pass", {
+                //     requestId,
+                //     consumerId,
+                //     removedCount: indicesToRemove.length,
+                //     newTotal,
+                //     summary: languagePassSummary.map((l) => `${l.languageName}:${l.passed}/${l.total}`).join(", "),
+                // });
             }
         }
     }
@@ -1595,13 +1560,13 @@ const verifyOneProgrammingQuestion = async ({
 
     // If 50%+ languages pass all 5/5 test cases, mark as verified
     if (hasMajority100Percent) {
-        vLog("verify-question", "Majority of languages passed all test cases, marking as verified", {
-            requestId,
-            consumerId,
-            languagesWith100Percent: languagesWith100Percent.length,
-            totalLanguages,
-            verifiedLanguages: languagesWith100Percent.map((l) => l.languageName).join(", "),
-        });
+        // vLog("verify-question", "Majority of languages passed all test cases, marking as verified", {
+        //     requestId,
+        //     consumerId,
+        //     languagesWith100Percent: languagesWith100Percent.length,
+        //     totalLanguages,
+        //     verifiedLanguages: languagesWith100Percent.map((l) => l.languageName).join(", "),
+        // });
 
         // Mark all languages as verified (including failing ones - they're likely formatting issues)
         languagePassSummary.forEach((lang) => {
@@ -1639,18 +1604,18 @@ const verifyOneProgrammingQuestion = async ({
     // PHASE 3.7: Re-verification (run full verification once more with same boilerplate)
     // Skip if SKIP_VERIFICATION_RECOVERY_PHASES=true (default) or ENABLE_VERIFICATION_PHASE_37=false
     if (failingLanguages.length > 0 && !ENABLE_PHASE_37) {
-        vLog("verify-question", "Phase 3.7: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_37=false)", {
-            requestId,
-            consumerId,
-            failingCount: failingLanguages.length,
-        });
+        // vLog("verify-question", "Phase 3.7: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_37=false)", {
+        //     requestId,
+        //     consumerId,
+        //     failingCount: failingLanguages.length,
+        // });
     }
     if (failingLanguages.length > 0 && ENABLE_PHASE_37) {
-        vLog("verify-question", "Phase 3.7: Re-verification (one attempt with same boilerplate)", {
-            requestId,
-            consumerId,
-            failingCount: failingLanguages.length,
-        });
+        // vLog("verify-question", "Phase 3.7: Re-verification (one attempt with same boilerplate)", {
+        //     requestId,
+        //     consumerId,
+        //     failingCount: failingLanguages.length,
+        // });
 
         const runReVerification = async () => {
             languageStates.forEach((ls) => {
@@ -1785,12 +1750,12 @@ const verifyOneProgrammingQuestion = async ({
 
         await runReVerification();
 
-        vLog("verify-question", "Phase 3.7: Re-verification completed", {
-            requestId,
-            consumerId,
-            verifiedAfterReVerify: verifiedLanguageIds.size,
-            failingAfterReVerify: failingLanguages.length,
-        });
+        // vLog("verify-question", "Phase 3.7: Re-verification completed", {
+        //     requestId,
+        //     consumerId,
+        //     verifiedAfterReVerify: verifiedLanguageIds.size,
+        //     failingAfterReVerify: failingLanguages.length,
+        // });
     }
 
     // Early exit if all pass after 3.7
@@ -1825,16 +1790,16 @@ const verifyOneProgrammingQuestion = async ({
     // PHASE 3.8: Regenerate boilerplate for failed languages only, then run full verification once
     // Skip if VERIFICATION_FAST_MODE or ENABLE_VERIFICATION_PHASE_38=false
     if (!ENABLE_PHASE_38) {
-        vLog("verify-question", "Phase 3.8: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_38=false)", {
-            requestId,
-            consumerId,
-        });
+        // vLog("verify-question", "Phase 3.8: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_38=false)", {
+        //     requestId,
+        //     consumerId,
+        // });
     } else {
-    vLog("verify-question", "Phase 3.8: Regenerating boilerplate for failed languages only", {
-        requestId,
-        consumerId,
-        failedLanguages: failingLanguages.map((f) => f.languageName).join(", "),
-    });
+    // vLog("verify-question", "Phase 3.8: Regenerating boilerplate for failed languages only", {
+    //     requestId,
+    //     consumerId,
+    //     failedLanguages: failingLanguages.map((f) => f.languageName).join(", "),
+    // });
 
     try {
         const failedLangStates = failingLanguages.map((fl) =>
@@ -1857,10 +1822,10 @@ const verifyOneProgrammingQuestion = async ({
             originalBoilerplates.set(ls.languageId, ls.codeSnippet);
         });
 
-        vLog("verify-question", "Phase 3.8: Boilerplate regenerated, running full verification", {
-            requestId,
-            consumerId,
-        });
+        // vLog("verify-question", "Phase 3.8: Boilerplate regenerated, running full verification", {
+        //     requestId,
+        //     consumerId,
+        // });
 
         languageStates.forEach((ls) => {
             ls.logicBlock = "";
@@ -1935,18 +1900,18 @@ const verifyOneProgrammingQuestion = async ({
             }
         });
 
-        vLog("verify-question", "Phase 3.8: Full verification after boilerplate regeneration completed", {
-            requestId,
-            consumerId,
-            verifiedAfter38: verifiedLanguageIds.size,
-            failingAfter38: failingLanguages.length,
-        });
+        // vLog("verify-question", "Phase 3.8: Full verification after boilerplate regeneration completed", {
+        //     requestId,
+        //     consumerId,
+        //     verifiedAfter38: verifiedLanguageIds.size,
+        //     failingAfter38: failingLanguages.length,
+        // });
     } catch (err) {
-        vLog("verify-question", "Phase 3.8: Boilerplate regeneration or verification failed", {
-            requestId,
-            consumerId,
-            error: err?.message,
-        });
+        // vLog("verify-question", "Phase 3.8: Boilerplate regeneration or verification failed", {
+        //     requestId,
+        //     consumerId,
+        //     error: err?.message,
+        // });
     }
     }
 
@@ -1961,17 +1926,17 @@ const verifyOneProgrammingQuestion = async ({
         verified: verifiedLanguageIds.has(lang.languageId),
     }));
 
-    vLog("verify-question", "Verification completed", {
-        requestId,
-        consumerId,
-        title: workingQuestion.questionTitle || "Untitled",
-        allLanguagesVerified,
-        verifiedCount: verifiedLanguageIds.size,
-        totalLanguages: languagePassSummary.length,
-        summary: finalLanguagePassSummary
-            .map((item) => `${item.languageName}:${item.passed}/${item.total}${item.verified ? " ✓" : ""}`)
-            .join(", "),
-    });
+    // vLog("verify-question", "Verification completed", {
+    //     requestId,
+    //     consumerId,
+    //     title: workingQuestion.questionTitle || "Untitled",
+    //     allLanguagesVerified,
+    //     verifiedCount: verifiedLanguageIds.size,
+    //     totalLanguages: languagePassSummary.length,
+    //     summary: finalLanguagePassSummary
+    //         .map((item) => `${item.languageName}:${item.passed}/${item.total}${item.verified ? " ✓" : ""}`)
+    //         .join(", "),
+    // });
 
     return {
         question: {
@@ -2010,11 +1975,11 @@ const verifyProgrammingQuestions = async ({
     requestId = "",
     consumerId = "",
 }) => {
-    vLog("verify-batch", "Starting programming verification batch", {
-        requestId,
-        consumerId,
-        questionCount: questions.length,
-    });
+    // vLog("verify-batch", "Starting programming verification batch", {
+    //     requestId,
+    //     consumerId,
+    //     questionCount: questions.length,
+    // });
 
     const verifyOne = async (question) => {
         const title = question.questionTitle || "Untitled";
@@ -2036,12 +2001,12 @@ const verifyProgrammingQuestions = async ({
                 : await verifyPromise;
             return stripInternalFields(result.question);
         } catch (error) {
-            vLog("verify-batch", "Question verification crashed", {
-                requestId,
-                consumerId,
-                title,
-                error: error.message,
-            });
+            // vLog("verify-batch", "Question verification crashed", {
+            //     requestId,
+            //     consumerId,
+            //     title,
+            //     error: error.message,
+            // });
             return stripInternalFields({
                 ...question,
                 verified: false,
@@ -2061,12 +2026,12 @@ const verifyProgrammingQuestions = async ({
     );
 
     const verifiedCount = results.filter((q) => q.verified === true).length;
-    vLog("verify-batch", "Completed programming verification batch", {
-        requestId,
-        consumerId,
-        questionCount: questions.length,
-        verifiedCount,
-    });
+    // vLog("verify-batch", "Completed programming verification batch", {
+    //     requestId,
+    //     consumerId,
+    //     questionCount: questions.length,
+    //     verifiedCount,
+    // });
 
     return {
         questions: results,
@@ -2082,11 +2047,11 @@ const verifyGeneratedBoilerplate = async ({
     genAI,
     modelName = DEFAULT_MODEL,
 }) => {
-    vLog("verify-boilerplate", "Starting boilerplate verification", {
-        title: questionTitle || "Untitled",
-        languages: Array.isArray(languages) ? languages.length : 0,
-        testCases: Array.isArray(testCases) ? testCases.length : 0,
-    });
+    // vLog("verify-boilerplate", "Starting boilerplate verification", {
+    //     title: questionTitle || "Untitled",
+    //     languages: Array.isArray(languages) ? languages.length : 0,
+    //     testCases: Array.isArray(testCases) ? testCases.length : 0,
+    // });
     const syntheticQuestion = {
         questionTitle,
         question,
@@ -2115,11 +2080,11 @@ const verifyGeneratedBoilerplate = async ({
         updatedBoilerplate[lang.languageName] = lang.codeSnippet || "";
     });
 
-    vLog("verify-boilerplate", "Completed boilerplate verification", {
-        title: questionTitle || "Untitled",
-        verified: !!verifiedResult.question.verified,
-        attempts: verifiedResult.question.verificationAttempts || 0,
-    });
+    // vLog("verify-boilerplate", "Completed boilerplate verification", {
+    //     title: questionTitle || "Untitled",
+    //     verified: !!verifiedResult.question.verified,
+    //     attempts: verifiedResult.question.verificationAttempts || 0,
+    // });
     return {
         boilerplateCode: updatedBoilerplate,
         verified: !!verifiedResult.question.verified,

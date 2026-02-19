@@ -93,10 +93,6 @@ const generateScreeningQuestion = async (req, res) => {
         for (const questionConfig of otherTypes) {
           const typeSpecificQuestionsArray =
             questionConfig.questionsArray || questionsArray || [];
-          console.log(
-            "typeSpecificQuestionsArray",
-            typeSpecificQuestionsArray.length,
-          );
 
           // Get server-side tracked used categories for Programming questions (Redis or in-memory)
           // Tracking key: prefer jobId (requested), fallback to clientId
@@ -116,10 +112,6 @@ const generateScreeningQuestion = async (req, res) => {
             if (usedCategories.length > 0) {
               await categoryTracker.refreshTracking(trackingId, category.category);
             }
-            console.log(
-              `📊 Server-side used categories for ${category.category}:`,
-              usedCategories.length > 0 ? usedCategories.join(", ") : "None",
-            );
           }
 
           producerMessages.push({
@@ -164,8 +156,6 @@ const generateScreeningQuestion = async (req, res) => {
       messages: producerMessages,
     });
 
-    console.log("Question Generation Temp Id", tempId);
-
     const REQUEST_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (question gen + verification)
     const timeoutId = setTimeout(() => {
       const info = req.pendingRequests.get(requestId);
@@ -195,7 +185,6 @@ const generateScreeningQuestion = async (req, res) => {
       timeoutId,
     });
   } catch (error) {
-    console.error("❌ Error in generateScreeningQuestion:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
@@ -278,7 +267,6 @@ const generateBoilerplateCode = async (req, res) => {
     });
     return;
   } catch (error) {
-    console.error("❌ Error in generateBoilerplateCode:", error);
     return res
       .status(500)
       .json({ message: "Internal Server Error", error: error.message });
