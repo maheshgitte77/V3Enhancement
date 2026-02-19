@@ -203,16 +203,63 @@ const normalizeLanguageKey = (name = "") => String(name).toLowerCase();
 const detectLanguageFamily = (languageName = "") => {
     const v = normalizeLanguageKey(languageName);
     if (v.includes("c++")) return "cpp";
-    if (v.includes("java")) return "java";
+    if (v.includes("c (gcc")) return "c";
+    if (v.includes("java") && !v.includes("kotlin")) return "java";
+    if (v.includes("kotlin")) return "kotlin";
     if (v.includes("python")) return "python";
     if (v.includes("javascript") || v.includes("node")) return "javascript";
+    if (v.includes("go ")) return "go";
+    if (v.includes("dart")) return "dart";
+    if (v.includes("php")) return "php";
+    if (v.includes("r (")) return "r";
+    if (v.includes("haskell")) return "haskell";
+    if (v.includes("rust")) return "rust";
+    if (v.includes("ruby")) return "ruby";
+    if (v.includes("pascal")) return "pascal";
+    if (v.includes("swift")) return "swift";
+    if (v.includes("scala")) return "scala";
+    if (v.includes("prolog")) return "prolog";
+    if (v.includes("lua")) return "lua";
+    if (v.includes("ocaml")) return "ocaml";
+    if (v.includes("octave")) return "octave";
     return "other";
 };
 
-const markerPrefix = (family = "other") => (family === "python" ? "#" : "//");
+const markerPrefix = (family = "other") => {
+    if (family === "python" || family === "r" || family === "ruby") return "#";
+    if (family === "haskell" || family === "lua") return "--";
+    if (family === "prolog" || family === "octave") return "%";
+    if (family === "ocaml") return "(*"; // OCaml uses (* *) block comments
+    return "//";
+};
 
 const markerLine = (family, marker, indent = "") =>
     `${indent}${markerPrefix(family)} ${marker}`;
+
+/** Per-family regex to find the solve function signature line for code injection. */
+const getSignaturePattern = (family) => {
+    switch (family) {
+        case "python": return /^\s*def\s+solve\s*\([^)]*\)\s*:/;
+        case "kotlin": return /fun\s+solve\s*\(/;
+        case "go": return /func\s+solve\s*\(/;
+        case "r": return /solve\s*<-\s*function\s*\(/;
+        case "haskell": return /^solve\s+[\w\s]+\=\s*(do)?\s*$/;
+        case "php": return /function\s+solve\s*\(/;
+        case "dart": return /[\w<>]+\s+solve\s*\(/;
+        case "rust": return /fn\s+solve\s*\(/;
+        case "ruby": return /def\s+solve\s*\(/;
+        case "swift": return /func\s+solve\s*\(/;
+        case "scala": return /def\s+solve\s*\(/;
+        case "pascal": return /function\s+solve\s*\(|procedure\s+solve\s*\(/;
+        case "lua": return /function\s+solve\s*\(/;
+        case "ocaml": return /let\s+solve\s+[^=]+=\s*/;
+        case "octave": return /function\s+(?:\[[\w\s,]+\]|\w+)\s*=\s*solve\s*\(|function\s+solve\s*\(/;
+        case "c":
+        case "cpp":
+        case "java":
+        default: return /\bsolve\s*\(|^\s*\w+[\*\s]*\s*solve\s*\(/;
+    }
+};
 
 const findSolveInvocationLineIndex = (lines = []) => {
     for (let i = lines.length - 1; i >= 0; i -= 1) {
@@ -269,10 +316,24 @@ const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
     if (!hasInputMarkers) {
         lines = code.split("\n");
         const inputIdx = lines.findIndex((line) => {
-            if (family === "cpp") return /\bcin\s*>>/.test(line);
-            if (family === "java") return /scanner\.(next|hasNext)/i.test(line);
+            if (family === "cpp" || family === "c") return /\bcin\s*>>|scanf\s*\(/.test(line);
+            if (family === "java" || family === "kotlin") return /scanner\.(next|hasNext)|readLine\s*\(\s*\)/i.test(line);
             if (family === "python") return /\binput\s*\(|sys\.stdin/.test(line);
             if (family === "javascript") return /readFileSync\s*\(|input\.split\s*\(/.test(line);
+            if (family === "go") return /Scan|ReadString|bufio/.test(line);
+            if (family === "dart") return /stdin\.readLineSync|readLineSync/.test(line);
+            if (family === "php") return /fgets\s*\(\s*STDIN|fgetcsv/.test(line);
+            if (family === "r") return /readLines\s*\(|file\s*\(\s*['\"]stdin['\"]\s*\)/.test(line);
+            if (family === "haskell") return /getContents|getLine|read\s+/.test(line);
+            if (family === "rust") return /read_line|stdin|BufRead/.test(line);
+            if (family === "ruby") return /gets|readline|ARGF/.test(line);
+            if (family === "swift") return /readLine|FileHandle/.test(line);
+            if (family === "scala") return /StdIn|readLine|readInt/.test(line);
+            if (family === "pascal") return /readln|read\s*\(/.test(line);
+            if (family === "prolog") return /read\s*\(|get_char|get_code/.test(line);
+            if (family === "lua") return /io\.read|io\.lines/.test(line);
+            if (family === "ocaml") return /Scanf\.scanf|read_line|input_line/.test(line);
+            if (family === "octave") return /fscanf|input\s*\(|stdin/.test(line);
             return false;
         });
         const solveInvokeIdx = findSolveInvocationLineIndex(lines);
@@ -293,8 +354,12 @@ const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
 const buildLogicBlockPrompt = ({ question, testCases, language }) => {
     const langInstruction = getLanguageInstruction(language.languageName);
     const isPython = /python/i.test(String(language.languageName || ""));
+    const isHaskell = /haskell/i.test(String(language.languageName || ""));
     const pythonNote = isPython
         ? " For Python: use exactly 4 spaces at the start of every line of the body (consistent indent); mixed indentation causes IndentationError when injected."
+        : "";
+    const haskellNote = isHaskell
+        ? " For Haskell: return ONLY the indented lines that go inside the 'do' block. No 'solve', no '= do', no type signature. Use putStrLn for output, not print. Escape any backslashes and quotes in the JSON string."
         : "";
     return `
 You are given a boilerplate skeleton for ${language.languageName}.
@@ -311,7 +376,7 @@ Rules:
 1) todoReplacement = only the executable body lines (what goes inside solve). No def solve, no function solve, no closing }.
 2) Do not return full file, main, or any code outside the solve body.
 3) Must pass provided test cases when this body is inserted into the boilerplate.
-4) Minimize comments. No markdown fences. Output only the JSON.${pythonNote}
+4) Minimize comments. No markdown fences. Output only the JSON.${pythonNote}${haskellNote}
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -426,20 +491,50 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
             code = String(code || "");
         } else {
             const isPython = family === "python";
-            const signaturePattern = isPython
-                ? /^\s*def\s+solve\s*\([^)]*\)\s*:/
-                : /\bsolve\s*\([^)]*\)\s*\{/;
+            const isHaskell = family === "haskell";
+            const isPascal = family === "pascal";
+            const signaturePattern = getSignaturePattern(family);
             const signatureIdx = blockLines.findIndex((line) => signaturePattern.test(line));
             const sigIdx = signatureIdx >= 0 ? signatureIdx : 0;
-            const signatureLine = blockLines[sigIdx];
-            const hasClosingBrace =
+            // Haskell: keep type sig + equation line (solve n arr = ); body is RHS only
+            let headerLines = isHaskell && sigIdx >= 0
+                ? blockLines.slice(0, sigIdx + 1)
+                : [blockLines[sigIdx]];
+            let signatureLine = headerLines.join("\n");
+            let hasClosingBrace =
                 !isPython &&
+                !isHaskell &&
+                !isPascal &&
                 blockLines.length > sigIdx + 1 &&
                 /^\s*\}\s*$/.test(blockLines[blockLines.length - 1]);
-            const closingLine = hasClosingBrace ? blockLines[blockLines.length - 1] : "";
-            const bodyLines = hasClosingBrace
+            let closingLine = hasClosingBrace ? blockLines[blockLines.length - 1] : "";
+            let bodyLines = hasClosingBrace
                 ? blockLines.slice(sigIdx + 1, blockLines.length - 1)
                 : blockLines.slice(sigIdx + 1);
+            if (isPascal) {
+                const beginIdx = blockLines.findIndex((l) => /^\s*begin\s*$/i.test(l));
+                const endIdx = blockLines.findIndex((l) => /^\s*end\s*;?\s*$/i.test(l));
+                if (beginIdx >= 0 && endIdx > beginIdx) {
+                    bodyLines = blockLines.slice(beginIdx + 1, endIdx);
+                    headerLines = blockLines.slice(0, beginIdx + 1);
+                    signatureLine = headerLines.join("\n");
+                    closingLine = blockLines[endIdx];
+                }
+            }
+            if (family === "lua" || family === "octave") {
+                const endIdx = blockLines.findIndex((l, i) => i > sigIdx && /^\s*end\s*$/.test(l));
+                if (endIdx > sigIdx) {
+                    bodyLines = blockLines.slice(sigIdx + 1, endIdx);
+                    closingLine = blockLines[endIdx];
+                }
+            }
+            if (family === "ocaml") {
+                const semiIdx = blockLines.findIndex((l, i) => i > sigIdx && /;;\s*$/.test(l.trim()));
+                if (semiIdx > sigIdx) {
+                    bodyLines = blockLines.slice(sigIdx + 1, semiIdx);
+                    closingLine = blockLines[semiIdx];
+                }
+            }
             const bodyIndent =
                 bodyLines.length > 0 && bodyLines[0].match(/^(\s*)/)
                     ? (bodyLines[0].match(/^(\s*)/) || [null, "    "])[1].length
@@ -486,6 +581,14 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
                 /^(\s*)#\s*.*TODO.*$/im,
                 (_, indent) => indentLines(logic, indent.length),
             );
+            code = code.replace(
+                /^(\s*)--\s*.*TODO.*$/im,
+                (_, indent) => indentLines(logic, indent.length),
+            );
+            code = code.replace(
+                /^(\s*)%\s*.*TODO.*$/im,
+                (_, indent) => indentLines(logic, indent.length),
+            );
         }
         return { mergedCode: code, injected: true };
     }
@@ -500,10 +603,50 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
             const indent = (body.match(/\n(\s*)/) || [null, "  "])[1];
             return m.replace(body, `\n${indentLines(logic, indent.length)}\n`);
         });
-    } else if (family === "java" || family === "cpp") {
+    } else if (family === "java" || family === "cpp" || family === "c") {
         code = code.replace(/\{\s*\n(\s*)(?:return\s+0(?:\.0)?;?)?\s*\n\s*\}/m, (_, indent) => {
             return `{\n${indentLines(logic, indent.length)}\n${indent}}`;
         });
+    } else if (["kotlin", "go", "dart", "php", "r", "rust", "ruby", "swift", "scala"].includes(family)) {
+        code = code.replace(/\{\s*\n(\s*)(?:return\s+[^;]+;?|return\s*[^\n]*)?\s*\n\s*\}/m, (_, indent) => {
+            const idt = (indent && indent.length > 0) ? indent : "    ";
+            return `{\n${indentLines(logic, idt.length)}\n${idt}}`;
+        });
+    } else if (family === "haskell") {
+        // Do-block: solve ... = do\n    body
+        let replaced = code.replace(/(=\s*do)\s*\n(\s*)[\s\S]*?(\n--\s*HC_IMPLEMENTATION_BLOCK_END)/m, (_, eqDo, indent, suffix) => {
+            const idt = (indent && indent.length > 0) ? indent : "    ";
+            return `${eqDo}\n${indentLines(logic, idt.length)}${suffix}`;
+        });
+        // Equational: solve ... =\n    0 (placeholder)
+        if (replaced === code) {
+            replaced = code.replace(/(solve\s+[\w\s]+\=\s*)\n(\s*)[\s\S]*?(\n--\s*HC_IMPLEMENTATION_BLOCK_END)/m, (_, eq, indent, suffix) => {
+                const idt = (indent && indent.length > 0) ? indent : "    ";
+                return `${eq}\n${indentLines(logic, idt.length)}${suffix}`;
+            });
+        }
+        code = replaced;
+    } else if (family === "pascal") {
+        code = code.replace(/(begin)\s*\n(\s*)(?:solve\s*:=\s*0[\s\S]*?|[\s\S]*?)(\n\s*end\s*;)/im, (_, beginKw, indent, endPart) => {
+            const idt = (indent && indent.length > 0) ? indent : "  ";
+            return `${beginKw}\n${indentLines(logic, idt.length)}${endPart}`;
+        });
+    } else if (family === "lua" || family === "octave") {
+        code = code.replace(
+            /(function\s+(?:(?:\[[\w\s,]+\]|\w+)\s*=\s*)?solve\s*\([^)]*\)\s*\n)([\s\S]*?)(\n\s*end\s*)/m,
+            (_, open, body, close) => {
+                const idt = (body.match(/\n(\s*)/) || [null, "    "])[1];
+                return open + indentLines(logic, idt.length) + close;
+            },
+        );
+    } else if (family === "ocaml") {
+        code = code.replace(
+            /(let\s+solve\s+[^=]+=\s*(?:\n)?)([\s\S]*?)(\s*;;)/m,
+            (_, open, body, close) => {
+                const idt = (body.match(/\n(\s*)/) || [null, "  "])[1];
+                return open + indentLines(logic, idt.length) + close;
+            },
+        );
     }
 
     return { mergedCode: code, injected: true };
