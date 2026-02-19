@@ -1701,6 +1701,7 @@ The user has specified exactly what they want. Generate programming questions th
 
 - The problem description, input/output, constraints, and test cases MUST be exclusively about the user's concept. Example: if the user asked for "queues (FIFO) in array", the problem MUST involve queue operations (enqueue/dequeue), FIFO order, or implementing a queue using an array—NOT "print numbers 1 to N", "skip multiples of 5", "count vowels", "palindrome", or any unrelated problem.
 - Do NOT substitute a different problem. If the user asked for FIFO/queues, the question must be about queues/FIFO (e.g. implement queue with array, simulate FIFO, circular queue). If the user asked for Fibonacci, the question must be about Fibonacci. Never output a problem that is off-topic.
+- **EXECUTABLE ONLY**: Even for theoretical topics (e.g. "time complexity", "Fibonacci"), generate RUNNABLE code problems. E.g. "Fibonacci" → "Given n, output nth Fibonacci number" (with input/output). NEVER "analyze complexity" or "explain" type questions—those cannot run in Judge0.
 - If the provided title (from the list below) does not match the user's prompt, still implement the USER REQUEST concept for the problem content—the user's prompt overrides the title theme when they conflict.
 - If any detail conflicts with maxTime or feasibility, simplify while keeping the user's core topic.
 `;
@@ -1748,9 +1749,20 @@ ${isScenarioBased
     - "Check if a string contains valid parentheses"
     - "Merge two sorted arrays into one sorted array"
   * Focus on clarity and standard problem formulations rather than job-role specific scenarios`}
-- **JUDGE0 COMPATIBILITY** (MANDATORY):
-  * Problems/testcases must be executable on Judge0.
-  * Boilerplate will be generated in a separate dedicated boilerplate step after questions+testcases.
+- **EXECUTABLE ONLY - JUDGE0 COMPATIBILITY** (MANDATORY - NO EXCEPTIONS):
+  * EVERY question MUST be a runnable coding problem that executes in Judge0. Boilerplate is generated separately.
+  * FORBIDDEN: Theoretical, analysis, or explanation-only questions. NEVER generate:
+    - "Analyze time/space complexity" or "Explain which approach is more efficient"
+    - "There is no input" or "N/A" for Input Format
+    - "Provide an analysis" or "Your answer should include..." (text output instead of code output)
+    - "Examples: N/A" or "This question requires analysis, not code execution"
+  * REQUIRED: Every question MUST have:
+    - Concrete Input Format: actual stdin input (e.g. numbers, strings, arrays)
+    - Concrete Output Format: what the program prints to stdout
+    - At least 1 real test case with specific input and expected output values
+  * If a topic (e.g. Fibonacci, time complexity) could be theoretical, generate an EXECUTABLE variant instead:
+    - WRONG: "Analyze iterative vs recursive Fibonacci complexity"
+    - RIGHT: "Given n, compute the nth Fibonacci number" (with input n, output the number)
 - **Experience Level Tailoring** (${experience} years):
   * ${experience <= 3
           ? "Junior Level"
@@ -3424,6 +3436,37 @@ const createConsumer = async (id) => {
 
             // Process Programming questions: verify and normalize test cases/boilerplate code
             if (questionType === "Programming" && aiResponse.Programming) {
+              // Filter out non-executable questions (analysis/theoretical - cannot run in Judge0)
+              const nonExecutablePatterns = [
+                /there is no input|no input for this|input.*n\/a|n\/a.*input|constraints\s*[:\s]*n\/a/i,
+                /provide an analysis|provide.*analysis|your answer should include/i,
+                /requires analysis,?\s*not (code|to write code)/i,
+                /examples?:\s*n\/a|n\/a\s*[-–]\s*this question requires/i,
+                /analyze (and )?compare.*(time|space) complexity/i,
+                /explain which approach is more efficient/i,
+                /output format.*analysis|output.*big o|complexity in big o/i,
+                /you are required to provide an? analysis|not to write code/i,
+              ];
+              const isNonExecutable = (q) => {
+                const text = `${q.question || ""} ${(q.testCases || []).map((t) => t.input || t.output || "").join(" ")}`;
+                return nonExecutablePatterns.some((p) => p.test(text));
+              };
+              const beforeFilter = aiResponse.Programming.length;
+              aiResponse.Programming = aiResponse.Programming.filter((q) => {
+                if (isNonExecutable(q)) {
+                  console.warn(
+                    `⚠️ Filtered non-executable Programming question (Consumer ${id}): "${q.questionTitle || "Untitled"}" - analysis/theoretical questions cannot run in Judge0`,
+                  );
+                  return false;
+                }
+                return true;
+              });
+              if (beforeFilter > aiResponse.Programming.length) {
+                console.warn(
+                  `⚠️ Removed ${beforeFilter - aiResponse.Programming.length} non-executable Programming question(s) - only executable coding problems allowed`,
+                );
+              }
+
               // Generate boilerplate AFTER question+testcase generation.
               const boilerplatePromises = aiResponse.Programming.map(async (question) => {
                 const supportedLanguages = Array.isArray(question.supportedLanguages)
