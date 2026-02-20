@@ -17,6 +17,32 @@ const sanitize = (value) =>
     .replace(/\r/g, "\n")
     .trim();
 
+const getMarkerPrefix = (langName) => {
+  const v = String(langName || "").toLowerCase();
+  if (/python|ruby|r\s*\(/.test(v)) return "#";
+  if (/lua|haskell/.test(v)) return "--";
+  if (/octave|prolog|erlang/.test(v)) return "%";
+  return "//";
+};
+
+/** Fix malformed markers: AI sometimes outputs }HC_IMPLEMENTATION_BLOCK_END or return 0HC_IMPLEMENTATION_BLOCK_END without newline/comment. */
+const ensureBlockMarkersOnOwnLine = (code, langName) => {
+  const prefix = getMarkerPrefix(langName);
+  const implEnd = BLOCK_MARKERS.implEnd;
+  const inputEnd = BLOCK_MARKERS.inputEnd;
+  let fixed = code;
+  const endOfStmt = "[}\\d\\w]";
+  const implEndReplacement = `$1\n${prefix} ${implEnd}`;
+  const inputEndReplacement = `$1\n${prefix} ${inputEnd}`;
+  if (fixed.includes(implEnd)) {
+    fixed = fixed.replace(new RegExp(`(${endOfStmt})\\s*${implEnd}`, "g"), implEndReplacement);
+  }
+  if (fixed.includes(inputEnd)) {
+    fixed = fixed.replace(new RegExp(`(${endOfStmt})\\s*${inputEnd}`, "g"), inputEndReplacement);
+  }
+  return fixed;
+};
+
 const normalizeJavaScriptJudge0Input = (code = "") => {
   const source = String(code || "");
   const hasReadline =
@@ -80,6 +106,8 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
         "$1    pass\n",
       );
     }
+    cleaned = ensureBlockMarkersOnOwnLine(cleaned, langName);
+
     const markerPrefix = /python/i.test(String(langName)) ? "#" : "//";
     if (!cleaned.includes(BLOCK_MARKERS.implStart) && /TODO|Implement the solution here/i.test(cleaned)) {
       cleaned = cleaned.replace(
@@ -125,6 +153,35 @@ const parseJson = (text) => {
   return JSON.parse(cleaned);
 };
 
+/**
+ * Find boilerplate code for a language. AI sometimes returns shortened keys
+ * (e.g. "C++" instead of "C++ (GCC 13.2.0)"). Try exact match first, then
+ * fallback to partial/fuzzy match.
+ */
+const getBoilerplateForLanguage = (boilerplateCode, languageName) => {
+  if (!boilerplateCode || typeof boilerplateCode !== "object") return "";
+  const exact = boilerplateCode[languageName];
+  if (exact && String(exact).trim()) return exact;
+
+  const langLower = String(languageName || "").toLowerCase();
+  const baseLang = String(languageName || "").split(" ")[0] || "";
+
+  for (const key of Object.keys(boilerplateCode)) {
+    const code = boilerplateCode[key];
+    if (!code || !String(code).trim()) continue;
+    const keyLower = key.toLowerCase();
+    if (
+      keyLower === langLower ||
+      langLower.startsWith(keyLower) ||
+      keyLower.startsWith(baseLang.toLowerCase()) ||
+      langLower.includes(keyLower)
+    ) {
+      return code;
+    }
+  }
+  return "";
+};
+
 const generateBoilerplateWithGemini = async ({
   genAI,
   modelName = process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
@@ -133,13 +190,19 @@ const generateBoilerplateWithGemini = async ({
   testCases,
   languages,
 }) => {
-  const languageNames = (languages || [])
+  const languageList = languages || [];
+  const languageNames = languageList
     .map((lang) => lang.languageName || lang.name)
-    .join(", ");
-  const instructionsBlock = buildLanguageInstructionsBlock(languages || []);
+    .filter(Boolean);
+  const languageNamesStr = languageNames.join(", ");
+  const instructionsBlock = buildLanguageInstructionsBlock(languageList);
+
+  const expectedKeysExample = languageNames.length
+    ? languageNames.map((n) => `"${n}": "code for ${n.split(" ")[0]}"`).join(",\n    ")
+    : '"Language Name": "code"';
 
   const prompt = `
-Generate boilerplate code for: ${languageNames}
+Generate boilerplate code for these EXACT languages (use these strings as JSON keys): ${languageNamesStr}
 
 Problem Title: ${questionTitle}
 Problem Statement:
@@ -152,21 +215,23 @@ Language-wise Judge0 instructions:
 ${instructionsBlock}
 
 Global constraints:
-1) Do NOT include solution logic.
-2) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
-3) MUST keep two explicit sections in each language:
+1) Do NOT include solution logic. NO commented example code, pseudo-solutions, or explanatory comments.
+2) Implementation block must be MINIMAL: only function signature, one line "// TODO: Implement the solution", and placeholder return (e.g. return 0; or pass). Do NOT add "Example:", "Example loop:", or any commented pseudo-code - it can cause execution issues.
+3) Include only imports, input parsing, function/method skeleton with TODO, and output hook.
+4) MUST keep two explicit sections in each language:
    A) Input section in entrypoint (main) wrapped by markers ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
-   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function (first line after start marker = function signature, e.g. int solve(...) { or def solve(...):, then body with TODO, then closing brace). Do NOT put a whole class or extra wrappers between the markers; the content between markers must be exactly one solve function.
-4) Java: use public class Main with public static int solve(...) (or appropriate return type) inside Main; do not use a nested class Solution.
-5) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input().
-6) main/entrypoint must call solve(...) and print the result. Keep boilerplate minimal; avoid long comment blocks.
-7) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); ABSOLUTE BAN: no readline/createInterface/readline.on.
-8) Use real newline chars in code. Output ONLY the JSON object: no text before/after, no markdown fences.
+   B) Implementation section: markers ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap ONLY the solve function. Each marker MUST be on its own line with the language's comment prefix (e.g. // HC_IMPLEMENTATION_BLOCK_END for C++/Java/JS, # HC_IMPLEMENTATION_BLOCK_END for Python). First line after start marker = function signature, then minimal body with TODO and placeholder return, then closing brace, then end marker on new line.
+5) Java: use public class Main with public static int solve(...) (or appropriate return type) inside Main; do not use a nested class Solution.
+6) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input().
+7) main/entrypoint must call solve(...) and print the result. Keep boilerplate clean - no example comments.
+8) JavaScript must use ONLY: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); ABSOLUTE BAN: no readline/createInterface/readline.on.
+9) Use real newline chars in code. Output ONLY the JSON object: no text before/after, no markdown fences.
+10) CRITICAL: The boilerplateCode object keys MUST exactly match the language names above (e.g. "${languageNames[0] || "C++ (GCC 13.2.0)"}" not "C++").
 
-Return ONLY valid JSON:
+Return ONLY valid JSON with EXACT keys:
 {
   "boilerplateCode": {
-    "Language Name": "code"
+    ${expectedKeysExample}
   }
 }
 `;
@@ -189,4 +254,4 @@ Return ONLY valid JSON:
   };
 };
 
-module.exports = { generateBoilerplateWithGemini };
+module.exports = { generateBoilerplateWithGemini, getBoilerplateForLanguage };

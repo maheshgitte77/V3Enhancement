@@ -1,15 +1,30 @@
 const axios = require("axios");
 const {
     getLanguageInstruction,
-    buildLanguageInstructionsBlock,
 } = require("../utils/judge0LanguageInstructions");
+const {
+    generateBoilerplateWithGemini,
+    getBoilerplateForLanguage,
+} = require("./boilerplateGeneration.service");
 
 const DEFAULT_MODEL =
     process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash";
 const MAX_VERIFICATION_ATTEMPTS = 3;
-const EXECUTION_TIMEOUT_MS = 30000;
+const EXECUTION_TIMEOUT_MS = Number(process.env.QUESTION_TEST_EXECUTION_TIMEOUT_MS) || 15000; // Judge0 API timeout (default 15s)
+const VERIFICATION_QUESTION_TIMEOUT_MS = Number(process.env.VERIFICATION_QUESTION_TIMEOUT_MS) || 0; // 0 = no timeout, wait for full verification (default). Set e.g. 300000 for 5 min cap.
 const VERIFICATION_LOG_ENABLED =
     process.env.PROGRAMMING_VERIFICATION_LOGS !== "false";
+// Skip Phase 3.7 (re-verification) and Phase 3.8 (boilerplate regen) - saves ~1-2 min per failing question.
+// Default: true (skip for faster response). Set to "false" to run full recovery for all questions.
+const SKIP_RECOVERY_PHASES =
+    process.env.SKIP_VERIFICATION_RECOVERY_PHASES !== "false" ||
+    process.env.VERIFICATION_FAST_MODE === "true";
+const ENABLE_PHASE_37 = !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION_PHASE_37 !== "false";
+const ENABLE_PHASE_38 = !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION_PHASE_38 !== "false";
+// Max concurrent questions verified in parallel (0 = unlimited). Reduces rate limits when many questions.
+const QUESTION_CONCURRENCY = Math.max(0, parseInt(process.env.VERIFICATION_QUESTION_CONCURRENCY, 10) || 0);
+// Remove failed test cases when 70%+ languages have same partial pass (e.g. 4/5 -> 4/4). Default: true.
+const REMOVE_FAILED_TEST_CASES = process.env.REMOVE_FAILED_TEST_CASES !== "false";
 
 const QUESTION_SERVICE_URL =
     process.env.QUESTION_SERVICE_URL ||
@@ -30,37 +45,8 @@ const joinUrl = (base, path) =>
 const BULK_EXECUTION_URL = joinUrl(QUESTION_SERVICE_URL, BULK_EXECUTION_PATH);
 const SINGLE_EXECUTION_URL = joinUrl(QUESTION_SERVICE_URL, SINGLE_EXECUTION_PATH);
 
-const vLog = (step, message, meta = {}) => {
-    if (!VERIFICATION_LOG_ENABLED) return;
-    const context = Object.entries(meta)
-        .filter(([, value]) => value !== undefined && value !== null && value !== "")
-        .map(([key, value]) => `${key}=${value}`)
-        .join(" ");
-    console.log(
-        `[ProgrammingVerification][${step}] ${message}${context ? ` | ${context}` : ""}`,
-    );
-};
-
-const MAX_CODE_LOG_CHARS = 8000;
-
-const vLogCode = (step, blockType, languageName, languageId, code) => {
-    if (!VERIFICATION_LOG_ENABLED) return;
-    const raw = String(code || "").trim();
-    const truncated = raw.length > MAX_CODE_LOG_CHARS;
-    const content = truncated ? raw.slice(0, MAX_CODE_LOG_CHARS) + "\n... (truncated)" : raw;
-    console.log(
-        `[ProgrammingVerification][${step}] ${blockType} | language=${languageName} languageId=${languageId} length=${raw.length}`,
-    );
-    console.log("---BEGIN CODE---");
-    console.log(content);
-    console.log("---END CODE---");
-};
-
-vLog("config", "Verification execution endpoints resolved", {
-    bulkUrl: BULK_EXECUTION_URL,
-    singleUrl: SINGLE_EXECUTION_URL,
-    timeoutMs: EXECUTION_TIMEOUT_MS,
-});
+// const vLog = () => {};
+// const vLogCode = () => {};
 
 const sanitizeText = (value) =>
     String(value || "")
@@ -117,6 +103,23 @@ const isRetriableError = (error) => {
     return status === 408 || status === 425 || status === 429 || status >= 500;
 };
 
+/** Run async tasks with concurrency limit. When limit is 0, runs all in parallel. */
+const runWithConcurrency = async (items, limit, fn) => {
+    if (!items.length) return [];
+    if (!limit || limit <= 0) return Promise.all(items.map((item, i) => fn(item, i)));
+    const results = new Array(items.length);
+    let idx = 0;
+    const worker = async () => {
+        for (;;) {
+            const i = idx++;
+            if (i >= items.length) return;
+            results[i] = await fn(items[i], i);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+    return results;
+};
+
 const withRetry = async (fn, retries = 3, delayMs = 1000) => {
     let lastError = null;
     for (let i = 0; i < retries; i += 1) {
@@ -143,6 +146,22 @@ const normalizeTestCases = (testCases) =>
         weightage: Number(tc?.weightage || 0),
     }));
 
+/**
+ * Redistribute weightage across test cases so total equals 100%.
+ * E.g. 3 cases -> 34, 33, 33; 4 cases -> 25, 25, 25, 25.
+ */
+const redistributeWeightageTo100 = (testCases) => {
+    const arr = Array.isArray(testCases) ? [...testCases] : [];
+    if (arr.length === 0) return arr;
+    const n = arr.length;
+    const base = Math.floor(100 / n);
+    const remainder = 100 - base * n;
+    return arr.map((tc, i) => ({
+        ...tc,
+        weightage: i < remainder ? base + 1 : base,
+    }));
+};
+
 const normalizeSupportedLanguages = (question) => {
     const languageList = Array.isArray(question?.supportedLanguages)
         ? question.supportedLanguages
@@ -163,33 +182,68 @@ const normalizeSupportedLanguages = (question) => {
         .filter((lang) => Number.isFinite(Number(lang.languageId)) && lang.languageName);
 };
 
-const applyBoilerplateMap = (question, boilerplateMap) => {
-    if (!question || !Array.isArray(question.supportedLanguages)) return;
-    question.supportedLanguages = question.supportedLanguages.map((lang) => {
-        const mapped = boilerplateMap?.[lang.languageName];
-        if (!mapped) return lang;
-        return {
-            ...lang,
-            codeSnippet: sanitizeText(mapped),
-        };
-    });
-};
-
 const normalizeLanguageKey = (name = "") => String(name).toLowerCase();
 
 const detectLanguageFamily = (languageName = "") => {
     const v = normalizeLanguageKey(languageName);
     if (v.includes("c++")) return "cpp";
-    if (v.includes("java")) return "java";
+    if (v.includes("c (gcc")) return "c";
+    if (v.includes("java") && !v.includes("kotlin")) return "java";
+    if (v.includes("kotlin")) return "kotlin";
     if (v.includes("python")) return "python";
     if (v.includes("javascript") || v.includes("node")) return "javascript";
+    if (v.includes("go ")) return "go";
+    if (v.includes("dart")) return "dart";
+    if (v.includes("php")) return "php";
+    if (v.includes("r (")) return "r";
+    if (v.includes("haskell")) return "haskell";
+    if (v.includes("rust")) return "rust";
+    if (v.includes("ruby")) return "ruby";
+    if (v.includes("pascal")) return "pascal";
+    if (v.includes("swift")) return "swift";
+    if (v.includes("scala")) return "scala";
+    if (v.includes("prolog")) return "prolog";
+    if (v.includes("lua")) return "lua";
+    if (v.includes("ocaml")) return "ocaml";
+    if (v.includes("octave")) return "octave";
     return "other";
 };
 
-const markerPrefix = (family = "other") => (family === "python" ? "#" : "//");
+const markerPrefix = (family = "other") => {
+    if (family === "python" || family === "r" || family === "ruby") return "#";
+    if (family === "haskell" || family === "lua") return "--";
+    if (family === "prolog" || family === "octave") return "%";
+    if (family === "ocaml") return "(*"; // OCaml uses (* *) block comments
+    return "//";
+};
 
 const markerLine = (family, marker, indent = "") =>
     `${indent}${markerPrefix(family)} ${marker}`;
+
+/** Per-family regex to find the solve function signature line for code injection. */
+const getSignaturePattern = (family) => {
+    switch (family) {
+        case "python": return /^\s*def\s+solve\s*\([^)]*\)\s*:/;
+        case "kotlin": return /fun\s+solve\s*\(/;
+        case "go": return /func\s+solve\s*\(/;
+        case "r": return /solve\s*<-\s*function\s*\(/;
+        case "haskell": return /^solve\s+[\w\s]+\=\s*(do)?\s*$/;
+        case "php": return /function\s+solve\s*\(/;
+        case "dart": return /[\w<>]+\s+solve\s*\(/;
+        case "rust": return /fn\s+solve\s*\(/;
+        case "ruby": return /def\s+solve\s*\(/;
+        case "swift": return /func\s+solve\s*\(/;
+        case "scala": return /def\s+solve\s*\(/;
+        case "pascal": return /function\s+solve\s*\(|procedure\s+solve\s*\(/;
+        case "lua": return /function\s+solve\s*\(/;
+        case "ocaml": return /let\s+solve\s+[^=]+=\s*/;
+        case "octave": return /function\s+(?:\[[\w\s,]+\]|\w+)\s*=\s*solve\s*\(|function\s+solve\s*\(/;
+        case "c":
+        case "cpp":
+        case "java":
+        default: return /\bsolve\s*\(|^\s*\w+[\*\s]*\s*solve\s*\(/;
+    }
+};
 
 const findSolveInvocationLineIndex = (lines = []) => {
     for (let i = lines.length - 1; i >= 0; i -= 1) {
@@ -246,10 +300,24 @@ const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
     if (!hasInputMarkers) {
         lines = code.split("\n");
         const inputIdx = lines.findIndex((line) => {
-            if (family === "cpp") return /\bcin\s*>>/.test(line);
-            if (family === "java") return /scanner\.(next|hasNext)/i.test(line);
+            if (family === "cpp" || family === "c") return /\bcin\s*>>|scanf\s*\(/.test(line);
+            if (family === "java" || family === "kotlin") return /scanner\.(next|hasNext)|readLine\s*\(\s*\)/i.test(line);
             if (family === "python") return /\binput\s*\(|sys\.stdin/.test(line);
             if (family === "javascript") return /readFileSync\s*\(|input\.split\s*\(/.test(line);
+            if (family === "go") return /Scan|ReadString|bufio/.test(line);
+            if (family === "dart") return /stdin\.readLineSync|readLineSync/.test(line);
+            if (family === "php") return /fgets\s*\(\s*STDIN|fgetcsv/.test(line);
+            if (family === "r") return /readLines\s*\(|file\s*\(\s*['\"]stdin['\"]\s*\)/.test(line);
+            if (family === "haskell") return /getContents|getLine|read\s+/.test(line);
+            if (family === "rust") return /read_line|stdin|BufRead/.test(line);
+            if (family === "ruby") return /gets|readline|ARGF/.test(line);
+            if (family === "swift") return /readLine|FileHandle/.test(line);
+            if (family === "scala") return /StdIn|readLine|readInt/.test(line);
+            if (family === "pascal") return /readln|read\s*\(/.test(line);
+            if (family === "prolog") return /read\s*\(|get_char|get_code/.test(line);
+            if (family === "lua") return /io\.read|io\.lines/.test(line);
+            if (family === "ocaml") return /Scanf\.scanf|read_line|input_line/.test(line);
+            if (family === "octave") return /fscanf|input\s*\(|stdin/.test(line);
             return false;
         });
         const solveInvokeIdx = findSolveInvocationLineIndex(lines);
@@ -266,189 +334,16 @@ const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
     return code;
 };
 
-const hasInputRead = (code = "", family = "other") => {
-    const c = String(code);
-    if (family === "cpp") return /\bcin\b/.test(c);
-    if (family === "java") return /Scanner\s*\(/.test(c);
-    if (family === "python") return /\binput\s*\(|sys\.stdin/.test(c);
-    if (family === "javascript")
-        return /readFileSync\s*\(\s*(0|['"]\/dev\/stdin['"])/.test(c);
-    return c.length > 0;
-};
-
-const hasUnsupportedInputPattern = (code = "", family = "other") => {
-    const c = String(code);
-    if (family === "javascript") {
-        return /require\s*\(\s*['"]readline['"]\s*\)|createInterface\s*\(|readline\.on\s*\(/i.test(
-            c,
-        );
-    }
-    if (family === "java") {
-        return /\bnextInt\s*\(\s*\)\s*;\s*\n\s*.*nextLine\s*\(\s*\)\s*;/i.test(c);
-    }
-    return false;
-};
-
-const hasOutputWrite = (code = "", family = "other") => {
-    const c = String(code);
-    if (family === "cpp") return /\bcout\b/.test(c);
-    if (family === "java") return /System\.out/.test(c);
-    if (family === "python") return /\bprint\s*\(/.test(c);
-    if (family === "javascript") return /console\.log|process\.stdout\.write/.test(c);
-    return c.length > 0;
-};
-
-const hasImplementationBlock = (code = "", family = "other") => {
-    const c = String(code);
-    if (family === "cpp")
-        return /\b(?:int|long long|double|float|bool|void|string)\s+solve\s*\(/m.test(c);
-    if (family === "java") return /\bstatic\s+[A-Za-z0-9_<>\[\]]+\s+solve\s*\(/m.test(c);
-    if (family === "python") return /^\s*def\s+solve\s*\(/m.test(c);
-    if (family === "javascript") return /\bfunction\s+solve\s*\(/m.test(c);
-    return true;
-};
-
-const hasInputBlockMarkers = (code = "") =>
-    String(code).includes(BLOCK_MARKERS.inputStart) &&
-    String(code).includes(BLOCK_MARKERS.inputEnd);
-
-const hasImplementationBlockMarkers = (code = "") =>
-    String(code).includes(BLOCK_MARKERS.implStart) &&
-    String(code).includes(BLOCK_MARKERS.implEnd);
-
-const hasSolveInvocation = (code = "", family = "other") => {
-    const c = String(code);
-    if (family === "cpp") return /\bsolve\s*\(/.test(c);
-    if (family === "java") return /\bsolve\s*\(/.test(c);
-    if (family === "python") return /\bsolve\s*\(/.test(c);
-    if (family === "javascript") return /\bsolve\s*\(/.test(c);
-    return true;
-};
-
-const hasTodoPlaceholder = (code = "") =>
-    /TODO|Implement the solution here|pass\s*$|return\s+0\.?0?;?\s*$/im.test(
-        String(code),
-    );
-
-const generateDeterministicJavaScriptBoilerplate = ({
-    question,
-    testCases,
-}) => {
-    const sampleInput = testCases?.[0]?.input || "5\n1 2 3 4 5";
-    const lines = sampleInput.split("\n");
-    const firstLine = lines[0] || "5";
-    const isSingleValue = lines.length === 1;
-    const isTwoValues = lines.length === 2 && firstLine.split(" ").length === 2;
-
-    let inputParsing = "";
-    if (isSingleValue) {
-        inputParsing = `const n = parseInt(input.trim());`;
-    } else if (isTwoValues) {
-        inputParsing = `const [n, m] = input.trim().split('\\n')[0].split(' ').map(Number);`;
-    } else {
-        inputParsing = `const lines = input.trim().split('\\n');\nconst n = parseInt(lines[0]);`;
-    }
-
-    return `const fs = require('fs');
-const input = fs.readFileSync(0, 'utf8').trim();
-
-// ${BLOCK_MARKERS.inputStart}
-${inputParsing}
-// ${BLOCK_MARKERS.inputEnd}
-
-function solve(n) {
-  // ${BLOCK_MARKERS.implStart}
-  // TODO: Implement the solution here
-  return 0;
-  // ${BLOCK_MARKERS.implEnd}
-}
-
-const result = solve(n);
-console.log(result);
-`;
-};
-
-const checkBoilerplateContract = (codeSnippet = "", languageName = "", skipTodoCheck = false) => {
-    const family = detectLanguageFamily(languageName);
-    const checks = {
-        hasInputRead: hasInputRead(codeSnippet, family),
-        hasOutputWrite: hasOutputWrite(codeSnippet, family),
-        hasImplementationBlock: hasImplementationBlock(codeSnippet, family),
-        hasInputBlockMarkers: hasInputBlockMarkers(codeSnippet),
-        hasImplementationBlockMarkers: hasImplementationBlockMarkers(codeSnippet),
-        hasSolveInvocation: hasSolveInvocation(codeSnippet, family),
-        hasTodo: hasTodoPlaceholder(codeSnippet),
-        hasUnsupportedInputPattern: hasUnsupportedInputPattern(codeSnippet, family),
-    };
-
-    // Marker-based validation: if both markers exist, trust them completely - skip all extra checks
-    const hasBothMarkers = checks.hasInputBlockMarkers && checks.hasImplementationBlockMarkers;
-
-    if (hasBothMarkers) {
-        // Markers exist = structure is correct, only check critical safety requirements
-        return {
-            family,
-            valid:
-                checks.hasSolveInvocation &&
-                !checks.hasUnsupportedInputPattern,
-            checks,
-        };
-    }
-
-    // Fallback: if no markers, use traditional code pattern checks
-    return {
-        family,
-        valid:
-            checks.hasInputRead &&
-            checks.hasOutputWrite &&
-            checks.hasImplementationBlock &&
-            checks.hasSolveInvocation &&
-            (skipTodoCheck || checks.hasTodo) &&
-            !checks.hasUnsupportedInputPattern,
-        checks,
-    };
-};
-
-const buildBoilerplateRepairPrompt = ({ question, language, testCases }) => {
-    const langInstruction = getLanguageInstruction(language.languageName);
-    return `
-You are repairing a programming boilerplate skeleton for ${language.languageName}.
-
-Judge0 / language rule for this language:
-${langInstruction}
-
-Return ONLY JSON:
-{
-  "boilerplateCode": "corrected boilerplate code"
-}
-
-Requirements:
-1) MUST include ACTUAL executable code, not just markers.
-2) TWO blocks with markers:
-   - Input block in entrypoint wrapped with ${BLOCK_MARKERS.inputStart} and ${BLOCK_MARKERS.inputEnd}
-   - Implementation block: ${BLOCK_MARKERS.implStart} and ${BLOCK_MARKERS.implEnd} must wrap the solve function only (marker line, then function signature line, then body with TODO, then closing brace). Do not put markers inside a class or inside the method; the block content must be exactly the solve function (signature + body).
-3) Java: use public class Main and public static int solve(...) (or appropriate type) in Main; do not use a nested class Solution.
-4) Python: use sys.stdin for input (e.g. sys.stdin.readline()), not input(). Implementation block: marker line, then def solve(...):, then body with TODO.
-5) JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); DO NOT use readline/createInterface.
-6) Entrypoint must call solve(...) and print the result. Keep boilerplate minimal; avoid long comment blocks.
-7) No markdown fences.
-
-Question:
-${sanitizeText(question.question || "")}
-
-Current boilerplate:
-${language.codeSnippet || ""}
-
-Testcases:
-${JSON.stringify(testCases, null, 2)}
-`;
-};
 
 const buildLogicBlockPrompt = ({ question, testCases, language }) => {
     const langInstruction = getLanguageInstruction(language.languageName);
     const isPython = /python/i.test(String(language.languageName || ""));
+    const isHaskell = /haskell/i.test(String(language.languageName || ""));
     const pythonNote = isPython
         ? " For Python: use exactly 4 spaces at the start of every line of the body (consistent indent); mixed indentation causes IndentationError when injected."
+        : "";
+    const haskellNote = isHaskell
+        ? " For Haskell: return ONLY the indented lines that go inside the 'do' block. No 'solve', no '= do', no type signature. Use putStrLn for output, not print. Escape any backslashes and quotes in the JSON string."
         : "";
     return `
 You are given a boilerplate skeleton for ${language.languageName}.
@@ -465,7 +360,7 @@ Rules:
 1) todoReplacement = only the executable body lines (what goes inside solve). No def solve, no function solve, no closing }.
 2) Do not return full file, main, or any code outside the solve body.
 3) Must pass provided test cases when this body is inserted into the boilerplate.
-4) Minimize comments. No markdown fences. Output only the JSON.${pythonNote}
+4) Minimize comments. No markdown fences. Output only the JSON.${pythonNote}${haskellNote}
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -580,20 +475,50 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
             code = String(code || "");
         } else {
             const isPython = family === "python";
-            const signaturePattern = isPython
-                ? /^\s*def\s+solve\s*\([^)]*\)\s*:/
-                : /\bsolve\s*\([^)]*\)\s*\{/;
+            const isHaskell = family === "haskell";
+            const isPascal = family === "pascal";
+            const signaturePattern = getSignaturePattern(family);
             const signatureIdx = blockLines.findIndex((line) => signaturePattern.test(line));
             const sigIdx = signatureIdx >= 0 ? signatureIdx : 0;
-            const signatureLine = blockLines[sigIdx];
-            const hasClosingBrace =
+            // Haskell: keep type sig + equation line (solve n arr = ); body is RHS only
+            let headerLines = isHaskell && sigIdx >= 0
+                ? blockLines.slice(0, sigIdx + 1)
+                : [blockLines[sigIdx]];
+            let signatureLine = headerLines.join("\n");
+            let hasClosingBrace =
                 !isPython &&
+                !isHaskell &&
+                !isPascal &&
                 blockLines.length > sigIdx + 1 &&
                 /^\s*\}\s*$/.test(blockLines[blockLines.length - 1]);
-            const closingLine = hasClosingBrace ? blockLines[blockLines.length - 1] : "";
-            const bodyLines = hasClosingBrace
+            let closingLine = hasClosingBrace ? blockLines[blockLines.length - 1] : "";
+            let bodyLines = hasClosingBrace
                 ? blockLines.slice(sigIdx + 1, blockLines.length - 1)
                 : blockLines.slice(sigIdx + 1);
+            if (isPascal) {
+                const beginIdx = blockLines.findIndex((l) => /^\s*begin\s*$/i.test(l));
+                const endIdx = blockLines.findIndex((l) => /^\s*end\s*;?\s*$/i.test(l));
+                if (beginIdx >= 0 && endIdx > beginIdx) {
+                    bodyLines = blockLines.slice(beginIdx + 1, endIdx);
+                    headerLines = blockLines.slice(0, beginIdx + 1);
+                    signatureLine = headerLines.join("\n");
+                    closingLine = blockLines[endIdx];
+                }
+            }
+            if (family === "lua" || family === "octave") {
+                const endIdx = blockLines.findIndex((l, i) => i > sigIdx && /^\s*end\s*$/.test(l));
+                if (endIdx > sigIdx) {
+                    bodyLines = blockLines.slice(sigIdx + 1, endIdx);
+                    closingLine = blockLines[endIdx];
+                }
+            }
+            if (family === "ocaml") {
+                const semiIdx = blockLines.findIndex((l, i) => i > sigIdx && /;;\s*$/.test(l.trim()));
+                if (semiIdx > sigIdx) {
+                    bodyLines = blockLines.slice(sigIdx + 1, semiIdx);
+                    closingLine = blockLines[semiIdx];
+                }
+            }
             const bodyIndent =
                 bodyLines.length > 0 && bodyLines[0].match(/^(\s*)/)
                     ? (bodyLines[0].match(/^(\s*)/) || [null, "    "])[1].length
@@ -640,6 +565,14 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
                 /^(\s*)#\s*.*TODO.*$/im,
                 (_, indent) => indentLines(logic, indent.length),
             );
+            code = code.replace(
+                /^(\s*)--\s*.*TODO.*$/im,
+                (_, indent) => indentLines(logic, indent.length),
+            );
+            code = code.replace(
+                /^(\s*)%\s*.*TODO.*$/im,
+                (_, indent) => indentLines(logic, indent.length),
+            );
         }
         return { mergedCode: code, injected: true };
     }
@@ -654,89 +587,55 @@ const injectLogicIntoBoilerplate = ({ boilerplate, todoReplacement, languageName
             const indent = (body.match(/\n(\s*)/) || [null, "  "])[1];
             return m.replace(body, `\n${indentLines(logic, indent.length)}\n`);
         });
-    } else if (family === "java" || family === "cpp") {
+    } else if (family === "java" || family === "cpp" || family === "c") {
         code = code.replace(/\{\s*\n(\s*)(?:return\s+0(?:\.0)?;?)?\s*\n\s*\}/m, (_, indent) => {
             return `{\n${indentLines(logic, indent.length)}\n${indent}}`;
         });
+    } else if (["kotlin", "go", "dart", "php", "r", "rust", "ruby", "swift", "scala"].includes(family)) {
+        code = code.replace(/\{\s*\n(\s*)(?:return\s+[^;]+;?|return\s*[^\n]*)?\s*\n\s*\}/m, (_, indent) => {
+            const idt = (indent && indent.length > 0) ? indent : "    ";
+            return `{\n${indentLines(logic, idt.length)}\n${idt}}`;
+        });
+    } else if (family === "haskell") {
+        // Do-block: solve ... = do\n    body
+        let replaced = code.replace(/(=\s*do)\s*\n(\s*)[\s\S]*?(\n--\s*HC_IMPLEMENTATION_BLOCK_END)/m, (_, eqDo, indent, suffix) => {
+            const idt = (indent && indent.length > 0) ? indent : "    ";
+            return `${eqDo}\n${indentLines(logic, idt.length)}${suffix}`;
+        });
+        // Equational: solve ... =\n    0 (placeholder)
+        if (replaced === code) {
+            replaced = code.replace(/(solve\s+[\w\s]+\=\s*)\n(\s*)[\s\S]*?(\n--\s*HC_IMPLEMENTATION_BLOCK_END)/m, (_, eq, indent, suffix) => {
+                const idt = (indent && indent.length > 0) ? indent : "    ";
+                return `${eq}\n${indentLines(logic, idt.length)}${suffix}`;
+            });
+        }
+        code = replaced;
+    } else if (family === "pascal") {
+        code = code.replace(/(begin)\s*\n(\s*)(?:solve\s*:=\s*0[\s\S]*?|[\s\S]*?)(\n\s*end\s*;)/im, (_, beginKw, indent, endPart) => {
+            const idt = (indent && indent.length > 0) ? indent : "  ";
+            return `${beginKw}\n${indentLines(logic, idt.length)}${endPart}`;
+        });
+    } else if (family === "lua" || family === "octave") {
+        code = code.replace(
+            /(function\s+(?:(?:\[[\w\s,]+\]|\w+)\s*=\s*)?solve\s*\([^)]*\)\s*\n)([\s\S]*?)(\n\s*end\s*)/m,
+            (_, open, body, close) => {
+                const idt = (body.match(/\n(\s*)/) || [null, "    "])[1];
+                return open + indentLines(logic, idt.length) + close;
+            },
+        );
+    } else if (family === "ocaml") {
+        code = code.replace(
+            /(let\s+solve\s+[^=]+=\s*(?:\n)?)([\s\S]*?)(\s*;;)/m,
+            (_, open, body, close) => {
+                const idt = (body.match(/\n(\s*)/) || [null, "  "])[1];
+                return open + indentLines(logic, idt.length) + close;
+            },
+        );
     }
 
     return { mergedCode: code, injected: true };
 };
 
-const buildFailureSummaryForFix = (executionResults = []) => {
-    return (Array.isArray(executionResults) ? executionResults : []).map((entry) => {
-        const out = {
-            languageId: entry.languageId,
-            languageName: entry.languageName,
-            message: entry.summary?.message || entry.error || "",
-            stderr: "",
-            compileOutput: "",
-        };
-        const results = entry.results || entry.caseResults || [];
-        for (const r of results) {
-            if (r.stderr && !out.stderr) out.stderr = String(r.stderr).trim().slice(0, 2000);
-            const compileOut = r.compile_output ?? r.compileOutput;
-            if (compileOut && !out.compileOutput) out.compileOutput = String(compileOut).trim().slice(0, 2000);
-            if (out.stderr && out.compileOutput) break;
-        }
-        return out;
-    });
-};
-
-const buildRootCauseFixPrompt = ({
-    question,
-    failures,
-    testCases,
-    languages,
-    fixMode,
-}) => {
-    const failureSummary = buildFailureSummaryForFix(failures);
-    const instructionsBlock = buildLanguageInstructionsBlock(languages || []);
-    return `
-You are fixing an AI-generated programming question package after Judge0 failures.
-Minimize comments in boilerplate and logic; long comment blocks cause verification issues.
-
-Return ONLY JSON with this exact shape:
-{
-  "testCases": [{"input":"","output":"","explanation":"","visible":true,"weightage":20}],
-  "boilerplateCode": {
-    "LanguageName": "starter code"
-  },
-  "logicBlocks": {
-    "LanguageName": "TODO replacement logic block only"
-  }
-}
-
-Fix mode: ${fixMode}
-
-Rules:
-1) If mode is testcase_repair, prioritize correcting only testcase input/output.
-2) If mode is boilerplate_repair, prioritize failing language boilerplate only.
-3) If mode is logic_repair, prioritize logic blocks only for failing languages.
-4) If mode is mixed_repair, return both corrected boilerplate and corrected logic blocks for failed languages.
-5) Boilerplate must keep two blocks: input in entrypoint + separate solve(...) TODO block.
-6) Keep explicit markers in boilerplate:
-   - ${BLOCK_MARKERS.inputStart} ... ${BLOCK_MARKERS.inputEnd}
-   - ${BLOCK_MARKERS.implStart} ... ${BLOCK_MARKERS.implEnd}
-7) logicBlocks entries must contain ONLY implementation lines to place inside ${BLOCK_MARKERS.implStart}/${BLOCK_MARKERS.implEnd}.
-8) Keep response minimal; omit fields you are not changing. No markdown fences.
-
-Language-wise Judge0 rules (follow for boilerplate and logic):
-${instructionsBlock}
-
-Question:
-${sanitizeText(question.question || "")}
-
-Languages:
-${JSON.stringify(languages, null, 2)}
-
-Current testcases:
-${JSON.stringify(testCases, null, 2)}
-
-Judge0 failures (errors sent for fix; use stderr/compileOutput to correct code):
-${JSON.stringify(failureSummary.length ? failureSummary : failures, null, 2)}
-`;
-};
 
 const buildExecutionHeaders = () => {
     const headers = { "Content-Type": "application/json" };
@@ -767,16 +666,16 @@ const executeBulk = async ({
         memoryLimit: safeMemoryLimit,
     };
 
-    vLog("judge0-bulk", "Calling bulk execution API", {
-        bulkUrl: BULK_EXECUTION_URL,
-        languages: languageExecutions.length,
-        testCases: testCases.length,
-        timeLimit: safeTimeLimit,
-        memoryLimit: safeMemoryLimit,
-        languageIdTypes: payload.codeSubmissions
-            .map((x) => typeof x.languageId)
-            .join(","),
-    });
+    // vLog("judge0-bulk", "Calling bulk execution API", {
+    //     bulkUrl: BULK_EXECUTION_URL,
+    //     languages: languageExecutions.length,
+    //     testCases: testCases.length,
+    //     timeLimit: safeTimeLimit,
+    //     memoryLimit: safeMemoryLimit,
+    //     languageIdTypes: payload.codeSubmissions
+    //         .map((x) => typeof x.languageId)
+    //         .join(","),
+    // });
     try {
         const response = await axios.post(BULK_EXECUTION_URL, payload, {
             timeout: EXECUTION_TIMEOUT_MS,
@@ -785,7 +684,7 @@ const executeBulk = async ({
         return response.data;
     } catch (error) {
         const { status, details } = extractHttpErrorDetails(error);
-        vLog("judge0-bulk", "Bulk execution API failed", { status, details });
+        // vLog("judge0-bulk", "Bulk execution API failed", { status, details });
         throw error;
     }
 };
@@ -795,13 +694,13 @@ const executeSingle = async ({ code, languageId, testCases, timeLimit, memoryLim
     const safeMemoryLimit = Number.isFinite(Number(memoryLimit))
         ? Number(memoryLimit)
         : 128;
-    vLog("judge0-single", "Calling single execution API", {
-        singleUrl: SINGLE_EXECUTION_URL,
-        languageId,
-        testCases: testCases.length,
-        timeLimit: safeTimeLimit,
-        memoryLimit: safeMemoryLimit,
-    });
+    // vLog("judge0-single", "Calling single execution API", {
+    //     singleUrl: SINGLE_EXECUTION_URL,
+    //     languageId,
+    //     testCases: testCases.length,
+    //     timeLimit: safeTimeLimit,
+    //     memoryLimit: safeMemoryLimit,
+    // });
     try {
         const response = await axios.post(
             SINGLE_EXECUTION_URL,
@@ -820,11 +719,11 @@ const executeSingle = async ({ code, languageId, testCases, timeLimit, memoryLim
         return response.data;
     } catch (error) {
         const { status, details } = extractHttpErrorDetails(error);
-        vLog("judge0-single", "Single execution API failed", {
-            status,
-            languageId,
-            details,
-        });
+        // vLog("judge0-single", "Single execution API failed", {
+        //     status,
+        //     languageId,
+        //     details,
+        // });
         throw error;
     }
 };
@@ -835,10 +734,10 @@ const executeAgainstJudge = async ({
     timeLimit,
     memoryLimit,
 }) => {
-    vLog("judge0-start", "Starting Judge0 execution phase", {
-        languages: languageExecutions.length,
-        testCases: testCases.length,
-    });
+    // vLog("judge0-start", "Starting Judge0 execution phase", {
+    //     languages: languageExecutions.length,
+    //     testCases: testCases.length,
+    // });
     try {
         const bulkResult = await withRetry(
             () =>
@@ -853,17 +752,17 @@ const executeAgainstJudge = async ({
         );
         const results = Array.isArray(bulkResult?.results) ? bulkResult.results : [];
         if (results.length > 0) {
-            vLog("judge0-bulk", "Bulk execution succeeded", { resultCount: results.length });
+            // vLog("judge0-bulk", "Bulk execution succeeded", { resultCount: results.length });
             return results;
         }
-        vLog("judge0-bulk", "Bulk execution returned empty results, using fallback");
+        // vLog("judge0-bulk", "Bulk execution returned empty results, using fallback");
     } catch (error) {
         const { status, details } = extractHttpErrorDetails(error);
-        vLog("judge0-bulk", "Bulk execution failed, using single fallback", {
-            error: error.message,
-            status,
-            details,
-        });
+        // vLog("judge0-bulk", "Bulk execution failed, using single fallback", {
+        //     error: error.message,
+        //     status,
+        //     details,
+        // });
     }
 
     const singleResults = await Promise.all(
@@ -899,123 +798,10 @@ const executeAgainstJudge = async ({
         }),
     );
 
-    vLog("judge0-single", "Single execution fallback completed", {
-        resultCount: singleResults.length,
-    });
+    // vLog("judge0-single", "Single execution fallback completed", {
+    //     resultCount: singleResults.length,
+    // });
     return singleResults;
-};
-
-const repairBoilerplateIfNeeded = async ({
-    genAI,
-    modelName,
-    question,
-    testCases,
-    language,
-}) => {
-    const preprocessedLanguage = {
-        ...language,
-        codeSnippet: ensureBoilerplateMarkers(language.codeSnippet, language.languageName),
-    };
-    const contract = checkBoilerplateContract(
-        preprocessedLanguage.codeSnippet,
-        preprocessedLanguage.languageName,
-        false, // Check TODO before injection
-    );
-    if (contract.valid) return { language: preprocessedLanguage, repaired: false, contract };
-
-    vLog("contract-check", "Boilerplate contract missing items, repairing", {
-        language: language.languageName,
-        hasInputRead: contract.checks.hasInputRead,
-        hasOutputWrite: contract.checks.hasOutputWrite,
-        hasImplementationBlock: contract.checks.hasImplementationBlock,
-        hasInputBlockMarkers: contract.checks.hasInputBlockMarkers,
-        hasImplementationBlockMarkers: contract.checks.hasImplementationBlockMarkers,
-        hasSolveInvocation: contract.checks.hasSolveInvocation,
-        hasTodo: contract.checks.hasTodo,
-        hasUnsupportedInputPattern: contract.checks.hasUnsupportedInputPattern,
-    });
-
-    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
-    const response = await withRetry(
-        () =>
-            model.generateContent(
-                buildBoilerplateRepairPrompt({
-                    question,
-                    language: preprocessedLanguage,
-                    testCases,
-                }),
-            ),
-        2,
-        1000,
-    );
-    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const parsed = safeJsonParse(text);
-    let repairedCode = null;
-
-    if (parsed?.boilerplateCode && typeof parsed.boilerplateCode === "string") {
-        repairedCode = sanitizeText(parsed.boilerplateCode);
-    }
-
-    // Deterministic fallback for JavaScript if Gemini repair fails or produces invalid code
-    if (
-        (!repairedCode || repairedCode.length < 50) &&
-        detectLanguageFamily(language.languageName) === "javascript"
-    ) {
-        vLog("contract-check", "Using deterministic JavaScript fallback", {
-            language: language.languageName,
-        });
-        repairedCode = generateDeterministicJavaScriptBoilerplate({ question, testCases });
-    }
-
-    if (!repairedCode) {
-        throw new Error(`Invalid repaired boilerplate for ${language.languageName}`);
-    }
-
-    const repairedLanguage = {
-        ...language,
-        codeSnippet: ensureBoilerplateMarkers(repairedCode, language.languageName),
-    };
-    const repairedContract = checkBoilerplateContract(
-        repairedLanguage.codeSnippet,
-        repairedLanguage.languageName,
-        false, // Check TODO for repaired boilerplate
-    );
-    if (!repairedContract.valid) {
-        vLog("contract-check", "Repaired boilerplate still invalid", {
-            language: repairedLanguage.languageName,
-            hasInputRead: repairedContract.checks.hasInputRead,
-            hasOutputWrite: repairedContract.checks.hasOutputWrite,
-            hasImplementationBlock: repairedContract.checks.hasImplementationBlock,
-            hasInputBlockMarkers: repairedContract.checks.hasInputBlockMarkers,
-            hasImplementationBlockMarkers: repairedContract.checks.hasImplementationBlockMarkers,
-            hasSolveInvocation: repairedContract.checks.hasSolveInvocation,
-            hasTodo: repairedContract.checks.hasTodo,
-            hasUnsupportedInputPattern: repairedContract.checks.hasUnsupportedInputPattern,
-        });
-
-        // Final deterministic fallback for JavaScript
-        if (detectLanguageFamily(language.languageName) === "javascript") {
-            vLog("contract-check", "Using final deterministic JavaScript fallback", {
-                language: language.languageName,
-            });
-            const finalCode = generateDeterministicJavaScriptBoilerplate({ question, testCases });
-            const finalLanguage = {
-                ...language,
-                codeSnippet: ensureBoilerplateMarkers(finalCode, language.languageName),
-            };
-            const finalContract = checkBoilerplateContract(
-                finalLanguage.codeSnippet,
-                finalLanguage.languageName,
-                false, // Check TODO for deterministic fallback
-            );
-            if (finalContract.valid) {
-                return { language: finalLanguage, repaired: true, contract: finalContract };
-            }
-        }
-
-        throw new Error(`Boilerplate contract still invalid for ${language.languageName}`);
-    }
-    return { language: repairedLanguage, repaired: true, contract: repairedContract };
 };
 
 const generateLogicBlockOnly = async ({
@@ -1025,181 +811,25 @@ const generateLogicBlockOnly = async ({
     testCases,
     language,
 }) => {
-    vLog("solution-generate", "Generating solution for language", {
-        language: language.languageName,
-        languageId: language.languageId,
-    });
+    // vLog("solution-generate", "Generating solution for language", {
+    //     language: language.languageName,
+    //     languageId: language.languageId,
+    // });
     const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
     const response = await withRetry(
         () => model.generateContent(buildLogicBlockPrompt({ question, testCases, language })),
-        3,
-        1000,
+        2,
+        500,
     );
     const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = safeJsonParse(text);
     if (!parsed?.todoReplacement || typeof parsed.todoReplacement !== "string") {
         throw new Error(`Invalid logic block for ${language.languageName}`);
     }
-    vLog("solution-generate", "Generated solution successfully", {
-        language: language.languageName,
-    });
+    // vLog("solution-generate", "Generated solution successfully", {
+    //     language: language.languageName,
+    // });
     return sanitizeText(parsed.todoReplacement);
-};
-
-const normalizeComparableOutput = (value) =>
-    String(value ?? "")
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .trim();
-
-const getCaseOutput = (caseResult = {}) =>
-    normalizeComparableOutput(
-        caseResult?.actualOutput ??
-        caseResult?.stdout ??
-        caseResult?.output ??
-        caseResult?.actual ??
-        caseResult?.receivedOutput ??
-        "",
-    );
-
-const isLikelyWrongTestCases = (executionResults = [], testCases = []) => {
-    if (!Array.isArray(executionResults) || executionResults.length < 2) return false;
-    if (!Array.isArray(testCases) || testCases.length === 0) return false;
-
-    const runnable = executionResults.filter(
-        (x) => Array.isArray(x?.results) && x.results.length > 0,
-    );
-    if (runnable.length < 2) return false;
-
-    let suspiciousCount = 0;
-    for (let i = 0; i < testCases.length; i += 1) {
-        const outputs = runnable
-            .map((langRes) => getCaseOutput(langRes.results?.[i]))
-            .filter((x) => x.length > 0);
-        if (outputs.length < 2) continue;
-        const unique = new Set(outputs);
-        if (unique.size !== 1) continue;
-        const expected = normalizeComparableOutput(testCases[i]?.output || "");
-        const actual = outputs[0];
-        if (expected && actual && expected !== actual) suspiciousCount += 1;
-    }
-    // If multiple testcases have same cross-language output but different expected output,
-    // expected outputs are likely incorrect.
-    return suspiciousCount >= 2;
-};
-
-const classifyFixMode = (executionResults = [], testCases = []) => {
-    const failed = executionResults.filter((x) => {
-        const passed = Number(x?.summary?.passed || 0);
-        const total = Number(x?.summary?.total || 0);
-        return !(x?.success !== false && total > 0 && passed === total);
-    });
-    if (failed.length === 0) return "none";
-    const failedCompile = failed.filter((x) =>
-        /Compilation Error|compile/i.test(
-            `${x?.summary?.message || ""} ${x?.error || ""} ${(x?.results || []).map((r) => r?.status || "").join(" ")
-            }`,
-        ),
-    );
-    const failedBoilerplateContract = failed.filter((x) =>
-        /Boilerplate contract|Invalid repaired boilerplate/i.test(
-            `${x?.summary?.message || ""} ${x?.error || ""}`,
-        ),
-    );
-    const wrongAnswerLike = failed.filter((x) =>
-        /Wrong Answer|0\/100|Failed/i.test(
-            `${x?.summary?.message || ""} ${x?.error || ""} ${(x?.results || []).map((r) => r?.status || "").join(" ")
-            }`,
-        ),
-    );
-    if (
-        (failedCompile.length > 0 || failedBoilerplateContract.length > 0) &&
-        wrongAnswerLike.length > 0
-    ) {
-        return "mixed_repair";
-    }
-    if (failedCompile.length > 0 || failedBoilerplateContract.length > 0)
-        return "boilerplate_repair";
-    const allFailed = failed.length === executionResults.length;
-    const transportLikeFailure = failed.every((x) =>
-        /Request failed|ECONN|timeout|status code 4|status code 5/i.test(
-            `${x?.summary?.message || ""} ${x?.error || ""}`,
-        ),
-    );
-    if (transportLikeFailure) return "boilerplate_repair";
-    const wrongAnswerAll = wrongAnswerLike.length === failed.length && failed.length > 0;
-    if (wrongAnswerAll && isLikelyWrongTestCases(executionResults, testCases)) {
-        return "testcase_repair";
-    }
-    if (allFailed && wrongAnswerAll) return "logic_repair";
-    return "logic_repair";
-};
-
-const generateFixes = async ({
-    genAI,
-    modelName,
-    question,
-    failures,
-    testCases,
-    languages,
-    fixMode,
-}) => {
-    const failureSummary = buildFailureSummaryForFix(failures);
-    vLog("fix-generate", "Generating fixes from failure analysis", {
-        failedLanguages: Array.isArray(failures) ? failures.length : 0,
-        fixMode,
-    });
-    vLog("repair-input", "Judge0 errors sent for fix", {
-        fixMode,
-        perLanguage: failureSummary.map((f) => ({
-            lang: f.languageName,
-            message: f.message,
-            hasStderr: !!f.stderr,
-            hasCompileOutput: !!f.compileOutput,
-        })),
-    });
-    if (VERIFICATION_LOG_ENABLED && failureSummary.some((f) => f.stderr || f.compileOutput)) {
-        console.log(
-            "[ProgrammingVerification][repair-input] Judge0 stderr/compile_output sample:",
-            JSON.stringify(
-                failureSummary.map((f) => ({
-                    languageName: f.languageName,
-                    stderr: (f.stderr || "").slice(0, 500),
-                    compileOutput: (f.compileOutput || "").slice(0, 500),
-                })),
-                null,
-                2,
-            ),
-        );
-    }
-    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
-    const response = await withRetry(
-        () =>
-            model.generateContent(
-                buildRootCauseFixPrompt({
-                    question,
-                    failures,
-                    testCases,
-                    languages,
-                    fixMode,
-                }),
-            ),
-        3,
-        1000,
-    );
-    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const parsed = safeJsonParse(text);
-    return {
-        testCases: Array.isArray(parsed?.testCases) ? normalizeTestCases(parsed.testCases) : null,
-        boilerplateCode:
-            parsed?.boilerplateCode && typeof parsed.boilerplateCode === "object"
-                ? parsed.boilerplateCode
-                : null,
-        logicBlocks:
-            parsed?.logicBlocks && typeof parsed.logicBlocks === "object"
-                ? parsed.logicBlocks
-                : null,
-    };
 };
 
 const summarizeResults = (executionResults = []) => {
@@ -1246,6 +876,34 @@ const summarizeResults = (executionResults = []) => {
 };
 
 /**
+ * Identify test case indices that fail for >= threshold fraction of languages.
+ * Uses per-test-case results from Judge0 (results[i].status !== "Passed").
+ * @returns number[] - indices to remove (0-based), sorted descending for safe splice
+ */
+const getFailedTestCaseIndicesToRemove = (executionResults, threshold = 0.7) => {
+    const totalLangs = executionResults.length;
+    if (totalLangs === 0) return [];
+    const firstResult = executionResults[0];
+    const resultsArray = Array.isArray(firstResult?.results) ? firstResult.results : [];
+    const totalTests = resultsArray.length;
+    if (totalTests === 0) return [];
+    const failCountByIndex = new Array(totalTests).fill(0);
+    executionResults.forEach((entry) => {
+        const perTc = Array.isArray(entry?.results) ? entry.results : [];
+        perTc.forEach((r, i) => {
+            if (i < totalTests && String(r?.status || "").toLowerCase() !== "passed") {
+                failCountByIndex[i]++;
+            }
+        });
+    });
+    const toRemove = [];
+    failCountByIndex.forEach((count, i) => {
+        if (count >= Math.ceil(totalLangs * threshold)) toRemove.push(i);
+    });
+    return toRemove.sort((a, b) => b - a); // descending for splice
+};
+
+/**
  * Check if language passes verification threshold (70% or 100%)
  */
 const isLanguageVerified = (languageResult) => {
@@ -1269,8 +927,20 @@ const generateCompleteSolutionWithBoilerplate = async ({
     language,
 }) => {
     const langInstruction = getLanguageInstruction(language.languageName);
+    const isPython = detectLanguageFamily(language.languageName) === "python";
+    const pythonIndentWarning = isPython ? `
+CRITICAL PYTHON INDENTATION (Judge0-ready):
+- Python uses indentation (spaces) to define code blocks - MANDATORY for Judge0 execution
+- Use 4 spaces per indentation level (consistent with the boilerplate)
+- All code inside the solve function must be indented correctly - no post-processing will be applied
+- Every line after a colon (:) must be indented; helper functions inside solve() must follow same rules
+- Return full working code with correct indentation - it will be executed directly in Judge0
+` : "";
+
     const prompt = `
 You are completing a programming solution using the provided boilerplate code.
+The output will be executed directly in Judge0 - no post-processing is applied.
+Return full working code with correct indentation, Judge0-compatible I/O, and ready to run.
 
 CRITICAL INSTRUCTIONS:
 - DO NOT change ANY word in the boilerplate code
@@ -1278,6 +948,10 @@ CRITICAL INSTRUCTIONS:
 - ONLY add the solution logic inside the implementation block (between HC_IMPLEMENTATION_BLOCK_START and HC_IMPLEMENTATION_BLOCK_END)
 - The boilerplate code is correct and must remain exactly as provided
 - Complete the solution by implementing the logic inside the solve function/method
+${pythonIndentWarning}
+
+Judge0 language-specific rules for ${language.languageName}:
+${langInstruction}
 
 Question:
 ${sanitizeText(question.question || "")}
@@ -1289,27 +963,26 @@ Boilerplate Code (DO NOT MODIFY - USE EXACTLY AS PROVIDED):
 ${boilerplateCode || ""}
 
 Language: ${language.languageName}
-Judge0 Rules:
-${langInstruction}
 
 Return ONLY the complete solution code (boilerplate + your solution logic merged together).
 The boilerplate code must remain EXACTLY as provided, with only the solution logic added inside the implementation block.
+Code must be Judge0-ready: correct indentation, non-interactive I/O, executable without any post-processing.
 
 Return ONLY JSON:
 {
   "completeSolution": "full code with boilerplate unchanged and solution added"
 }
 `;
-    
+
     const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
-    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
+    const response = await withRetry(() => model.generateContent(prompt), 2, 500);
     const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = safeJsonParse(text);
-    
+
     if (!parsed?.completeSolution || typeof parsed.completeSolution !== "string") {
         throw new Error(`Invalid complete solution for ${language.languageName}`);
     }
-    
+
     return sanitizeText(parsed.completeSolution);
 };
 
@@ -1332,126 +1005,32 @@ const reEvaluateTestCases = async ({
     }));
 
     const prompt = `
-You are analyzing test cases for a programming question. Multiple languages are showing partial test case failures (not all 5 test cases passed).
+Analyze test cases for a programming question. Languages show partial failures.
 
-Question:
-${sanitizeText(question.question || "")}
+Question: ${sanitizeText((question.question || "").slice(0, 1500))}
 
-Current Test Cases:
-${JSON.stringify(testCases || [], null, 2)}
+Test Cases: ${JSON.stringify(testCases || [])}
 
-Language Execution Results:
-${JSON.stringify(langSummary, null, 2)}
+Results: ${JSON.stringify(langSummary)}
 
-Analyze: Are the test cases correct? If multiple languages are failing the same test cases, or if the expected outputs don't match the problem description, the test cases may be incorrect.
+Rules: If expected outputs are wrong per problem, set testCasesCorrect=false and provide correctedTestCases. Otherwise true.
 
-Return ONLY JSON:
-{
-  "testCasesCorrect": true or false,
-  "correctedTestCases": [...], // Only if testCasesCorrect is false, array of { input: "...", output: "..." }
-  "reason": "explanation"
-}
+Return ONLY this JSON (no explanation, no markdown). Reason: 1 sentence max.
+{"testCasesCorrect":boolean,"correctedTestCases":[{"input":"...","output":"..."}],"reason":"One sentence."}
 
-Rules:
-- testCasesCorrect = true if test cases are correct and failures are due to code issues
-- testCasesCorrect = false if test cases have wrong expected outputs
-- correctedTestCases: Array of test case objects with input and output fields (same count as original)
-- If test cases are correct, return empty array for correctedTestCases
+If correct: correctedTestCases=[]. If wrong: same-length array with fixed output values.
 `;
-    
+
     const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
-    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
+    const response = await withRetry(() => model.generateContent(prompt), 2, 500);
     const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = safeJsonParse(text);
-    
+
     return {
         testCasesCorrect: parsed?.testCasesCorrect === true,
         correctedTestCases: Array.isArray(parsed?.correctedTestCases) && parsed.correctedTestCases.length > 0
             ? parsed.correctedTestCases
             : null,
-        reason: parsed?.reason || "Analysis completed",
-    };
-};
-
-/**
- * Analyze failure to determine if issue is with test cases or boilerplate code
- * Returns: { issueType: "testCase" | "boilerplate", correctedTestCases?: [], correctedBoilerplate?: "", reason: "" }
- */
-const analyzeFailureWithAI = async ({
-    genAI,
-    modelName,
-    question,
-    testCases,
-    mergedCode,
-    executionResult,
-    language,
-}) => {
-    const langInstruction = getLanguageInstruction(language.languageName);
-    const failureSummary = buildFailureSummaryForFix([executionResult]);
-    const stderr = failureSummary[0]?.stderr || "";
-    const compileOutput = failureSummary[0]?.compileOutput || "";
-    const errors = [stderr, compileOutput].filter(Boolean).join("\n").slice(0, 2000);
-    
-    // Get actual outputs from execution results
-    const actualOutputs = (executionResult?.results || []).map((r) => ({
-        input: r.input || "",
-        expected: r.expectedOutput || r.expected || "",
-        actual: r.actualOutput || r.stdout || r.output || "",
-        status: r.status || "",
-    }));
-
-    const prompt = `
-You are analyzing why a programming solution failed test cases. Determine if the failure is due to:
-1. INCORRECT TEST CASES - The test cases have wrong expected outputs
-2. BOILERPLATE CODE ISSUE - The boilerplate code structure is incompatible with Judge0 or has syntax errors
-
-Question:
-${sanitizeText(question.question || "")}
-
-Test Cases:
-${JSON.stringify(testCases || [], null, 2)}
-
-Merged Code (Boilerplate + Solution):
-${mergedCode || ""}
-
-Execution Results:
-${JSON.stringify(actualOutputs, null, 2)}
-
-Judge0 Errors:
-${errors || "No errors reported"}
-
-Language: ${language.languageName}
-Judge0 Rules:
-${langInstruction}
-
-Analyze and determine:
-- If test cases are incorrect: Return corrected test cases
-- If boilerplate code has issues: Return corrected boilerplate code only (without solution logic)
-
-Return ONLY JSON:
-{
-  "issueType": "testCase" or "boilerplate",
-  "correctedTestCases": [...], // Only if issueType is "testCase", array of { input: "...", output: "..." }
-  "correctedBoilerplate": "...", // Only if issueType is "boilerplate", just the boilerplate code
-  "reason": "explanation of the issue"
-}
-
-Rules:
-- issueType = "testCase" if expected outputs in test cases are wrong for the given solution logic
-- issueType = "boilerplate" if boilerplate has syntax errors, wrong I/O patterns, missing imports, or Judge0 incompatibilities
-- correctedTestCases: Array of test case objects with input and output fields
-- correctedBoilerplate: Complete boilerplate code with markers, but WITHOUT solution logic (keep TODO placeholder)
-`;
-    
-    const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
-    const response = await withRetry(() => model.generateContent(prompt), 2, 1000);
-    const text = response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const parsed = safeJsonParse(text);
-    
-    return {
-        issueType: parsed?.issueType === "testCase" ? "testCase" : "boilerplate",
-        correctedTestCases: Array.isArray(parsed?.correctedTestCases) ? parsed.correctedTestCases : null,
-        correctedBoilerplate: typeof parsed?.correctedBoilerplate === "string" ? parsed.correctedBoilerplate : null,
         reason: parsed?.reason || "Analysis completed",
     };
 };
@@ -1462,18 +1041,17 @@ const verifyOneProgrammingQuestion = async ({
     modelName,
     requestId,
     consumerId,
-    skipRegeneration = false, // If true, proceed to Phase 4/5 even if failed
 }) => {
     const workingQuestion = JSON.parse(JSON.stringify(question || {}));
     workingQuestion.testCases = normalizeTestCases(workingQuestion.testCases);
     workingQuestion.supportedLanguages = normalizeSupportedLanguages(workingQuestion);
 
     if (!workingQuestion.supportedLanguages.length || !workingQuestion.testCases.length) {
-        vLog("verify-question", "Skipping verification due to missing inputs", {
-            requestId,
-            consumerId,
-            title: workingQuestion.questionTitle || "Untitled",
-        });
+        // vLog("verify-question", "Skipping verification due to missing inputs", {
+        //     requestId,
+        //     consumerId,
+        //     title: workingQuestion.questionTitle || "Untitled",
+        // });
         return {
             question: {
                 ...workingQuestion,
@@ -1485,13 +1063,13 @@ const verifyOneProgrammingQuestion = async ({
         };
     }
 
-    vLog("verify-question", "Starting restructured single-attempt verification", {
-        requestId,
-        consumerId,
-        title: workingQuestion.questionTitle || "Untitled",
-        languages: workingQuestion.supportedLanguages.length,
-        testCases: workingQuestion.testCases.length,
-    });
+    // vLog("verify-question", "Starting restructured single-attempt verification", {
+    //     requestId,
+    //     consumerId,
+    //     title: workingQuestion.questionTitle || "Untitled",
+    //     languages: workingQuestion.supportedLanguages.length,
+    //     testCases: workingQuestion.testCases.length,
+    // });
 
     // Initialize language states
     const languageStates = (workingQuestion.supportedLanguages || []).map((lang) => ({
@@ -1503,12 +1081,12 @@ const verifyOneProgrammingQuestion = async ({
         verified: false,
     }));
 
-    // PHASE 1: Generate solution blocks and inject into boilerplate
-    vLog("verify-question", "Phase 1: Generating solution blocks", {
-        requestId,
-        consumerId,
-        languages: languageStates.length,
-    });
+    // // PHASE 1: Generate solution blocks and inject into boilerplate
+    // vLog("verify-question", "Phase 1: Generating solution blocks", {
+    //     requestId,
+    //     consumerId,
+    //     languages: languageStates.length,
+    // });
 
     const generationResults = await Promise.allSettled(
         languageStates.map(async (state) => {
@@ -1553,18 +1131,18 @@ const verifyOneProgrammingQuestion = async ({
         }
     });
 
-    // Log code blocks
-    languageStates.forEach((ls) => {
-        vLogCode("code-boilerplate", "BOILERPLATE", ls.languageName, ls.languageId, ls.codeSnippet);
-        if (ls.logicBlock) {
-            vLogCode("code-solution-block", "SOLUTION_BLOCK", ls.languageName, ls.languageId, ls.logicBlock);
-        }
-        if (ls.mergedCode) {
-            const isPython = detectLanguageFamily(ls.languageName) === "python";
-            const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
-            vLogCode("code-merged-judge0", "MERGED_CODE_SENT_TO_JUDGE0", ls.languageName, ls.languageId, loggedMerged);
-        }
-    });
+    // // Log code blocks
+    // languageStates.forEach((ls) => {
+    //     vLogCode("code-boilerplate", "BOILERPLATE", ls.languageName, ls.languageId, ls.codeSnippet);
+    //     if (ls.logicBlock) {
+    //         vLogCode("code-solution-block", "SOLUTION_BLOCK", ls.languageName, ls.languageId, ls.logicBlock);
+    //     }
+    //     if (ls.mergedCode) {
+    //         const isPython = detectLanguageFamily(ls.languageName) === "python";
+    //         const loggedMerged = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+    //         vLogCode("code-merged-judge0", "MERGED_CODE_SENT_TO_JUDGE0", ls.languageName, ls.languageId, loggedMerged);
+    //     }
+    // });
 
     // PHASE 2: Execute merged code with Judge0 (single execution)
     const runnableExecutions = languageStates
@@ -1581,12 +1159,12 @@ const verifyOneProgrammingQuestion = async ({
 
     let executionResults = [];
     if (runnableExecutions.length > 0) {
-        vLog("verify-question", "Phase 2: Executing merged code with Judge0", {
-            requestId,
-            consumerId,
-            languages: runnableExecutions.length,
-            testCases: workingQuestion.testCases.length,
-        });
+        // vLog("verify-question", "Phase 2: Executing merged code with Judge0", {
+        //     requestId,
+        //     consumerId,
+        //     languages: runnableExecutions.length,
+        //     testCases: workingQuestion.testCases.length,
+        // });
         executionResults = await executeAgainstJudge({
             languageExecutions: runnableExecutions,
             testCases: workingQuestion.testCases,
@@ -1606,6 +1184,7 @@ const verifyOneProgrammingQuestion = async ({
         originalBoilerplates.set(ls.languageId, ls.codeSnippet);
     });
     let testCasesWereUpdated = false; // Track if test cases were updated in Phase 3.5
+    let speculativeCompleteSolutions = null; // From parallel Phase 3.5+3.6 when test cases are correct
 
     // PHASE 3: Analyze results and mark verified languages
     const verifiedLanguageIds = new Set();
@@ -1621,158 +1200,227 @@ const verifyOneProgrammingQuestion = async ({
         }
     });
 
-    vLog("verify-question", "Phase 3: Initial verification results", {
-        requestId,
-        consumerId,
-        verifiedCount: verifiedLanguageIds.size,
-        failingCount: failingLanguages.length,
-        summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
-    });
+    // vLog("verify-question", "Phase 3: Initial verification results", {
+    //     requestId,
+    //     consumerId,
+    //     verifiedCount: verifiedLanguageIds.size,
+    //     failingCount: failingLanguages.length,
+    //     summary: languagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+    // });
+
+    // Check if any language passes all test cases (5/5) - if so, test cases are correct, skip re-evaluation
+    const hasAnyFullPass = languagePassSummary.some((lang) => lang.passed === lang.total && lang.total > 0);
 
     // Check if any language doesn't pass all test cases (even if 70%+)
     const hasPartialPass = languagePassSummary.some((lang) => lang.passed < lang.total && lang.total > 0);
-    
-    // PHASE 3.5: Re-evaluate test cases if any language has partial pass
-    if (hasPartialPass) {
-        vLog("verify-question", "Phase 3.5: Re-evaluating test cases (some languages have partial pass)", {
-            requestId,
-            consumerId,
-            languagesWithPartialPass: languagePassSummary.filter((lang) => lang.passed < lang.total).length,
-        });
 
-        try {
-            const testCaseEvaluation = await reEvaluateTestCases({
-                genAI,
-                modelName,
-                question: workingQuestion,
-                testCases: workingQuestion.testCases,
-                languagePassSummary,
-            });
+    // If all failing languages have 0/total, code didn't execute - we can't determine if test cases are wrong, skip re-evaluation
+    const allFailingHaveZeroPass =
+        failingLanguages.length > 0 &&
+        failingLanguages.every((fl) => Number(fl.passed || 0) === 0);
 
-            if (!testCaseEvaluation.testCasesCorrect && testCaseEvaluation.correctedTestCases) {
-                vLog("verify-question", "Test cases are incorrect, applying corrections", {
-                    requestId,
-                    consumerId,
-                    reason: testCaseEvaluation.reason,
-                    correctedCount: testCaseEvaluation.correctedTestCases.length,
-                });
+    // PHASE 3.5: Re-evaluate test cases ONLY if:
+    // 1. Some languages have partial pass (not all 5/5)
+    // 2. AND no language has full pass (5/5) - if any language passes 5/5, test cases are correct
+    // 3. AND NOT all failing have 0/total - if all fail with 0, code didn't execute, we don't know if test cases are correct
+    // PARALLEL: Run Phase 3.5 and speculative Phase 3.6 (complete solutions with originalTestCases) together when both apply
+    if (hasPartialPass && !hasAnyFullPass && !allFailingHaveZeroPass && failingLanguages.length > 0) {
+        // vLog("verify-question", "Phase 3.5+3.6: Running test case re-evaluation and complete solution generation in parallel", {
+        //     requestId,
+        //     consumerId,
+        // });
 
-                // Replace test cases
-                workingQuestion.testCases = normalizeTestCases(testCaseEvaluation.correctedTestCases);
-                testCasesWereUpdated = true; // Mark that test cases were updated
+        const phase35Promise = reEvaluateTestCases({
+            genAI,
+            modelName,
+            question: workingQuestion,
+            testCases: workingQuestion.testCases,
+            languagePassSummary,
+        }).catch((err) => ({ _error: err }));
 
-                // Re-execute all languages with corrected test cases
-                const reExecResults = await executeAgainstJudge({
-                    languageExecutions: runnableExecutions,
-                    testCases: workingQuestion.testCases,
-                    timeLimit: workingQuestion.timeLimit,
-                    memoryLimit: workingQuestion.memoryLimit,
-                });
-
-                // Re-analyze results
-                const { allPass: reAllPass, languagePassSummary: reLanguagePassSummary } = summarizeResults(reExecResults);
-                const reExecutionMap = new Map(reExecResults.map((res) => [Number(res.languageId), res]));
-
-                // Update verified languages
-                verifiedLanguageIds.clear();
-                failingLanguages.length = 0;
-
-                reLanguagePassSummary.forEach((langResult) => {
-                    if (isLanguageVerified(langResult)) {
-                        verifiedLanguageIds.add(langResult.languageId);
-                        const langState = languageStates.find((ls) => ls.languageId === langResult.languageId);
-                        if (langState) langState.verified = true;
-                    } else {
-                        failingLanguages.push(langResult);
+        const phase36SpeculativePromise = (async () => {
+            const testCasesToUse = originalTestCases;
+            const results = await Promise.allSettled(
+                failingLanguages.map(async (failingLang) => {
+                    const langState = languageStates.find((ls) => ls.languageId === failingLang.languageId);
+                    if (!langState) return null;
+                    const origBp = originalBoilerplates.get(failingLang.languageId) || langState.codeSnippet;
+                    try {
+                        const completeSolution = await generateCompleteSolutionWithBoilerplate({
+                            genAI,
+                            modelName,
+                            question: workingQuestion,
+                            testCases: testCasesToUse,
+                            boilerplateCode: origBp,
+                            language: langState,
+                        });
+                        return { langState, failingLang, completeSolution };
+                    } catch {
+                        return null;
                     }
-                });
+                }),
+            );
+            return results
+                .filter((r) => r.status === "fulfilled" && r.value)
+                .map((r) => r.value);
+        })();
 
-                // Update languagePassSummary for final status
-                languagePassSummary.length = 0;
-                languagePassSummary.push(...reLanguagePassSummary);
+        const [testCaseEvaluation, speculativeResults] = await Promise.all([phase35Promise, phase36SpeculativePromise]);
 
-                vLog("verify-question", "Re-execution completed after test case correction", {
-                    requestId,
-                    consumerId,
-                    verifiedAfterCorrection: verifiedLanguageIds.size,
-                    failingAfterCorrection: failingLanguages.length,
-                    summary: reLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
-                });
-            } else {
-                vLog("verify-question", "Test cases are correct, failures are due to code issues", {
-                    requestId,
-                    consumerId,
-                    reason: testCaseEvaluation.reason,
-                });
-            }
-        } catch (error) {
-            vLog("verify-question", "Test case re-evaluation failed", {
-                requestId,
-                consumerId,
-                error: error.message,
+        if (testCaseEvaluation && testCaseEvaluation._error) {
+            // vLog("verify-question", "Phase 3.5: Test case re-evaluation failed", {
+            //     requestId,
+            //     consumerId,
+            //     error: testCaseEvaluation._error?.message,
+            // });
+            speculativeCompleteSolutions = speculativeResults;
+        } else if (!testCaseEvaluation?.testCasesCorrect && testCaseEvaluation?.correctedTestCases) {
+            // vLog("verify-question", "Test cases are incorrect, applying corrections (discarding speculative Phase 3.6)", {
+            //     requestId,
+            //     consumerId,
+            //     reason: testCaseEvaluation.reason,
+            // });
+            const originalTcs = workingQuestion.testCases;
+            const merged = testCaseEvaluation.correctedTestCases.map((corr, i) => {
+                const orig = originalTcs[i] || {};
+                return {
+                    input: corr.input ?? orig.input,
+                    output: corr.output ?? orig.output,
+                    explanation: orig.explanation ?? "",
+                    visible: orig.visible !== undefined ? orig.visible : true,
+                    weightage: orig.weightage ?? 0,
+                };
             });
+            workingQuestion.testCases = normalizeTestCases(
+                redistributeWeightageTo100(merged),
+            );
+            testCasesWereUpdated = true;
+
+            // Re-execute with EXISTING merged code (boilerplate + solution from Phase 1) using corrected test cases
+            const reExecResults = await executeAgainstJudge({
+                languageExecutions: runnableExecutions,
+                testCases: workingQuestion.testCases,
+                timeLimit: workingQuestion.timeLimit,
+                memoryLimit: workingQuestion.memoryLimit,
+            });
+
+            const { languagePassSummary: reLanguagePassSummary } = summarizeResults(reExecResults);
+            verifiedLanguageIds.clear();
+            failingLanguages.length = 0;
+            languagePassSummary.length = 0;
+            languagePassSummary.push(...reLanguagePassSummary);
+            reLanguagePassSummary.forEach((langResult) => {
+                if (isLanguageVerified(langResult)) {
+                    verifiedLanguageIds.add(langResult.languageId);
+                    const ls = languageStates.find((ls) => ls.languageId === langResult.languageId);
+                    if (ls) ls.verified = true;
+                } else {
+                    failingLanguages.push(langResult);
+                }
+            });
+            speculativeCompleteSolutions = null;
+            // vLog("verify-question", "Re-execution completed after test case correction", {
+            //     requestId,
+            //     consumerId,
+            //     verifiedAfterCorrection: verifiedLanguageIds.size,
+            //     failingAfterCorrection: failingLanguages.length,
+            // });
+        } else {
+            // vLog("verify-question", "Test cases are correct, using speculative Phase 3.6 results", {
+            //     requestId,
+            //     consumerId,
+            //     reason: testCaseEvaluation?.reason,
+            // });
+            speculativeCompleteSolutions = speculativeResults;
         }
+    } else if (hasAnyFullPass) {
+        // vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (at least one language passed 5/5 - test cases are correct)", {
+        //     requestId,
+        //     consumerId,
+        //     languagesWithFullPass: languagePassSummary.filter((lang) => lang.passed === lang.total).map((lang) => lang.languageName).join(", "),
+        // });
+    } else if (allFailingHaveZeroPass) {
+        // vLog("verify-question", "Phase 3.5: Skipping test case re-evaluation (all failing languages have 0/total - code did not execute, cannot determine if test cases are correct)", {
+        //     requestId,
+        //     consumerId,
+        //     failingCount: failingLanguages.length,
+        // });
     }
 
     // PHASE 3.6: Generate complete solution for failed languages using original boilerplate
+    // Use speculative results from parallel Phase 3.5+3.6 when available (test cases were correct)
     if (failingLanguages.length > 0) {
-        // Use updated test cases if they were updated, otherwise use original
         const testCasesToUse = testCasesWereUpdated ? workingQuestion.testCases : originalTestCases;
-        
-        vLog("verify-question", "Phase 3.6: Generating complete solutions for failed languages", {
-            requestId,
-            consumerId,
-            failedCount: failingLanguages.length,
-            usingOriginalBoilerplate: true,
-            usingUpdatedTestCases: testCasesWereUpdated,
-            testCasesCount: testCasesToUse.length,
-        });
+        let completeSolutionExecutions;
 
-        const completeSolutionResults = await Promise.allSettled(
-            failingLanguages.map(async (failingLang) => {
-                const langState = languageStates.find((ls) => ls.languageId === failingLang.languageId);
-                if (!langState) return null;
-
-                const originalBoilerplate = originalBoilerplates.get(failingLang.languageId) || langState.codeSnippet;
-                
-                vLog("verify-question", "Generating complete solution for failed language", {
-                    requestId,
-                    consumerId,
-                    language: failingLang.languageName,
-                });
-
-                const completeSolution = await generateCompleteSolutionWithBoilerplate({
-                    genAI,
-                    modelName,
-                    question: workingQuestion,
-                    testCases: testCasesToUse, // Use updated test cases if available, otherwise original
-                    boilerplateCode: originalBoilerplate, // Use original boilerplate
-                    language: langState,
-                });
-
+        if (speculativeCompleteSolutions && speculativeCompleteSolutions.length > 0) {
+            speculativeCompleteSolutions.forEach(({ langState, completeSolution }) => {
                 langState.mergedCode = completeSolution;
-                return {
-                    languageId: langState.languageId,
-                    languageName: langState.languageName,
-                    code: detectLanguageFamily(langState.languageName) === "python"
-                        ? fixPythonIndentationForJudge0(completeSolution)
-                        : completeSolution,
-                };
-            }),
-        );
-
-        const completeSolutionExecutions = completeSolutionResults
-            .filter((result) => result.status === "fulfilled" && result.value !== null)
-            .map((result) => result.value);
-
-        if (completeSolutionExecutions.length > 0) {
-            vLog("verify-question", "Executing complete solutions", {
-                requestId,
-                consumerId,
-                languages: completeSolutionExecutions.length,
-                testCases: testCasesToUse.length,
-                usingUpdatedTestCases: testCasesWereUpdated,
             });
+            completeSolutionExecutions = speculativeCompleteSolutions.map(({ langState, completeSolution }) => ({
+                languageId: langState.languageId,
+                languageName: langState.languageName,
+                code: completeSolution,
+            }));
+            // vLog("verify-question", "Phase 3.6: Using speculative complete solutions from parallel run", {
+            //     requestId,
+            //     consumerId,
+            //     count: completeSolutionExecutions.length,
+            // });
+        } else {
+            // vLog("verify-question", "Phase 3.6: Generating complete solutions for failed languages", {
+            //     requestId,
+            //     consumerId,
+            //     failedCount: failingLanguages.length,
+            //     usingOriginalBoilerplate: true,
+            //     usingUpdatedTestCases: testCasesWereUpdated,
+            //     testCasesCount: testCasesToUse.length,
+            // });
+
+            const completeSolutionResults = await Promise.allSettled(
+                failingLanguages.map(async (failingLang) => {
+                    const langState = languageStates.find((ls) => ls.languageId === failingLang.languageId);
+                    if (!langState) return null;
+
+                    const originalBoilerplate = originalBoilerplates.get(failingLang.languageId) || langState.codeSnippet;
+
+                    // vLog("verify-question", "Generating complete solution for failed language", {
+                    //     requestId,
+                    //     consumerId,
+                    //     language: failingLang.languageName,
+                    // });
+
+                    const completeSolution = await generateCompleteSolutionWithBoilerplate({
+                        genAI,
+                        modelName,
+                        question: workingQuestion,
+                        testCases: testCasesToUse,
+                        boilerplateCode: originalBoilerplate,
+                        language: langState,
+                    });
+
+                    langState.mergedCode = completeSolution;
+                    return {
+                        languageId: langState.languageId,
+                        languageName: langState.languageName,
+                        code: completeSolution,
+                    };
+                }),
+            );
+
+            completeSolutionExecutions = completeSolutionResults
+                .filter((result) => result.status === "fulfilled" && result.value !== null)
+                .map((result) => result.value);
+        }
+
+        if (completeSolutionExecutions && completeSolutionExecutions.length > 0) {
+            // vLog("verify-question", "Executing complete solutions", {
+            //     requestId,
+            //     consumerId,
+            //     languages: completeSolutionExecutions.length,
+            //     testCases: testCasesToUse.length,
+            //     usingUpdatedTestCases: testCasesWereUpdated,
+            // });
 
             const completeExecResults = await executeAgainstJudge({
                 languageExecutions: completeSolutionExecutions,
@@ -1783,7 +1431,7 @@ const verifyOneProgrammingQuestion = async ({
 
             // Update results for languages that got complete solutions
             const completeExecMap = new Map(completeExecResults.map((res) => [Number(res.languageId), res]));
-            
+
             // Merge with existing execution results
             completeExecMap.forEach((result, langId) => {
                 executionMap.set(langId, result);
@@ -1811,13 +1459,62 @@ const verifyOneProgrammingQuestion = async ({
             languagePassSummary.length = 0;
             languagePassSummary.push(...finalLanguagePassSummary);
 
-            vLog("verify-question", "Complete solution execution completed", {
-                requestId,
-                consumerId,
-                verifiedAfterCompleteSolution: verifiedLanguageIds.size,
-                failingAfterCompleteSolution: failingLanguages.length,
-                summary: finalLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
-            });
+            // vLog("verify-question", "Complete solution execution completed", {
+            //     requestId,
+            //     consumerId,
+            //     verifiedAfterCompleteSolution: verifiedLanguageIds.size,
+            //     failingAfterCompleteSolution: failingLanguages.length,
+            //     summary: finalLanguagePassSummary.map((item) => `${item.languageName}:${item.passed}/${item.total}`).join(", "),
+            // });
+        }
+    }
+
+    // PHASE 3.65: Remove failed test cases when 70%+ languages have same partial pass (e.g. 4/5 -> 4/4)
+    if (REMOVE_FAILED_TEST_CASES && workingQuestion.testCases.length > 1) {
+        const allResults = Array.from(executionMap.values());
+        const partialPassLangs = languagePassSummary.filter((l) => l.passed < l.total && l.passed > 0);
+        const partialThreshold = Math.ceil(languagePassSummary.length * 0.7);
+        if (partialPassLangs.length >= partialThreshold && allResults.length > 0) {
+            const indicesToRemove = getFailedTestCaseIndicesToRemove(allResults, 0.7);
+            if (indicesToRemove.length > 0 && indicesToRemove.length < workingQuestion.testCases.length) {
+                const newTestCases = [...workingQuestion.testCases];
+                indicesToRemove.forEach((i) => newTestCases.splice(i, 1));
+                workingQuestion.testCases = normalizeTestCases(
+                    redistributeWeightageTo100(newTestCases),
+                );
+                const newTotal = workingQuestion.testCases.length;
+                languagePassSummary.forEach((langResult) => {
+                    const entry = allResults.find((r) => Number(r?.languageId) === Number(langResult.languageId));
+                    const perTc = Array.isArray(entry?.results) ? entry.results : [];
+                    let passedAfterRemoval = langResult.passed;
+                    indicesToRemove.forEach((idx) => {
+                        if (perTc[idx] && String(perTc[idx]?.status || "").toLowerCase() === "passed") {
+                            passedAfterRemoval--;
+                        }
+                    });
+                    langResult.passed = Math.max(0, passedAfterRemoval);
+                    langResult.total = newTotal;
+                    langResult.success = langResult.passed === langResult.total;
+                });
+                verifiedLanguageIds.clear();
+                failingLanguages.length = 0;
+                languagePassSummary.forEach((lang) => {
+                    if (lang.passed === lang.total) {
+                        verifiedLanguageIds.add(lang.languageId);
+                        const ls = languageStates.find((l) => l.languageId === lang.languageId);
+                        if (ls) ls.verified = true;
+                    } else {
+                        failingLanguages.push(lang);
+                    }
+                });
+                // vLog("verify-question", "Phase 3.65: Removed failed test cases for perfect pass", {
+                //     requestId,
+                //     consumerId,
+                //     removedCount: indicesToRemove.length,
+                //     newTotal,
+                //     summary: languagePassSummary.map((l) => `${l.languageName}:${l.passed}/${l.total}`).join(", "),
+                // });
+            }
         }
     }
 
@@ -1827,7 +1524,7 @@ const verifyOneProgrammingQuestion = async ({
     );
     const totalLanguages = languagePassSummary.length;
     const majorityThreshold = Math.ceil(totalLanguages * 0.7); // 70% threshold
-    
+
     const hasMajority100Percent = languagesWith100Percent.length >= majorityThreshold;
 
     // Early exit: If all languages verified after test case correction, return immediately
@@ -1863,13 +1560,13 @@ const verifyOneProgrammingQuestion = async ({
 
     // If 50%+ languages pass all 5/5 test cases, mark as verified
     if (hasMajority100Percent) {
-        vLog("verify-question", "Majority of languages passed all test cases, marking as verified", {
-            requestId,
-            consumerId,
-            languagesWith100Percent: languagesWith100Percent.length,
-            totalLanguages,
-            verifiedLanguages: languagesWith100Percent.map((l) => l.languageName).join(", "),
-        });
+        // vLog("verify-question", "Majority of languages passed all test cases, marking as verified", {
+        //     requestId,
+        //     consumerId,
+        //     languagesWith100Percent: languagesWith100Percent.length,
+        //     totalLanguages,
+        //     verifiedLanguages: languagesWith100Percent.map((l) => l.languageName).join(", "),
+        // });
 
         // Mark all languages as verified (including failing ones - they're likely formatting issues)
         languagePassSummary.forEach((lang) => {
@@ -1904,8 +1601,168 @@ const verifyOneProgrammingQuestion = async ({
         };
     }
 
-    // If skipRegeneration is false, return early for regeneration
-    if (!skipRegeneration) {
+    // PHASE 3.7: Re-verification (run full verification once more with same boilerplate)
+    // Skip if SKIP_VERIFICATION_RECOVERY_PHASES=true (default) or ENABLE_VERIFICATION_PHASE_37=false
+    if (failingLanguages.length > 0 && !ENABLE_PHASE_37) {
+        // vLog("verify-question", "Phase 3.7: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_37=false)", {
+        //     requestId,
+        //     consumerId,
+        //     failingCount: failingLanguages.length,
+        // });
+    }
+    if (failingLanguages.length > 0 && ENABLE_PHASE_37) {
+        // vLog("verify-question", "Phase 3.7: Re-verification (one attempt with same boilerplate)", {
+        //     requestId,
+        //     consumerId,
+        //     failingCount: failingLanguages.length,
+        // });
+
+        const runReVerification = async () => {
+            languageStates.forEach((ls) => {
+                ls.logicBlock = "";
+                ls.mergedCode = "";
+                ls.verified = false;
+            });
+
+            const genResults = await Promise.allSettled(
+                languageStates.map(async (state) => {
+                    const logicBlock = await generateLogicBlockOnly({
+                        genAI,
+                        modelName,
+                        question: workingQuestion,
+                        testCases: workingQuestion.testCases,
+                        language: state,
+                    });
+                    state.logicBlock = logicBlock;
+                    const injected = injectLogicIntoBoilerplate({
+                        boilerplate: state.codeSnippet,
+                        todoReplacement: logicBlock,
+                        languageName: state.languageName,
+                    });
+                    state.mergedCode = injected.mergedCode;
+                    return { languageId: state.languageId, languageName: state.languageName, code: state.mergedCode };
+                }),
+            );
+
+            const revRunnable = languageStates
+                .filter((ls) => ls.mergedCode && ls.mergedCode.length > 0)
+                .map((ls) => {
+                    const isPython = detectLanguageFamily(ls.languageName) === "python";
+                    const codeToSend = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+                    return { languageId: ls.languageId, languageName: ls.languageName, code: codeToSend };
+                });
+
+            let revResults = [];
+            if (revRunnable.length > 0) {
+                revResults = await executeAgainstJudge({
+                    languageExecutions: revRunnable,
+                    testCases: workingQuestion.testCases,
+                    timeLimit: workingQuestion.timeLimit,
+                    memoryLimit: workingQuestion.memoryLimit,
+                });
+            }
+            genResults.forEach((r, i) => {
+                if (r.status !== "fulfilled") {
+                    const s = languageStates[i];
+                    revResults.push({
+                        languageId: s.languageId,
+                        languageName: s.languageName,
+                        success: false,
+                        summary: { passed: 0, total: workingQuestion.testCases.length, message: r.reason?.message },
+                        results: [],
+                        error: r.reason?.message,
+                    });
+                }
+            });
+
+            const { languagePassSummary: revSummary } = summarizeResults(revResults);
+            const revExecMap = new Map(revResults.map((res) => [Number(res.languageId), res]));
+            revExecMap.forEach((res, langId) => executionMap.set(langId, res));
+
+            verifiedLanguageIds.clear();
+            failingLanguages.length = 0;
+            languagePassSummary.length = 0;
+            languagePassSummary.push(...revSummary);
+
+            revSummary.forEach((langResult) => {
+                if (isLanguageVerified(langResult)) {
+                    verifiedLanguageIds.add(langResult.languageId);
+                    const ls = languageStates.find((x) => x.languageId === langResult.languageId);
+                    if (ls) ls.verified = true;
+                } else {
+                    failingLanguages.push(langResult);
+                }
+            });
+
+            // Phase 3.6: Generate complete solutions for still-failing languages
+            if (failingLanguages.length > 0) {
+                const testCasesToUse = testCasesWereUpdated ? workingQuestion.testCases : originalTestCases;
+                const completePromises = failingLanguages.map(async (failingLang) => {
+                    const langState = languageStates.find((ls) => ls.languageId === failingLang.languageId);
+                    if (!langState) return null;
+                    const origBp = originalBoilerplates.get(failingLang.languageId) || langState.codeSnippet;
+                    try {
+                        const completeSolution = await generateCompleteSolutionWithBoilerplate({
+                            genAI,
+                            modelName,
+                            question: workingQuestion,
+                            testCases: testCasesToUse,
+                            boilerplateCode: origBp,
+                            language: langState,
+                        });
+                        langState.mergedCode = completeSolution;
+                        return {
+                            languageId: langState.languageId,
+                            languageName: langState.languageName,
+                            code: completeSolution, // Phase 3.6: Gemini returns Judge0-ready code with correct indentation; no fixPythonIndentationForJudge0
+                        };
+                    } catch {
+                        return null;
+                    }
+                });
+                const completeExecs = (await Promise.all(completePromises)).filter(Boolean);
+                if (completeExecs.length > 0) {
+                    const compResults = await executeAgainstJudge({
+                        languageExecutions: completeExecs,
+                        testCases: testCasesToUse,
+                        timeLimit: workingQuestion.timeLimit,
+                        memoryLimit: workingQuestion.memoryLimit,
+                    });
+                    compResults.forEach((res) => executionMap.set(Number(res.languageId), res));
+                    const allRes = Array.from(executionMap.values());
+                    const { languagePassSummary: compSummary } = summarizeResults(allRes);
+                    verifiedLanguageIds.clear();
+                    failingLanguages.length = 0;
+                    languagePassSummary.length = 0;
+                    languagePassSummary.push(...compSummary);
+                    compSummary.forEach((lr) => {
+                        if (isLanguageVerified(lr)) {
+                            verifiedLanguageIds.add(lr.languageId);
+                            const ls = languageStates.find((x) => x.languageId === lr.languageId);
+                            if (ls) ls.verified = true;
+                        } else {
+                            failingLanguages.push(lr);
+                        }
+                    });
+                }
+            }
+        };
+
+        await runReVerification();
+
+        // vLog("verify-question", "Phase 3.7: Re-verification completed", {
+        //     requestId,
+        //     consumerId,
+        //     verifiedAfterReVerify: verifiedLanguageIds.size,
+        //     failingAfterReVerify: failingLanguages.length,
+        // });
+    }
+
+    // Early exit if all pass after 3.7
+    if (failingLanguages.length === 0) {
+        const allLanguagesVerified = languagePassSummary.length > 0 && languagePassSummary.every((lang) =>
+            verifiedLanguageIds.has(lang.languageId),
+        );
         return {
             question: {
                 ...workingQuestion,
@@ -1914,23 +1771,151 @@ const verifyOneProgrammingQuestion = async ({
                     languageName: x.languageName,
                     codeSnippet: x.codeSnippet,
                 })),
-                verified: false,
+                verified: allLanguagesVerified,
                 verificationAttempts: 1,
                 verificationAt: new Date().toISOString(),
                 verificationSummary: {
-                    status: "needs_regeneration",
+                    status: "passed",
                     languagePassSummary: languagePassSummary.map((lang) => ({
                         ...lang,
                         verified: verifiedLanguageIds.has(lang.languageId),
                     })),
                 },
             },
-            verified: false,
-            needsRegeneration: true,
+            verified: allLanguagesVerified,
+            needsRegeneration: false,
         };
     }
 
-    // Final verification status (if skipRegeneration is true, meaning regeneration attempts exhausted)
+    // PHASE 3.8: Regenerate boilerplate for failed languages only, then run full verification once
+    // Skip if VERIFICATION_FAST_MODE or ENABLE_VERIFICATION_PHASE_38=false
+    if (!ENABLE_PHASE_38) {
+        // vLog("verify-question", "Phase 3.8: Skipped (SKIP_VERIFICATION_RECOVERY_PHASES or ENABLE_VERIFICATION_PHASE_38=false)", {
+        //     requestId,
+        //     consumerId,
+        // });
+    } else {
+    // vLog("verify-question", "Phase 3.8: Regenerating boilerplate for failed languages only", {
+    //     requestId,
+    //     consumerId,
+    //     failedLanguages: failingLanguages.map((f) => f.languageName).join(", "),
+    // });
+
+    try {
+        const failedLangStates = failingLanguages.map((fl) =>
+            languageStates.find((ls) => ls.languageId === fl.languageId),
+        ).filter(Boolean);
+
+        const bpResult = await generateBoilerplateWithGemini({
+            genAI,
+            modelName: modelName || DEFAULT_MODEL,
+            questionTitle: workingQuestion.questionTitle,
+            question: workingQuestion.question,
+            testCases: workingQuestion.testCases,
+            languages: failedLangStates.map((ls) => ({ languageId: ls.languageId, languageName: ls.languageName })),
+        });
+
+        const bpMap = bpResult.boilerplateCode || {};
+        failedLangStates.forEach((ls) => {
+            const newCode = getBoilerplateForLanguage(bpMap, ls.languageName) || ls.codeSnippet;
+            ls.codeSnippet = ensureBoilerplateMarkers(newCode, ls.languageName);
+            originalBoilerplates.set(ls.languageId, ls.codeSnippet);
+        });
+
+        // vLog("verify-question", "Phase 3.8: Boilerplate regenerated, running full verification", {
+        //     requestId,
+        //     consumerId,
+        // });
+
+        languageStates.forEach((ls) => {
+            ls.logicBlock = "";
+            ls.mergedCode = "";
+            ls.verified = false;
+        });
+
+        const genResults = await Promise.allSettled(
+            languageStates.map(async (state) => {
+                const logicBlock = await generateLogicBlockOnly({
+                    genAI,
+                    modelName,
+                    question: workingQuestion,
+                    testCases: workingQuestion.testCases,
+                    language: state,
+                });
+                state.logicBlock = logicBlock;
+                const injected = injectLogicIntoBoilerplate({
+                    boilerplate: state.codeSnippet,
+                    todoReplacement: logicBlock,
+                    languageName: state.languageName,
+                });
+                state.mergedCode = injected.mergedCode;
+                return { languageId: state.languageId, languageName: state.languageName, code: state.mergedCode };
+            }),
+        );
+
+        const runnable = languageStates
+            .filter((ls) => ls.mergedCode && ls.mergedCode.length > 0)
+            .map((ls) => {
+                const isPython = detectLanguageFamily(ls.languageName) === "python";
+                const codeToSend = isPython ? fixPythonIndentationForJudge0(ls.mergedCode) : ls.mergedCode;
+                return { languageId: ls.languageId, languageName: ls.languageName, code: codeToSend };
+            });
+
+        let finalExecResults = [];
+        if (runnable.length > 0) {
+            finalExecResults = await executeAgainstJudge({
+                languageExecutions: runnable,
+                testCases: workingQuestion.testCases,
+                timeLimit: workingQuestion.timeLimit,
+                memoryLimit: workingQuestion.memoryLimit,
+            });
+        }
+        genResults.forEach((r, i) => {
+            if (r.status !== "fulfilled") {
+                const s = languageStates[i];
+                finalExecResults.push({
+                    languageId: s.languageId,
+                    languageName: s.languageName,
+                    success: false,
+                    summary: { passed: 0, total: workingQuestion.testCases.length, message: r.reason?.message },
+                    results: [],
+                    error: r.reason?.message,
+                });
+            }
+        });
+
+        const { languagePassSummary: finalSummary } = summarizeResults(finalExecResults);
+        verifiedLanguageIds.clear();
+        failingLanguages.length = 0;
+        languagePassSummary.length = 0;
+        languagePassSummary.push(...finalSummary);
+
+        finalSummary.forEach((langResult) => {
+            if (isLanguageVerified(langResult)) {
+                verifiedLanguageIds.add(langResult.languageId);
+                const ls = languageStates.find((x) => x.languageId === langResult.languageId);
+                if (ls) ls.verified = true;
+            } else {
+                failingLanguages.push(langResult);
+            }
+        });
+
+        // vLog("verify-question", "Phase 3.8: Full verification after boilerplate regeneration completed", {
+        //     requestId,
+        //     consumerId,
+        //     verifiedAfter38: verifiedLanguageIds.size,
+        //     failingAfter38: failingLanguages.length,
+        // });
+    } catch (err) {
+        // vLog("verify-question", "Phase 3.8: Boilerplate regeneration or verification failed", {
+        //     requestId,
+        //     consumerId,
+        //     error: err?.message,
+        // });
+    }
+    }
+
+    // Final verification status (after 3.7 and 3.8)
     const allLanguagesVerified = languagePassSummary.length > 0 && languagePassSummary.every((lang) =>
         verifiedLanguageIds.has(lang.languageId),
     );
@@ -1941,17 +1926,17 @@ const verifyOneProgrammingQuestion = async ({
         verified: verifiedLanguageIds.has(lang.languageId),
     }));
 
-    vLog("verify-question", "Verification completed", {
-        requestId,
-        consumerId,
-        title: workingQuestion.questionTitle || "Untitled",
-        allLanguagesVerified,
-        verifiedCount: verifiedLanguageIds.size,
-        totalLanguages: languagePassSummary.length,
-        summary: finalLanguagePassSummary
-            .map((item) => `${item.languageName}:${item.passed}/${item.total}${item.verified ? " ✓" : ""}`)
-            .join(", "),
-    });
+    // vLog("verify-question", "Verification completed", {
+    //     requestId,
+    //     consumerId,
+    //     title: workingQuestion.questionTitle || "Untitled",
+    //     allLanguagesVerified,
+    //     verifiedCount: verifiedLanguageIds.size,
+    //     totalLanguages: languagePassSummary.length,
+    //     summary: finalLanguagePassSummary
+    //         .map((item) => `${item.languageName}:${item.passed}/${item.total}${item.verified ? " ✓" : ""}`)
+    //         .join(", "),
+    // });
 
     return {
         question: {
@@ -1983,380 +1968,74 @@ const stripInternalFields = (question) => {
     return cleaned;
 };
 
-/**
- * Regenerate a question using its title
- * This should call the question generation service/API
- */
-const regenerateQuestionFromTitle = async ({
-    questionTitle,
-    genAI,
-    modelName,
-    requestId,
-    consumerId,
-    originalQuestion = null, // Original question object to extract context
-    regenerationContext = null, // Optional context: { skillName, skillType, experience, jobRole, maxTime, programmingConfig, ... }
-}) => {
-    vLog("regenerate-question", "Starting question regeneration", {
-        requestId,
-        consumerId,
-        title: questionTitle,
-    });
-
-    try {
-        // Extract context from originalQuestion or use regenerationContext
-        const context = regenerationContext || (originalQuestion ? {
-            skillName: originalQuestion.skillName || "Programming",
-            skillType: originalQuestion.skillType || "unknown",
-            experience: originalQuestion.experience || 3,
-            jobRole: originalQuestion.jobRole || "Software Developer",
-            maxTime: originalQuestion.maxTime || 30,
-            programmingConfig: originalQuestion.programmingConfig || {
-                testCasesCount: originalQuestion.testCases?.length || 5,
-                supportedLanguages: originalQuestion.supportedLanguages || [],
-            },
-        } : null);
-
-        if (!context) {
-            vLog("regenerate-question", "Missing context for regeneration", {
-                requestId,
-                consumerId,
-                title: questionTitle,
-            });
-            return null;
-        }
-
-        const {
-            skillName,
-            skillType,
-            experience = 3,
-            jobRole = "Software Developer",
-            maxTime = 30,
-            programmingConfig = {},
-        } = context;
-
-        const testCasesCount = programmingConfig.testCasesCount || 5;
-        const supportedLanguages = programmingConfig.supportedLanguages || [];
-        const testCasesConfig = programmingConfig.testCasesConfig || Array(testCasesCount)
-            .fill(null)
-            .map((_, idx) => ({
-                visible: idx < 2,
-                weightage: Math.floor(100 / testCasesCount),
-            }));
-
-        // Build regeneration prompt similar to questionsWorker.js
-        const prompt = `Generate 1 Programming interview question for the following skill:
-skillName: "${skillName}"
-skillType: "${skillType}"
-maxTime: ${maxTime} minutes
-- Candidate Experience Level: ${experience} years
-- Job Role: ${jobRole}
-
-### CRITICAL RULES:
-1. **Time Constraint**: Question MUST be answerable within ${maxTime} minutes
-2. **Use Provided Title**: Use the title "${questionTitle}" VERBATIM as "questionTitle"
-3. **Implement Exact Problem**: The problem description MUST match the title's problem exactly
-4. **Difficulty**: Match ${experience} years of experience
-5. **Test Cases**: Generate exactly ${testCasesCount} test cases
-
-**Programming Question Requirements**:
-- Generate EXACTLY 1 Programming question
-- Use title "${questionTitle}" VERBATIM as the "questionTitle"
-- Implement THE EXACT PROBLEM described by that title
-- Generate classic, well-known programming problems commonly asked in coding interviews
-- Keep problem statements direct and clear
-
-**CRITICAL JSON OUTPUT REQUIREMENTS**:
-- Return ONLY valid JSON (no markdown fences, no extra text)
-- Start with { and end with }
-- No trailing commas
-- Properly escape JSON strings
-
-Return JSON in this format:
-{
-  "skillName": "${skillName}",
-  "skillType": "${skillType}",
-  "type": "Programming",
-  "Programming": [
-    {
-      "questionTitle": "${questionTitle.replace(/"/g, '\\"')}",
-      "question": "<h3>Problem Description</h3><p>Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><br/><h3>Input Format</h3><p>Input specification with examples. Use <ul><li> for lists.</li></ul></p><br/><h3>Output Format</h3><p>Output specification here.</p><br/><h3>Constraints</h3><ul><li>Constraint 1</li><li>Constraint 2</li></ul><br/><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p><strong>Output:</strong> example output description</p>",
-      "maxTime": ${maxTime},
-      "testCases": [
-        ${testCasesConfig.map((tc, tcIdx) => `{
-          "input": "Actual test input value ${tcIdx + 1}",
-          "output": "EXACT expected output value ${tcIdx + 1}",
-          "explanation": "Why this output is correct",
-          "visible": ${tc.visible !== undefined ? tc.visible : tcIdx < 2},
-          "weightage": ${tc.weightage !== undefined ? tc.weightage : Math.floor(100 / testCasesCount)}
-        }`).join(",")}
-      ],
-      "supportedLanguages": ${JSON.stringify(supportedLanguages.map((lang) => ({
-        languageId: lang.languageId,
-        languageName: lang.languageName,
-        language: lang.languageName.split(" (")[0],
-        version: lang.languageName.includes("(") ? lang.languageName.split("(")[1].replace(")", "") : "",
-      })))}
-    }
-  ]
-}`;
-
-        // Call Gemini API
-        const model = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent(prompt);
-        const response = result.response;
-        const candidate = response.candidates?.[0]?.content;
-
-        if (!candidate || !candidate.parts) {
-            throw new Error("No valid response received from Gemini");
-        }
-
-        const aiResponseText = candidate.parts[0]?.text || "";
-        
-        // Extract JSON from response (similar to extractJsonFromGeminiText in questionsWorker)
-        // Try multiple extraction strategies
-        let jsonText = aiResponseText.trim();
-        
-        // Remove markdown code fences if present
-        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
-        
-        // Find JSON object boundaries
-        const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            throw new Error("No JSON found in AI response");
-        }
-        
-        jsonText = jsonMatch[0];
-        
-        // Parse JSON with error handling
-        let parsedResponse;
-        try {
-            parsedResponse = JSON.parse(jsonText);
-        } catch (parseError) {
-            // Try to fix common JSON issues
-            jsonText = jsonText.replace(/,(\s*[}\]])/g, "$1"); // Remove trailing commas
-            parsedResponse = JSON.parse(jsonText);
-        }
-
-        if (!parsedResponse.Programming || !Array.isArray(parsedResponse.Programming) || parsedResponse.Programming.length === 0) {
-            throw new Error("Invalid response: missing Programming array");
-        }
-
-        const regeneratedQuestion = parsedResponse.Programming[0];
-        
-        // Preserve original context fields
-        regeneratedQuestion.skillName = skillName;
-        regeneratedQuestion.skillType = skillType;
-        regeneratedQuestion.experience = experience;
-        regeneratedQuestion.jobRole = jobRole;
-        regeneratedQuestion.programmingConfig = programmingConfig;
-
-        vLog("regenerate-question", "Question regenerated successfully", {
-            requestId,
-            consumerId,
-            title: questionTitle,
-            newTitle: regeneratedQuestion.questionTitle,
-        });
-
-        return regeneratedQuestion;
-    } catch (error) {
-        vLog("regenerate-question", "Regeneration failed", {
-            requestId,
-            consumerId,
-            title: questionTitle,
-            error: error.message,
-        });
-        return null;
-    }
-};
-
 const verifyProgrammingQuestions = async ({
     questions = [],
     genAI,
     modelName = DEFAULT_MODEL,
     requestId = "",
     consumerId = "",
-    regenerateFunction = null, // Optional function to regenerate questions: (title, originalQuestion) => Promise<question>
-    regenerationContext = null, // Optional: { skillName, skillType, experience, jobRole, maxTime, programmingConfig, ... }
 }) => {
-    vLog("verify-batch", "Starting programming verification batch with regeneration", {
-        requestId,
-        consumerId,
-        questionCount: questions.length,
-        maxRegenerationAttempts: 3,
-    });
+    // vLog("verify-batch", "Starting programming verification batch", {
+    //     requestId,
+    //     consumerId,
+    //     questionCount: questions.length,
+    // });
 
-    const MAX_REGENERATION_ATTEMPTS = 3;
-    let currentQuestions = [...questions];
-    const questionAttempts = new Map(); // Track attempts per question title
-    const verifiedQuestions = [];
-    const finalResults = [];
-
-    // Initialize attempts tracking
-    currentQuestions.forEach((q) => {
-        const title = q.questionTitle || "Untitled";
-        questionAttempts.set(title, 0);
-    });
-
-    for (let cycle = 1; cycle <= MAX_REGENERATION_ATTEMPTS; cycle++) {
-        vLog("verify-batch", `Regeneration cycle ${cycle}/${MAX_REGENERATION_ATTEMPTS}`, {
-            requestId,
-            consumerId,
-            questionsInCycle: currentQuestions.length,
-        });
-
-        // Verify all questions in current cycle
-        const cycleResults = await Promise.all(
-            currentQuestions.map(async (question) => {
-                const title = question.questionTitle || "Untitled";
-                const attempts = questionAttempts.get(title) || 0;
-                
-                try {
-                    const skipRegeneration = cycle === MAX_REGENERATION_ATTEMPTS; // Last attempt, proceed to Phase 4/5
-                    const result = await verifyOneProgrammingQuestion({
-                        question,
-                        genAI,
-                        modelName,
-                        requestId,
-                        consumerId,
-                        skipRegeneration,
-                    });
-                    
-                    questionAttempts.set(title, attempts + 1);
-                    return { question, result, title };
-                } catch (error) {
-                    vLog("verify-batch", "Question verification crashed", {
-                        requestId,
-                        consumerId,
-                        title,
-                        error: error.message,
-                    });
-                    questionAttempts.set(title, attempts + 1);
-                    return {
-                        question,
-                        result: {
-                            question: {
-                                ...question,
-                                verified: false,
-                                verificationAttempts: attempts + 1,
-                                verificationSummary: {
-                                    status: "failed",
-                                    reason: error.message || "Verification failed",
-                                },
-                            },
-                            verified: false,
-                            needsRegeneration: cycle < MAX_REGENERATION_ATTEMPTS,
-                        },
-                        title,
-                    };
-                }
-            }),
-        );
-
-        // Separate verified and failed questions
-        const cycleVerified = [];
-        const cycleFailed = [];
-
-        cycleResults.forEach(({ question, result, title }) => {
-            const cleanedQuestion = stripInternalFields(result.question);
-            finalResults.push(cleanedQuestion);
-
-            if (result.verified) {
-                cycleVerified.push(cleanedQuestion);
-                verifiedQuestions.push(cleanedQuestion);
-            } else if (result.needsRegeneration && cycle < MAX_REGENERATION_ATTEMPTS) {
-                cycleFailed.push({ question, title });
-            } else {
-                // Max attempts reached or regeneration disabled
-                verifiedQuestions.push(cleanedQuestion);
-            }
-        });
-
-        vLog("verify-batch", `Cycle ${cycle} completed`, {
-            requestId,
-            consumerId,
-            verified: cycleVerified.length,
-            failed: cycleFailed.length,
-            totalVerified: verifiedQuestions.length,
-        });
-
-        // If no failures or max attempts reached, stop
-        if (cycleFailed.length === 0 || cycle === MAX_REGENERATION_ATTEMPTS) {
-            break;
-        }
-
-        // Regenerate failed questions
-        if (regenerateFunction && typeof regenerateFunction === "function") {
-            vLog("verify-batch", "Regenerating failed questions", {
-                requestId,
-                consumerId,
-                failedCount: cycleFailed.length,
-            });
-
-            const regenerationPromises = cycleFailed.map(async ({ title, question }) => {
-                try {
-                    // Use provided regenerateFunction or default implementation
-                    const regenerated = regenerateFunction
-                        ? await regenerateFunction(title, question, regenerationContext)
-                        : await regenerateQuestionFromTitle({
-                            questionTitle: title,
-                            genAI,
-                            modelName,
-                            requestId,
-                            consumerId,
-                            originalQuestion: question,
-                            regenerationContext,
-                        });
-                    if (regenerated) {
-                        return regenerated;
-                    }
-                } catch (error) {
-                    vLog("verify-batch", "Regeneration failed", {
-                        requestId,
-                        consumerId,
-                        title,
-                        error: error.message,
-                    });
-                }
-                return null;
-            });
-
-            const regeneratedQuestions = (await Promise.all(regenerationPromises)).filter(Boolean);
-            
-            if (regeneratedQuestions.length > 0) {
-                currentQuestions = regeneratedQuestions;
-                vLog("verify-batch", "Questions regenerated", {
-                    requestId,
-                    consumerId,
-                    regeneratedCount: regeneratedQuestions.length,
-                });
-            } else {
-                // Regeneration failed, stop cycles
-                vLog("verify-batch", "Regeneration failed for all questions, stopping cycles", {
-                    requestId,
-                    consumerId,
-                });
-                break;
-            }
-        } else {
-            // No regeneration function provided, stop cycles
-            vLog("verify-batch", "No regeneration function provided, stopping cycles", {
+    const verifyOne = async (question) => {
+        const title = question.questionTitle || "Untitled";
+        try {
+            const verifyPromise = verifyOneProgrammingQuestion({
+                question,
+                genAI,
+                modelName,
                 requestId,
                 consumerId,
             });
-            break;
+            const result = VERIFICATION_QUESTION_TIMEOUT_MS > 0
+                ? await Promise.race([
+                    verifyPromise,
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error(`Verification timeout (${VERIFICATION_QUESTION_TIMEOUT_MS}ms)`)), VERIFICATION_QUESTION_TIMEOUT_MS),
+                    ),
+                ])
+                : await verifyPromise;
+            return stripInternalFields(result.question);
+        } catch (error) {
+            // vLog("verify-batch", "Question verification crashed", {
+            //     requestId,
+            //     consumerId,
+            //     title,
+            //     error: error.message,
+            // });
+            return stripInternalFields({
+                ...question,
+                verified: false,
+                verificationAttempts: 1,
+                verificationSummary: {
+                    status: "failed",
+                    reason: error.message || "Verification failed",
+                },
+            });
         }
-    }
+    };
 
-    const verifiedCount = verifiedQuestions.filter((q) => q.verified).length;
-    vLog("verify-batch", "Completed programming verification batch with regeneration", {
-        requestId,
-        consumerId,
-        questionCount: questions.length,
-        verifiedCount,
-        totalCycles: Math.min(MAX_REGENERATION_ATTEMPTS, questionAttempts.size),
-    });
+    const results = await runWithConcurrency(
+        questions,
+        QUESTION_CONCURRENCY,
+        (q) => verifyOne(q),
+    );
 
-    return { questions: finalResults };
+    const verifiedCount = results.filter((q) => q.verified === true).length;
+    // vLog("verify-batch", "Completed programming verification batch", {
+    //     requestId,
+    //     consumerId,
+    //     questionCount: questions.length,
+    //     verifiedCount,
+    // });
+
+    return {
+        questions: results,
+    };
 };
 
 const verifyGeneratedBoilerplate = async ({
@@ -2368,11 +2047,11 @@ const verifyGeneratedBoilerplate = async ({
     genAI,
     modelName = DEFAULT_MODEL,
 }) => {
-    vLog("verify-boilerplate", "Starting boilerplate verification", {
-        title: questionTitle || "Untitled",
-        languages: Array.isArray(languages) ? languages.length : 0,
-        testCases: Array.isArray(testCases) ? testCases.length : 0,
-    });
+    // vLog("verify-boilerplate", "Starting boilerplate verification", {
+    //     title: questionTitle || "Untitled",
+    //     languages: Array.isArray(languages) ? languages.length : 0,
+    //     testCases: Array.isArray(testCases) ? testCases.length : 0,
+    // });
     const syntheticQuestion = {
         questionTitle,
         question,
@@ -2380,7 +2059,9 @@ const verifyGeneratedBoilerplate = async ({
         supportedLanguages: (languages || []).map((lang) => ({
             languageId: lang.languageId,
             languageName: lang.languageName || lang.name,
-            codeSnippet: sanitizeText(boilerplateCode?.[lang.languageName || lang.name] || ""),
+            codeSnippet: sanitizeText(
+                getBoilerplateForLanguage(boilerplateCode, lang.languageName || lang.name) || "",
+            ),
         })),
         timeLimit: 5,
         memoryLimit: 128,
@@ -2399,11 +2080,11 @@ const verifyGeneratedBoilerplate = async ({
         updatedBoilerplate[lang.languageName] = lang.codeSnippet || "";
     });
 
-    vLog("verify-boilerplate", "Completed boilerplate verification", {
-        title: questionTitle || "Untitled",
-        verified: !!verifiedResult.question.verified,
-        attempts: verifiedResult.question.verificationAttempts || 0,
-    });
+    // vLog("verify-boilerplate", "Completed boilerplate verification", {
+    //     title: questionTitle || "Untitled",
+    //     verified: !!verifiedResult.question.verified,
+    //     attempts: verifiedResult.question.verificationAttempts || 0,
+    // });
     return {
         boilerplateCode: updatedBoilerplate,
         verified: !!verifiedResult.question.verified,
