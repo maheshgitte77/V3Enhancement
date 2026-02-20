@@ -5,6 +5,24 @@ const CreditServiceClient = require("../utils/creditServiceClient");
  * Provides middleware and standalone validation functions for cost-based credit checking
  */
 class ActionCreditValidator {
+  constructor() {
+    this.validateMediaAnalysisCredit =
+      this.validateMediaAnalysisCredit.bind(this);
+    this.validateSubjectiveAnalysisCredit =
+      this.validateSubjectiveAnalysisCredit.bind(this);
+    this.validateProgrammingAnalysisCredit =
+      this.validateProgrammingAnalysisCredit.bind(this);
+    this.validateScreeningSummaryCredit =
+      this.validateScreeningSummaryCredit.bind(this);
+    this.validateAssessmentSummaryCredit =
+      this.validateAssessmentSummaryCredit.bind(this);
+    this.validateKafkaAnalysisCredits =
+      this.validateKafkaAnalysisCredits.bind(this);
+    this.validateKafkaSummaryCredits =
+      this.validateKafkaSummaryCredits.bind(this);
+    this._validateBalance = this._validateBalance.bind(this);
+  }
+
   /**
    * Validate credits for media analysis (video/audio)
    * @param {Object} req - Express request
