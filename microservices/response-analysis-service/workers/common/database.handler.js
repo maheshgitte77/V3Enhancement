@@ -1109,7 +1109,11 @@ const updateProgrammingQuestionAnalysis = async ({
       ) {
         const earned = parseFloat(executionSummary.earnedScore);
         if (!isNaN(earned)) {
-          newObtainedScore = earned;
+          // Execution score needs to be mapped to question marks using the actual maxScore
+          const executionMax = parseFloat(executionSummary.maxScore) || 100;
+          newObtainedScore = Math.round(
+            (earned / executionMax) * questionMarks,
+          );
           shouldUseExecutionScore = true;
           logger.info("Using execution summary score over AI score", {
             executionScore: newObtainedScore,

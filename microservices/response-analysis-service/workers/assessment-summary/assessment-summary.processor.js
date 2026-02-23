@@ -522,13 +522,14 @@ const processAssessmentSummary = async (requestData) => {
       validComponents > 0 ? Math.round(totalAccuracySum / validComponents) : 0;
 
     // B. Code Quality Score (The "How")
-    // Formula: Uses AI 'codeQuality' score. If pure MCQ, we use technical accuracy as a proxy for "Theoretical Quality".
+    // Formula: Uses AI 'codeQuality' score.
     let codeQualityScore = 0;
     if (programmingCodeQuality !== null) {
       codeQualityScore = programmingCodeQuality;
-    } else if (programmingTestCaseScore === null && mcqScore !== null) {
-      // Pure MCQ Assessment: "Quality" is inferred from theoretical depth
-      codeQualityScore = technicalAccuracy;
+    } else if (programmingTestCaseScore !== null) {
+      // If programming questions exist but AI analysis is not yet available,
+      // use test case score as a baseline so the metric is visible.
+      codeQualityScore = programmingTestCaseScore;
     }
 
     // C. Reasoning Score (The "Why")
