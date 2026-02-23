@@ -1,7 +1,6 @@
 const model = require("../utils/googleGenerativeAI");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
-const { calculateProcessingCost } = require("../utils/costCalculator");
 const CreditServiceClient = require("../utils/creditServiceClient");
 const { getPromptGenerator } = require("../prompts");
 
@@ -397,47 +396,36 @@ const generateJobDescriptionFormFile = async (req, res) => {
       const inputTokens = usageMetadata.promptTokenCount || 0;
       const outputTokens = usageMetadata.candidatesTokenCount || 0;
 
-      let processingCost = null;
-      if (inputTokens > 0 || outputTokens > 0) {
-        processingCost = calculateProcessingCost(
-          inputTokens,
-          outputTokens,
-          "text",
-        );
-
-        // --- Credit System Integration ---
-        try {
-          const clientId = req.body.clientId;
-          const channelId = req.body.channelId;
-          const tempId = req.body.tempId;
-          if (clientId && (inputTokens > 0 || outputTokens > 0)) {
-            const referenceId = `jd_file_${Date.now()}`;
-            await CreditServiceClient.deductAiUsage({
-              clientId,
-              modelId: "gemini-2.0-flash",
-              referenceId,
-              inputTokens,
-              outputTokens,
-              meta: {
-                type: "jd_generation_from_file",
-                fileName: req.file.originalname,
-                serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
-              },
-              channelId,
-              tempId,
-            });
-          }
-        } catch (creditError) {
-          console.error(`❌ AI Credit deduction failed:`, creditError.message);
+      // --- Credit System Integration ---
+      try {
+        const clientId = req.body.clientId;
+        const channelId = req.body.channelId;
+        const tempId = req.body.tempId || req.body.temp_id;
+        if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+          // Use tempId as base for referenceId to ensure consistency across all JD generations for same job
+          const referenceId = `jd_file_${Date.now()}`;
+          await CreditServiceClient.deductAiUsage({
+            clientId,
+            modelId: "gemini-2.0-flash",
+            referenceId,
+            inputTokens,
+            outputTokens,
+            meta: {
+              type: "jd_generation_from_file",
+              fileName: req.file.originalname,
+              serviceKey: "AI_JOB_DESCRIPTION_GENERATION",
+            },
+            channelId,
+            tempId,
+          });
         }
+      } catch (creditError) {
+        console.error(
+          `❌ AI Credit deduction failed (Non-blocking):`,
+          creditError.message,
+        );
       }
-
-      // Clean metaData: remove null values
-      const cleanedMetaData = metaData
-        ? Object.fromEntries(
-            Object.entries(metaData).filter(([_, value]) => value !== null),
-          )
-        : null;
+      // ---------------------------------
 
       return res.json({
         formattedText,
@@ -449,7 +437,6 @@ const generateJobDescriptionFormFile = async (req, res) => {
         documentType: "Analyzed by AI",
         numPages: pdfData.numpages,
         noticePeriod: "0-30", // Default notice period
-        ...(processingCost && { processingCost }),
       });
     } else {
       return res.json({

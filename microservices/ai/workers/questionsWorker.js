@@ -9,6 +9,10 @@ const {
 const CreditServiceClient = require("../utils/creditServiceClient");
 const categoryTracker = require("../utils/categoryTracker");
 const {
+  verifyProgrammingQuestions,
+  verifyGeneratedBoilerplate,
+} = require("../services/programmingVerification.service");
+const {
   normalizeProgrammingContext,
   validateTitlesAgainstExisting,
   truncateToWords,
@@ -17,6 +21,10 @@ const {
   jaccard: jaccardFromModule,
   TITLE_SIMILARITY_THRESHOLD: BODY_SIMILARITY_THRESHOLD,
 } = require("../utils/programmingDuplicateAvoidance");
+const {
+  generateBoilerplateWithGemini,
+  getBoilerplateForLanguage,
+} = require("../services/boilerplateGeneration.service");
 
 require("dotenv").config();
 
@@ -64,10 +72,6 @@ const retryGeminiCall = async (
       if (isRateLimit && attempt < maxRetries - 1) {
         // Exponential backoff: 1s, 2s, 4s, etc.
         const delayMs = baseDelayMs * Math.pow(2, attempt);
-        console.log(
-          `⏳ Rate limit hit (Consumer ${consumerId}), retrying in ${delayMs}ms (attempt ${attempt + 1
-          }/${maxRetries})...`,
-        );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
@@ -228,35 +232,8 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
   try {
     return JSON.parse(aiResponseJson);
   } catch (parseError) {
-    console.error(
-      `❌ Error parsing AI response JSON in Consumer ${consumerId}:`,
-      parseError,
-    );
-    console.error(`Parse error: ${parseError.message}`);
-    console.error(
-      `Response text (first 1000 chars):`,
-      aiResponseText.substring(0, 1000),
-    );
-    console.error(
-      `Extracted JSON (first 1000 chars):`,
-      aiResponseJson.substring(0, 1000),
-    );
-
-    // Try to locate problematic area
-    const errorMatch = parseError.message.match(/position (\d+)/);
-    if (errorMatch) {
-      const errorPos = parseInt(errorMatch[1], 10);
-      const start = Math.max(0, errorPos - 100);
-      const end = Math.min(aiResponseJson.length, errorPos + 100);
-      console.error(
-        `Problematic area around position ${errorPos}:`,
-        aiResponseJson.substring(start, end),
-      );
-    }
-
     // Fallback: try to find largest valid JSON object
     try {
-      // console.log(`🔄 Attempting fallback JSON extraction...`);
       const jsonMatches = [];
       let braceCount = 0;
       let startPos = -1;
@@ -286,9 +263,6 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
 
       if (jsonMatches.length > 0) {
         jsonMatches.sort((a, b) => b.length - a.length);
-        // console.log(
-        //   `✅ Found valid JSON object (${jsonMatches[0].length} chars), using fallback extraction`
-        // );
         return jsonMatches[0].json;
       }
 
@@ -296,10 +270,6 @@ const extractJsonFromGeminiText = (aiResponseText, consumerId = "N/A") => {
         `Failed to parse AI response: ${parseError.message}. No valid JSON object found.`,
       );
     } catch (fallbackError) {
-      console.error(
-        `❌ Fallback JSON extraction also failed (Consumer ${consumerId}):`,
-        fallbackError,
-      );
       throw new Error(
         `Failed to parse AI response: ${parseError.message}. Fallback extraction failed: ${fallbackError.message}`,
       );
@@ -425,21 +395,6 @@ const generateProgrammingTitlesPrompt = (
     unusedCategories.length > 0
       ? unusedCategories
       : PROGRAMMING_LOGIC_CATEGORIES;
-
-  if (usedCategories.length > 0) {
-    console.log(
-      `📊 Previously used logic categories (server-tracked): ${usedCategories.join(
-        ", ",
-      )}`,
-    );
-    if (isCategoryExhausted) {
-      console.log(
-        `🔄 Category Rotation Mode Activated: ${usedCount}/${totalCategories} categories used (${usagePercentage.toFixed(
-          1,
-        )}%) - Allowing reuse with unique variations`,
-      );
-    }
-  }
 
   const hasUserPrompt = typeof promptText === "string" && promptText.length > 0;
 
@@ -1694,6 +1649,7 @@ The user has specified exactly what they want. Generate programming questions th
 
 - The problem description, input/output, constraints, and test cases MUST be exclusively about the user's concept. Example: if the user asked for "queues (FIFO) in array", the problem MUST involve queue operations (enqueue/dequeue), FIFO order, or implementing a queue using an array—NOT "print numbers 1 to N", "skip multiples of 5", "count vowels", "palindrome", or any unrelated problem.
 - Do NOT substitute a different problem. If the user asked for FIFO/queues, the question must be about queues/FIFO (e.g. implement queue with array, simulate FIFO, circular queue). If the user asked for Fibonacci, the question must be about Fibonacci. Never output a problem that is off-topic.
+- **EXECUTABLE ONLY**: Even for theoretical topics (e.g. "time complexity", "Fibonacci"), generate RUNNABLE code problems. E.g. "Fibonacci" → "Given n, output nth Fibonacci number" (with input/output). NEVER "analyze complexity" or "explain" type questions—those cannot run in Judge0.
 - If the provided title (from the list below) does not match the user's prompt, still implement the USER REQUEST concept for the problem content—the user's prompt overrides the title theme when they conflict.
 - If any detail conflicts with maxTime or feasibility, simplify while keeping the user's core topic.
 `;
@@ -1741,17 +1697,20 @@ ${isScenarioBased
     - "Check if a string contains valid parentheses"
     - "Merge two sorted arrays into one sorted array"
   * Focus on clarity and standard problem formulations rather than job-role specific scenarios`}
-- **JUDGE0 COMPATIBILITY** (MANDATORY):
-  * Code runs non-interactive. Use ONLY these input methods:
-    - JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');
-    - Python: input() or sys.stdin.read()
-    - Java: Scanner(System.in)
-    - C++: cin
-    - C: scanf
-    - Go: fmt.Scan/fmt.Scanln
-    - PHP: fgets(STDIN)
-    - Rust: stdin().read_line()
-  * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
+- **EXECUTABLE ONLY - JUDGE0 COMPATIBILITY** (MANDATORY - NO EXCEPTIONS):
+  * EVERY question MUST be a runnable coding problem that executes in Judge0. Boilerplate is generated separately.
+  * FORBIDDEN: Theoretical, analysis, or explanation-only questions. NEVER generate:
+    - "Analyze time/space complexity" or "Explain which approach is more efficient"
+    - "There is no input" or "N/A" for Input Format
+    - "Provide an analysis" or "Your answer should include..." (text output instead of code output)
+    - "Examples: N/A" or "This question requires analysis, not code execution"
+  * REQUIRED: Every question MUST have:
+    - Concrete Input Format: actual stdin input (e.g. numbers, strings, arrays)
+    - Concrete Output Format: what the program prints to stdout
+    - At least 1 real test case with specific input and expected output values
+  * If a topic (e.g. Fibonacci, time complexity) could be theoretical, generate an EXECUTABLE variant instead:
+    - WRONG: "Analyze iterative vs recursive Fibonacci complexity"
+    - RIGHT: "Given n, compute the nth Fibonacci number" (with input n, output the number)
 - **Experience Level Tailoring** (${experience} years):
   * ${experience <= 3
           ? "Junior Level"
@@ -1921,39 +1880,7 @@ ${isScenarioBased
   * If maxTime <= 30 minutes: Medium max unless explicitly asked and still solvable
   * Ignore any "Hard" preference if it conflicts with maxTime
 - Supported Languages: ${supportedLanguageNames.join(", ")}
-- **CRITICAL BOILERPLATE CODE REQUIREMENTS - STRICTLY ENFORCED**:
-  * Boilerplate MUST include ONLY: imports/headers, input reading code, basic structure (main function/class), TODO comment
-  * **MANDATORY STRUCTURE**: Keep solution logic in a SEPARATE function/method (e.g., solve(), compute(), or class method)
-  * main() must ONLY handle input/output and call the separate logic function/method
-  * **DO NOT** place any solution logic in main() or input parsing
-  * **WHAT TO INCLUDE**: Only input reading (language-specific STDIN methods), empty function/class structure, TODO comment like "// TODO: Implement the solution here"
-  * **EXAMPLE OF CORRECT BOILERPLATE**: 
-    - C++: #include headers, main() with cin for input, empty function with TODO, placeholder output
-    - Java: imports, public class Main { ... }, main() with Scanner(System.in) for input, separate solve() with TODO, placeholder System.out.println
-    - JavaScript (Node.js): const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); (ONLY this method, NO other imports) empty function with TODO, placeholder console.log
-    - Python: imports, input() or sys.stdin.read() for input, empty function with TODO, placeholder print
-  * Use \\n for newlines in boilerplate code (NOT <br/>)
-  * Follow language-specific formatting standards
-  * **IMPORTANT**: The boilerplate code must be a clean starting point where candidates write ALL solution logic themselves.
-  * **IMPORTANT**: The boilerplate code does not include any solution logic or algorithm implementation.
-- **JUDGE0 COMPATIBILITY** (MANDATORY):
-  * Code runs non-interactive. Use ONLY these input methods:
-    - JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8');
-    - Python: input() or sys.stdin.read()
-    - Java: Scanner(System.in)
-    - C++: cin
-    - C: scanf
-    - Go: fmt.Scan/fmt.Scanln
-    - PHP: fgets(STDIN)
-    - Rust: stdin().read_line()
-  * JAVA-SPECIFIC RULE (SUPER IMPORTANT):
-    - Java output MUST use exactly: public class Main { ... }
-    - Keep both methods inside Main:
-      1) public static void main(String[] args)
-      2) static void solve(...) (or static returnType solve(...))
-    - main() handles input/output and calls solve(); solve() remains TODO-only (no algorithm logic).
-    - Never use another public class name (e.g., Solution/App/UserMain).
-  * Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output. NO solution logic.
+- Boilerplate code instructions are handled in dedicated boilerplate generation API/step; do not output boilerplate here.
 
 If titles are provided, you MUST (NO EXCEPTIONS):
 - Generate exactly one Programming question per title, in the SAME ORDER as the list below.
@@ -2093,11 +2020,6 @@ Return JSON in this format:
           }));
       const supportedLanguagesInfoForTemplate =
         programmingConfigForTemplate.supportedLanguages || [];
-      const supportedLanguageNamesForTemplate =
-        supportedLanguagesInfoForTemplate.map((lang) => lang.languageName) ||
-        [];
-      const supportedLanguageIdsForTemplate =
-        supportedLanguagesInfoForTemplate.map((lang) => lang.languageId) || [];
 
       const programmingCount =
         Array.isArray(titles) && titles.length > 0 ? titles.length : number;
@@ -2144,23 +2066,16 @@ Return JSON in this format:
                       : "",
                   })),
                 )},
-      "supportedLanguageNames": ${JSON.stringify(
-                  supportedLanguageNamesForTemplate,
-                )},
-      "supportedLanguageIds": ${JSON.stringify(
-                  supportedLanguageIdsForTemplate,
-                )},
-      "boilerplateCode": {
-        ${supportedLanguageNamesForTemplate.length > 0
-                ? supportedLanguageNamesForTemplate
-                  .map(
-                    (langName) =>
-                      `"${langName}": "Generate boilerplate (structure only, NO solution logic) with \\\\n for newlines. JUDGE0 non-interactive. Input methods: JavaScript: const fs = require('fs'); const input = fs.readFileSync(0, 'utf8'); Python: input()/sys.stdin.read(); Java: Scanner(System.in); C++: cin; C: scanf; Go: fmt.Scan/fmt.Scanln; PHP: fgets(STDIN); Rust: stdin().read_line(). For Java, MUST use exactly public class Main with both methods inside it: public static void main(String[] args) and static solve(...), where main handles I/O and calls solve(). Never use any other public class name. Boilerplate: imports, STDIN input, empty solve() with TODO, call solve(), print output."`,
-                  )
-                  .join(",")
-                : ""
-              }
-      }
+      "supportedLanguages": ${JSON.stringify(
+                  supportedLanguagesInfoForTemplate.map((lang) => ({
+                    languageId: lang.languageId,
+                    languageName: lang.languageName,
+                    language: lang.languageName.split(" (")[0],
+                    version: lang.languageName.includes("(")
+                      ? lang.languageName.split("(")[1].replace(")", "")
+                      : "",
+                  })),
+                )}
     }`;
           })
           .join(",")}
@@ -2176,9 +2091,7 @@ const createConsumer = async (id) => {
   const consumer = kafka.consumer({ groupId: "questions-group" });
   await consumer.connect();
 
-  // console.log(`🛠️ Consumer ${id} connecting to topic '${requestTopic}'`);
   await consumer.subscribe({ topic: requestTopic, fromBeginning: false });
-  console.log(`✅ Consumer ${id} subscribed to '${requestTopic}'!`);
 
   await consumer.run({
     eachMessage: async ({ partition, message }) => {
@@ -2201,6 +2114,7 @@ const createConsumer = async (id) => {
       let jobId = null;
       let tempId = null;
       let screeningAssessmentId = null;
+      let boilerplateRequest = null;
 
       try {
         const parsedMessage = JSON.parse(message.value.toString());
@@ -2224,15 +2138,109 @@ const createConsumer = async (id) => {
         jobId = parsedMessage.jobId;
         tempId = parsedMessage.tempId;
         screeningAssessmentId = parsedMessage.screeningAssessmentId;
+        boilerplateRequest = parsedMessage.boilerplateRequest || null;
       } catch (parseError) {
-        console.error(
-          `❌ Error parsing incoming Kafka message in Consumer ${id}:`,
-          parseError,
-        );
-        console.error(
-          `Message value (first 500 chars):`,
-          message.value.toString().substring(0, 500),
-        );
+        return;
+      }
+
+      // Handle combined Audio/Video/Subjective type
+      if (questionType === "Boilerplate") {
+        try {
+          if (!boilerplateRequest) {
+            throw new Error("Missing boilerplateRequest payload");
+          }
+          const { questionTitle, question, testCases, languages } = boilerplateRequest;
+          const boilerplateResult = await generateBoilerplateWithGemini({
+            genAI,
+            modelName: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+            questionTitle,
+            question,
+            testCases,
+            languages,
+          });
+          let verified = false;
+          let verificationMeta = {
+            attempts: 0,
+            summary: { status: "skipped", reason: "Verification disabled" },
+          };
+          let finalBoilerplateCode = boilerplateResult.boilerplateCode;
+
+          if (process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false") {
+            const verificationResult = await verifyGeneratedBoilerplate({
+              questionTitle,
+              question,
+              testCases,
+              languages,
+              boilerplateCode: boilerplateResult.boilerplateCode,
+              genAI,
+              modelName: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+            });
+            finalBoilerplateCode = verificationResult.boilerplateCode;
+            verified = verificationResult.verified;
+            verificationMeta = verificationResult.verificationMeta;
+          }
+
+          if (
+            clientId &&
+            (boilerplateResult.tokenUsage?.promptTokens ||
+              boilerplateResult.tokenUsage?.completionTokens)
+          ) {
+            try {
+              await CreditServiceClient.deductAiUsage({
+                clientId,
+                modelId: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+                referenceId: `ai_code_gen_${Date.now()}`,
+                inputTokens: boilerplateResult.tokenUsage.promptTokens || 0,
+                outputTokens: boilerplateResult.tokenUsage.completionTokens || 0,
+                meta: {
+                  type: "ai_code_generation",
+                  serviceKey: "AI_CODE_GENERATION",
+                },
+                channelId,
+                jobId,
+                tempId,
+              });
+            } catch (creditError) {
+              // Credit deduction failed - continue without logging
+            }
+          }
+
+          await producer.send({
+            topic: replyTopic,
+            messages: [
+              {
+                key: requestId,
+                value: JSON.stringify({
+                  requestId,
+                  questionType: "Boilerplate",
+                  category: category?.category || "boilerplate",
+                  boilerplateResponse: {
+                    boilerplateCode: finalBoilerplateCode,
+                    verified,
+                    verificationMeta,
+                  },
+                  tokenUsage: boilerplateResult.tokenUsage,
+                }),
+              },
+            ],
+          });
+        } catch (error) {
+          await producer.send({
+            topic: replyTopic,
+            messages: [
+              {
+                key: requestId,
+                value: JSON.stringify({
+                  requestId,
+                  questionType: "Boilerplate",
+                  category: category?.category || "boilerplate",
+                  error: true,
+                  message: error.message || "Boilerplate generation failed",
+                }),
+              },
+            ],
+          });
+        }
         return;
       }
 
@@ -2243,9 +2251,6 @@ const createConsumer = async (id) => {
           !Array.isArray(questionConfigs) ||
           questionConfigs.length === 0
         ) {
-          console.error(
-            `❌ Missing questionConfigs for AudioVideoSubjective in Consumer ${id}`,
-          );
           if (requestId) {
             try {
               await producer.send({
@@ -2265,18 +2270,12 @@ const createConsumer = async (id) => {
                 ],
               });
             } catch (errorSendError) {
-              console.error(
-                `❌ Failed to send error response to Kafka:`,
-                errorSendError,
-              );
+              // Failed to send error response
             }
           }
           return;
         }
       } else if (!questionType || !questionConfig) {
-        console.error(
-          `❌ Missing questionType or questionConfig in Consumer ${id}`,
-        );
         if (requestId) {
           try {
             await producer.send({
@@ -2295,20 +2294,13 @@ const createConsumer = async (id) => {
               ],
             });
           } catch (errorSendError) {
-            console.error(
-              `❌ Failed to send error response to Kafka:`,
-              errorSendError,
-            );
+            // Failed to send error response
           }
         }
         return;
       }
 
       try {
-        // console.log(
-        //   `🔄 Consumer ${id} processing ${questionType} questions for ${category.category}`
-        // );
-
         const model = genAI.getGenerativeModel({
           model: "gemini-2.0-flash",
         });
@@ -2358,10 +2350,6 @@ const createConsumer = async (id) => {
             response = result.response;
             candidate = response.candidates?.[0]?.content;
           } catch (geminiError) {
-            console.error(
-              `❌ Error calling Gemini API for combined Audio/Video/Subjective in Consumer ${id}:`,
-              geminiError,
-            );
             throw new Error(
               `Gemini API error: ${geminiError.message || "Unknown error"}`,
             );
@@ -2524,17 +2512,7 @@ const createConsumer = async (id) => {
                 topic: replyTopic,
                 messages: responseMessages,
               });
-              console.log(
-                `✅ Consumer ${id} completed processing combined Audio/Video/Subjective questions for '${category.category}'`,
-              );
-              console.log(
-                `✅ ${responseMessages.length} response(s) sent to Kafka for requestId: ${requestId}`,
-              );
             } catch (sendError) {
-              console.error(
-                `❌ Error sending combined responses to Kafka in Consumer ${id}:`,
-                sendError,
-              );
               throw sendError;
             }
           } else {
@@ -2580,10 +2558,6 @@ const createConsumer = async (id) => {
                 category.category,
               );
             } catch (e) {
-              console.error(
-                `⚠️ Failed to load example pointers (Consumer ${id}):`,
-                e?.message || e,
-              );
               examplePointers = {};
             }
           }
@@ -2693,10 +2667,6 @@ const createConsumer = async (id) => {
 
               await CreditServiceClient.deductAiUsage(reqBody);
             } catch (geminiError) {
-              console.error(
-                `❌ Error calling Gemini API for titles in Consumer ${id}:`,
-                geminiError,
-              );
               lastTitleError = new Error(
                 `Gemini API error (titles): ${geminiError.message || "Unknown error"
                 }`,
@@ -2762,10 +2732,6 @@ const createConsumer = async (id) => {
                     nextExamplePointers,
                   );
                 } catch (e) {
-                  console.error(
-                    `⚠️ Failed to persist example pointers (Consumer ${id}):`,
-                    e?.message || e,
-                  );
                 }
               }
               break;
@@ -2812,23 +2778,6 @@ const createConsumer = async (id) => {
             ? titlesJson.logicCategories.slice(0, titles.length)
             : [];
 
-          if (generatedLogicCategories.length > 0) {
-            console.log(
-              `📊 Generated Programming titles with logic categories (Consumer ${id}):`,
-            );
-            titles.forEach((title, idx) => {
-              const category = generatedLogicCategories[idx] || "Unknown";
-              console.log(`  ${idx + 1}. ${title} → ${category}`);
-            });
-          } else {
-            console.log(
-              `📊 Generated ${titles.length} Programming titles (Consumer ${id}):`,
-            );
-            titles.forEach((title, idx) => {
-              console.log(`  ${idx + 1}. ${title}`);
-            });
-          }
-
           // Now generate full Programming questions in batches of 2 titles - PROCESS IN PARALLEL
           const batchPromises = [];
 
@@ -2857,11 +2806,6 @@ const createConsumer = async (id) => {
             // Create promise for this batch
             const batchPromise = (async () => {
               try {
-                console.log(
-                  `🚀 Starting Programming batch ${batchIndex}/${Math.ceil(
-                    titles.length / 2,
-                  )} (Consumer ${id})...`,
-                );
 
                 const batchResult = await retryGeminiCall(
                   () => model.generateContent(batchPrompt),
@@ -2893,21 +2837,12 @@ const createConsumer = async (id) => {
                   );
                 }
 
-                console.log(
-                  `✅ Completed Programming batch ${batchIndex}/${Math.ceil(
-                    titles.length / 2,
-                  )} (Consumer ${id})`,
-                );
                 return {
                   batchIndex: batchIndex - 1, // 0-indexed for sorting
                   questions: batchJson.Programming,
                   tokenUsage: batchTokenUsage,
                 };
               } catch (geminiError) {
-                console.error(
-                  `❌ Error calling Gemini API for Programming batch ${batchIndex} in Consumer ${id}:`,
-                  geminiError,
-                );
                 throw new Error(
                   `Gemini API error (Programming batch ${batchIndex}): ${geminiError.message || "Unknown error"
                   }`,
@@ -2919,9 +2854,6 @@ const createConsumer = async (id) => {
           }
 
           // Process all batches in parallel - use allSettled to handle partial failures
-          console.log(
-            `🔄 Processing ${batchPromises.length} Programming batches in parallel (Consumer ${id})...`,
-          );
           const batchResults = await Promise.allSettled(batchPromises);
 
           // Separate successful and failed batches
@@ -2932,11 +2864,6 @@ const createConsumer = async (id) => {
             if (result.status === "fulfilled") {
               successfulBatches.push(result.value);
             } else {
-              const batchIndex = Math.floor((index * 2) / 2) + 1;
-              console.error(
-                `❌ Programming batch ${batchIndex} failed in Consumer ${id}:`,
-                result.reason?.message || result.reason,
-              );
               failedBatches.push({
                 batchIndex: index,
                 error: result.reason?.message || "Unknown error",
@@ -2964,20 +2891,6 @@ const createConsumer = async (id) => {
           });
 
           // Log summary
-          if (failedBatches.length > 0) {
-            console.warn(
-              `⚠️ Consumer ${id}: ${successfulBatches.length}/${batchPromises.length} Programming batches succeeded. ${failedBatches.length} batch(es) failed.`,
-            );
-          } else {
-            console.log(
-              `✅ Consumer ${id}: All ${successfulBatches.length} Programming batches succeeded.`,
-            );
-          }
-
-          console.log(
-            `📊 Token usage for Programming (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`,
-          );
-
           // Build aiResponse object matching normal schema
           // Always send response even if some batches failed (partial success)
           aiResponse = {
@@ -2987,20 +2900,7 @@ const createConsumer = async (id) => {
             Programming: allProgrammingQuestions,
           };
 
-          // If no questions were generated, log warning but still send empty array
-          if (allProgrammingQuestions.length === 0) {
-            console.warn(
-              `⚠️ Consumer ${id}: No Programming questions generated. All batches failed. Errors: ${failedBatches
-                .map((f) => f.error)
-                .join("; ")}`,
-            );
-            // Still send response with empty array - let frontend handle it
-          } else if (failedBatches.length > 0) {
-            // Log partial success
-            console.warn(
-              `⚠️ Consumer ${id}: Partial success - ${allProgrammingQuestions.length} Programming questions generated, ${failedBatches.length} batch(es) failed.`,
-            );
-          }
+          // If no questions were generated, still send empty array - let frontend handle it
         } else {
           // Normal single-call flow for all other types (and Programming <= 2)
           const prompt = generatePromptForType(
@@ -3027,10 +2927,6 @@ const createConsumer = async (id) => {
             response = result.response;
             candidate = response.candidates?.[0]?.content;
           } catch (geminiError) {
-            console.error(
-              `❌ Error calling Gemini API in Consumer ${id}:`,
-              geminiError,
-            );
             throw new Error(
               `Gemini API error: ${geminiError.message || "Unknown error"}`,
             );
@@ -3073,10 +2969,6 @@ const createConsumer = async (id) => {
 
           const aiResponseText = candidate.parts[0]?.text || "";
           aiResponse = extractJsonFromGeminiText(aiResponseText, id);
-
-          console.log(
-            `📊 Token usage for ${questionType} (Consumer ${id}): Prompt: ${tokenUsage.promptTokens}, Completion: ${tokenUsage.completionTokens}, Total: ${tokenUsage.totalTokens}`,
-          );
         }
 
         // Process questions based on type
@@ -3266,26 +3158,18 @@ const createConsumer = async (id) => {
                     ? question.correctAnswer.length
                     : 0;
                   if (question.isMultipleCorrect && correctAnswerCount < 2) {
-                    console.warn(
-                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=true but only ${correctAnswerCount} correct answer(s). Expected 2-4.`,
-                    );
+                    // Validation: isMultipleCorrect but < 2 correct answers
                   } else if (
                     !question.isMultipleCorrect &&
                     correctAnswerCount !== 1
                   ) {
-                    console.warn(
-                      `⚠️ Question "${question.questionTitle}" has isMultipleCorrect=false but ${correctAnswerCount} correct answer(s). Expected exactly 1.`,
-                    );
                     // Auto-fix: take first answer if multiple provided
                     if (correctAnswerCount > 1) {
                       question.correctAnswer = [question.correctAnswer[0]];
                     }
                   }
                 } catch (mcqError) {
-                  console.error(
-                    `❌ Error processing MCQ question in Consumer ${id}:`,
-                    mcqError,
-                  );
+                  // MCQ processing error - skip this question
                 }
               });
 
@@ -3300,10 +3184,6 @@ const createConsumer = async (id) => {
               ).length;
 
               if (actualMultipleCorrect !== expectedMultipleCorrect) {
-                console.warn(
-                  `⚠️ MCQ multiple correct distribution: Expected ${expectedMultipleCorrect} (20%), got ${actualMultipleCorrect}. Adjusting...`,
-                );
-
                 // Sort questions by current isMultipleCorrect status
                 const multipleCorrectQuestions = aiResponse.MCQ.filter(
                   (q) => q.isMultipleCorrect === true,
@@ -3361,8 +3241,80 @@ const createConsumer = async (id) => {
               }
             }
 
-            // Process Programming questions: validate test cases and boilerplate code
+            // Process Programming questions: verify and normalize test cases/boilerplate code
             if (questionType === "Programming" && aiResponse.Programming) {
+              // Filter out non-executable questions (analysis/theoretical - cannot run in Judge0)
+              const nonExecutablePatterns = [
+                /there is no input|no input for this|input.*n\/a|n\/a.*input|constraints\s*[:\s]*n\/a/i,
+                /provide an analysis|provide.*analysis|your answer should include/i,
+                /requires analysis,?\s*not (code|to write code)/i,
+                /examples?:\s*n\/a|n\/a\s*[-–]\s*this question requires/i,
+                /analyze (and )?compare.*(time|space) complexity/i,
+                /explain which approach is more efficient/i,
+                /output format.*analysis|output.*big o|complexity in big o/i,
+                /you are required to provide an? analysis|not to write code/i,
+              ];
+              const isNonExecutable = (q) => {
+                const text = `${q.question || ""} ${(q.testCases || []).map((t) => t.input || t.output || "").join(" ")}`;
+                return nonExecutablePatterns.some((p) => p.test(text));
+              };
+              const beforeFilter = aiResponse.Programming.length;
+              aiResponse.Programming = aiResponse.Programming.filter((q) => {
+                if (isNonExecutable(q)) {
+                  return false;
+                }
+                return true;
+              });
+
+              // Generate boilerplate AFTER question+testcase generation.
+              const boilerplatePromises = aiResponse.Programming.map(async (question) => {
+                const supportedLanguages = Array.isArray(question.supportedLanguages)
+                  ? question.supportedLanguages
+                  : [];
+                if (!supportedLanguages.length) return question;
+                try {
+                  const bp = await generateBoilerplateWithGemini({
+                    genAI,
+                    modelName:
+                      process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+                    questionTitle: question.questionTitle,
+                    question: question.question,
+                    testCases: question.testCases || [],
+                    languages: supportedLanguages,
+                  });
+                  question.supportedLanguages = supportedLanguages.map((lang) => ({
+                    ...lang,
+                    codeSnippet:
+                      getBoilerplateForLanguage(
+                        bp.boilerplateCode,
+                        lang.languageName || lang.name,
+                      ) || "",
+                  }));
+                } catch (bpErr) {
+                  // Boilerplate generation failed - continue with empty snippet
+                }
+                return question;
+              });
+              aiResponse.Programming = await Promise.all(boilerplatePromises);
+
+              const verificationEnabled =
+                process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false";
+              if (verificationEnabled) {
+                try {
+                  const verificationResult = await verifyProgrammingQuestions({
+                    questions: aiResponse.Programming,
+                    genAI,
+                    modelName:
+                      process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+                    requestId,
+                    consumerId: id,
+                  });
+                  aiResponse.Programming = verificationResult.questions;
+                } catch (verificationError) {
+                  // Verification failed - use unverified questions
+                }
+              }
+
               aiResponse.Programming.forEach((question) => {
                 try {
                   // Validate and clean test cases
@@ -3370,19 +3322,9 @@ const createConsumer = async (id) => {
                     question.testCases = question.testCases.map((tc, index) => {
                       // Ensure input and output are present
                       if (!tc.input || tc.input.trim() === "") {
-                        console.warn(
-                          `⚠️ Test case ${index + 1
-                          } missing input for question: ${question.questionTitle
-                          }`,
-                        );
                         tc.input = "1"; // Default fallback
                       }
                       if (!tc.output || tc.output.trim() === "") {
-                        console.warn(
-                          `⚠️ Test case ${index + 1
-                          } missing output for question: ${question.questionTitle
-                          }`,
-                        );
                         tc.output = "0"; // Default fallback
                       }
                       // Clean input and output - remove any HTML tags
@@ -3396,49 +3338,12 @@ const createConsumer = async (id) => {
                     });
                   }
 
-                  if (
-                    question.supportedLanguageNames &&
-                    question.supportedLanguageNames.length > 0 &&
-                    question.boilerplateCode
-                  ) {
-                    // Update supportedLanguages with boilerplate code from response
-                    if (
-                      question.supportedLanguages &&
-                      question.supportedLanguages.length > 0
-                    ) {
-                      question.supportedLanguages.forEach((lang) => {
-                        if (question.boilerplateCode[lang.languageName]) {
-                          let boilerplate =
-                            question.boilerplateCode[lang.languageName];
-
-                          // Clean up boilerplate code: replace <br/> tags with actual newlines
-                          boilerplate = String(boilerplate)
-                            .replace(/<br\s*\/?>/gi, "\n")
-                            .replace(/&nbsp;/g, " ")
-                            .replace(/&lt;/g, "<")
-                            .replace(/&gt;/g, ">")
-                            .replace(/&amp;/g, "&");
-
-                          // Normalize line endings
-                          boilerplate = boilerplate
-                            .replace(/\r\n/g, "\n")
-                            .replace(/\r/g, "\n");
-
-                          lang.codeSnippet = boilerplate;
-                        }
-                      });
-                    }
-                  }
-
                   // Remove non-schema fields before sending response
                   delete question.supportedLanguageNames;
                   delete question.supportedLanguageIds;
                   delete question.boilerplateCode;
                 } catch (progError) {
-                  console.error(
-                    `❌ Error processing Programming question in Consumer ${id}:`,
-                    progError,
-                  );
+                  // Programming question processing error - skip cleanup
                 }
               });
             }
@@ -3460,24 +3365,10 @@ const createConsumer = async (id) => {
                   },
                 ],
               });
-              console.log(
-                `✅ Consumer ${id} completed processing ${questionType} questions for '${category.category}'`,
-              );
-              console.log(
-                `✅ Response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`,
-              );
             } catch (sendError) {
-              console.error(
-                `❌ Error sending response to Kafka in Consumer ${id}:`,
-                sendError,
-              );
               throw sendError;
             }
           } catch (processError) {
-            console.error(
-              `❌ Error processing questions in Consumer ${id}:`,
-              processError,
-            );
             throw new Error(
               `Failed to process questions: ${processError.message}`,
             );
@@ -3488,8 +3379,6 @@ const createConsumer = async (id) => {
           );
         }
       } catch (error) {
-        console.error(`❌ Error in Consumer ${id} processing message:`, error);
-        console.error(`Error stack:`, error.stack);
         // Send error response back to Kafka
         if (requestId) {
           try {
@@ -3506,16 +3395,10 @@ const createConsumer = async (id) => {
                     questionType: questionType || "unknown",
                   }),
                 },
-              ],
-            });
-            console.log(
-              `✅ Error response sent to Kafka for requestId: ${requestId}, questionType: ${questionType}`,
-            );
+                ],
+              });
           } catch (errorSendError) {
-            console.error(
-              `❌ Failed to send error response to Kafka:`,
-              errorSendError,
-            );
+            // Failed to send error response
           }
         }
       }
@@ -3531,14 +3414,13 @@ const ensureTopics = async () => {
     const existingTopics = await admin.listTopics();
     for (const topic of topics) {
       if (!existingTopics.includes(topic)) {
-        console.log(`Creating topic: ${topic}`);
         await admin.createTopics({
           topics: [{ topic, numPartitions: 6, replicationFactor: 3 }],
         });
       }
     }
   } catch (error) {
-    console.error("❌ Error ensuring topics:", error);
+    // Error ensuring topics
   } finally {
     await admin.disconnect();
   }
@@ -3546,18 +3428,13 @@ const ensureTopics = async () => {
 
 (async () => {
   try {
-    console.log("🚀 Ensuring Kafka topics...");
     await ensureTopics();
-    console.log("✅ Topics ensured!");
-
-    console.log("🚀 Connecting Kafka Producer...");
     await producer.connect();
-    console.log("✅ Producer Connected!");
 
     for (let i = 1; i <= NUM_CONSUMERS; i++) {
       createConsumer(i);
     }
   } catch (error) {
-    console.error("❌ Error initializing Kafka Producer:", error);
+    // Error initializing Kafka Producer
   }
 })();

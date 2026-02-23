@@ -585,7 +585,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
     - "85 percent" → "85%"
     - "Nine point five" → "CGPA 9.5"
 - Include only fields with explicit data. Omit empty fields, except for enums in defined structures.
-- For skills.proficiency, infer from context (e.g., "proficient" → Intermediate, "expert" → Advanced).
+- For skills.proficiency, infer from context and experience (e.g., "proficient" → Intermediate, "expert" → Expert, "familiar" → Beginner, "no exposure" → No Exposure). Must be one of: "No Exposure", "Beginner", "Intermediate", "Expert".
 - Include certificationDetails, workExperience, projects, socials, portfolio, languages, and address only if present.
 - For experience handling:
   - Prioritize explicit mentions in "Profile Summary," "Professional Summary," "Objective," "Summary," or "A B O U T" sections.
@@ -617,7 +617,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
 - Omit fields not present in the resume. Do not use null, "not found", or undefined.
 - **Skills**:
   - Extract skills only from the resume's skills section (if present) or visible text/captions in images.
-  - Include only skills that match ${primarySkills} or ${secondarySkills} (including synonyms, e.g., "JavaScript" matches "JS") in the \`skills\` field, with proficiency (Beginner, Intermediate, Advanced) inferred from context (e.g., "expert" → Advanced, "familiar" → Beginner).
+  - Include only skills that match ${primarySkills} or ${secondarySkills} (including synonyms, e.g., "JavaScript" matches "JS") in the \`skills\` field, with proficiency (No Exposure, Beginner, Intermediate, Expert) inferred from context and experience (e.g., "expert" → Expert, "familiar" → Beginner, "proficient" → Intermediate).
   - All other explicitly mentioned technical skills in the resume's skills section (or visible text in images) that do not match ${primarySkills} or ${secondarySkills} should be included in fields field as a list of strings.
 - **Experience**:
   - First, search for explicitly mentioned experience in fields resume's "Resume Summary," "ProfileSummary," "ProfessionalSummary," "Objective," "Summary," or "ABOUT" sections (case-insensitive).
@@ -671,7 +671,7 @@ Parse the resume to extract candidate details, skills, experience, and social li
     "skills": [
       {
         "name": "<String>",
-        "proficiency": "<Beginner | Intermediate | Advanced>"
+        "proficiency": "<No Exposure | Beginner | Intermediate | Expert>"
       }
     ],
     "additionalSkills": ["<String>", "..."],
