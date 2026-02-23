@@ -110,6 +110,58 @@ const fileService = {
       throw error;
     }
   },
+
+  /**
+   * Download file from S3 and save to a temp file for processing.
+   * @param {Object} options
+   * @param {String} options.fileId - MongoDB File ID
+   * @param {String} options.destinationPath - Full path where to save the file
+   * @returns {Promise<Object>} - { path, extension, name, mimetype }
+   */
+  async downloadFileToTemp({ fileId, destinationPath }) {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(fileId)) {
+        throw new Error("Invalid file ID");
+      }
+
+      const file = await File.findById(fileId);
+      if (!file) {
+        throw new Error("File not found");
+      }
+
+      const params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: file.key,
+      };
+
+      const { Body } = await s3.getObject(params).promise();
+      const fs = require("fs").promises;
+      await fs.writeFile(destinationPath, Body);
+
+      const ext = (file.extension || file.name?.split(".").pop() || "pdf").toLowerCase();
+      const mimeTypes = {
+        pdf: "application/pdf",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        doc: "application/msword",
+        rtf: "application/rtf",
+        txt: "text/plain",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        tiff: "image/tiff",
+      };
+
+      return {
+        path: destinationPath,
+        extension: ext,
+        name: file.name || `resume.${ext}`,
+        mimetype: mimeTypes[ext] || "application/octet-stream",
+      };
+    } catch (error) {
+      console.error("Error downloading file from S3:", error);
+      throw error;
+    }
+  },
 };
 
 module.exports = fileService;

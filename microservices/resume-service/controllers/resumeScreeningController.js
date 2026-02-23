@@ -1004,6 +1004,358 @@ const checkAutofillCredit = async (req, res) => {
   }
 };
 
+/**
+ * Merge analysis into existing JobApplication - only update fields that are empty
+ */
+function mergeAnalysisWithExisting(existing, analysis) {
+  const isEmpty = (val) => {
+    if (val === undefined || val === null) return true;
+    if (Array.isArray(val) && val.length === 0) return true;
+    if (typeof val === "string" && val.trim() === "") return true;
+    if (typeof val === "object" && Object.keys(val).length === 0) return true;
+    return false;
+  };
+
+  const fieldsToMerge = [
+    "resumeSummary",
+    "overallMatch",
+    "experienceMatch",
+    "educationMatch",
+    "contextualMatch",
+    "matchContexts",
+    "matchExplanation",
+    "requiredMatchedSkills",
+    "requiredUnmatchedSkills",
+    "goodToHaveMatchedSkills",
+    "goodToHaveUnmatchedSkills",
+    "skills",
+    "additionalSkills",
+    "certificationDetails",
+    "educationDetails",
+    "workExperience",
+    "projects",
+    "languages",
+    "socials",
+    "portfolio",
+    "name",
+    "email",
+    "mobile",
+    "gender",
+    "dateOfBirth",
+    "experience",
+    "address",
+    "city",
+    "state",
+    "country",
+    "zipCode",
+  ];
+
+  const update = {};
+  for (const field of fieldsToMerge) {
+    const existingVal = existing[field];
+    const analysisVal = analysis[field];
+    if (isEmpty(existingVal) && analysisVal !== undefined && analysisVal !== null) {
+      if (Array.isArray(analysisVal) && analysisVal.length > 0) {
+        update[field] = analysisVal;
+      } else if (typeof analysisVal === "object" && !Array.isArray(analysisVal)) {
+        if (Object.keys(analysisVal).length > 0) update[field] = analysisVal;
+      } else if (typeof analysisVal === "string" && analysisVal.trim() !== "") {
+        update[field] = analysisVal;
+      } else if (typeof analysisVal === "number" && !Number.isNaN(analysisVal)) {
+        update[field] = analysisVal;
+      }
+    }
+  }
+  return update;
+}
+
+/**
+ * Validate MongoDB ObjectId format
+ */
+const isValidObjectId = (val) => {
+  if (val == null || typeof val !== "string") return false;
+  return /^[0-9a-fA-F]{24}$/.test(val.trim());
+};
+
+/**
+ * POST /resume/reAnalyzeResumes
+ * Re-run (parse + analyze) on selected or all candidates without resumeSummary
+ *
+ * CREDIT FLOW:
+ * 1. Pre-check: ActionCreditValidator.validateResumeAnalysisCredits(clientId, applications.length)
+ *    - Gets cost estimate (costPerResume * count) from credit service (gemini-2.0-flash, AI_RESUME_ANALYSIS)
+ *    - Fetches client wallet balance
+ *    - If balance < totalCost → 402 Insufficient credits (no processing)
+ * 2. Per-resume: After each AI analysis, creditServiceClient.deductAiUsage() is called
+ *    with actual token usage (inside resumeAnalysisService.analyzeResumeForReAnalysis)
+ *
+ * CONDITIONS: Only processes where resumeFileId exists AND resumeSummary is missing/null/empty
+ * - Condition 1: jobApplicationIds provided → process only those IDs (filtered by above)
+ * - Condition 2: jobApplicationIds omitted/empty → process all for job matching above
+ */
+const reAnalyzeResumes = async (req, res) => {
+  try {
+    const { jobApplicationIds, jobId, clientId, channelId } = req.body;
+
+    // === PAYLOAD VALIDATIONS (valid request only) ===
+    if (!clientId || typeof clientId !== "string" || !clientId.trim()) {
+      return res.status(400).json({
+        error: "clientId is required and must be a non-empty string",
+        code: "INVALID_PAYLOAD",
+      });
+    }
+    if (!jobId || typeof jobId !== "string" || !jobId.trim()) {
+      return res.status(400).json({
+        error: "jobId is required and must be a non-empty string",
+        code: "INVALID_PAYLOAD",
+      });
+    }
+    if (!isValidObjectId(clientId)) {
+      return res.status(400).json({
+        error: "clientId must be a valid 24-character hex ObjectId",
+        code: "INVALID_PAYLOAD",
+      });
+    }
+    if (!isValidObjectId(jobId)) {
+      return res.status(400).json({
+        error: "jobId must be a valid 24-character hex ObjectId",
+        code: "INVALID_PAYLOAD",
+      });
+    }
+    if (channelId != null && (typeof channelId !== "string" || !channelId.trim())) {
+      return res.status(400).json({
+        error: "channelId must be a non-empty string when provided",
+        code: "INVALID_PAYLOAD",
+      });
+    }
+    if (jobApplicationIds !== undefined && jobApplicationIds !== null) {
+      if (!Array.isArray(jobApplicationIds)) {
+        return res.status(400).json({
+          error: "jobApplicationIds must be an array when provided",
+          code: "INVALID_PAYLOAD",
+        });
+      }
+      if (jobApplicationIds.length > 0) {
+        const invalidIds = jobApplicationIds.filter(
+          (id) => !id || !isValidObjectId(String(id).trim())
+        );
+        if (invalidIds.length > 0) {
+          return res.status(400).json({
+            error: "jobApplicationIds must contain valid 24-character hex ObjectIds",
+            code: "INVALID_PAYLOAD",
+            invalidCount: invalidIds.length,
+          });
+        }
+        const uniqueIds = [...new Set(jobApplicationIds.map((id) => String(id).trim()))];
+        if (uniqueIds.length !== jobApplicationIds.length) {
+          return res.status(400).json({
+            error: "jobApplicationIds must not contain duplicates",
+            code: "INVALID_PAYLOAD",
+          });
+        }
+      }
+    }
+
+    const db = mongoose.connection.db;
+    const jobObjectId = new ObjectId(jobId);
+    const clientObjectId = new ObjectId(clientId);
+
+    let applications;
+    const resumeSummaryFilter = {
+      $or: [
+        { resumeSummary: { $exists: false } },
+        { resumeSummary: null },
+        { resumeSummary: "" },
+      ],
+    };
+
+    if (Array.isArray(jobApplicationIds) && jobApplicationIds.length > 0) {
+      // Condition 1: Only selected jobApplicationIds (with resumeFileId and no resumeSummary)
+      applications = await JobApplication.find({
+        _id: { $in: jobApplicationIds.map((id) => new ObjectId(id)) },
+        jobId: jobObjectId,
+        resumeFileId: { $exists: true, $ne: null },
+        ...resumeSummaryFilter,
+      }).lean();
+    } else {
+      // Condition 2: All job applications for job without resumeSummary
+      applications = await JobApplication.find({
+        jobId: jobObjectId,
+        resumeFileId: { $exists: true, $ne: null },
+        ...resumeSummaryFilter,
+      }).lean();
+    }
+
+    if (!applications || applications.length === 0) {
+      return res.status(200).json({
+        message: "No applications to process",
+        processed: 0,
+        failed: 0,
+        results: [],
+      });
+    }
+
+    const job = await db.collection("jobs").findOne(
+      { _id: jobObjectId },
+      {
+        projection: {
+          description: 1,
+          jobDescription: 1,
+          skills: 1,
+          jobRoleId: 1,
+        },
+      }
+    );
+
+    const jobDescription =
+      job?.description || job?.jobDescription || "";
+    const primarySkills = Array.isArray(job?.skills?.requiredSkills)
+      ? job.skills.requiredSkills.join(",")
+      : job?.skills?.requiredSkills || "";
+    const secondarySkills = Array.isArray(job?.skills?.goodToHaveSkills)
+      ? job.skills.goodToHaveSkills.join(",")
+      : job?.skills?.goodToHaveSkills || "";
+
+    const validation = await ActionCreditValidator.validateResumeAnalysisCredits(
+      clientId,
+      applications.length
+    );
+
+    if (!validation.sufficient) {
+      return res.status(402).json({
+        success: false,
+        message: "Insufficient credits for this operation",
+        error: {
+          code: "INSUFFICIENT_CREDITS",
+          required: validation.estimatedCost.totalCost,
+          available: validation.balance,
+          shortfall: validation.estimatedCost.totalCost - validation.balance,
+        },
+        estimatedCost: validation.estimatedCost,
+      });
+    }
+
+    const fileService = require("../utils/fileService");
+    const File = require("../model/File");
+    const { analyzeResumeForReAnalysis, supportedExtensions } = require("../services/resumeAnalysisService");
+    const fs = require("fs").promises;
+    const path = require("path");
+    const uploadsDir = path.join(__dirname, "../Uploads");
+    await fs.mkdir(uploadsDir, { recursive: true });
+
+    const fileIds = applications
+      .map((a) => a.resumeFileId?.toString?.() || a.resumeFileId)
+      .filter(Boolean);
+    const fileMetaMap = {};
+    if (fileIds.length > 0) {
+      const fileDocs = await File.find({ _id: { $in: fileIds } })
+        .select("extension name")
+        .lean();
+      fileDocs.forEach((f) => {
+        const ext = (f.extension || f.name?.split(".").pop() || "pdf").toLowerCase();
+        fileMetaMap[f._id.toString()] = ext;
+      });
+    }
+
+    const results = [];
+    let processed = 0;
+    let failed = 0;
+
+    const processOne = async (app) => {
+      let tempPath = null;
+      try {
+        const fileId = app.resumeFileId?.toString?.() || app.resumeFileId;
+        if (!fileId) {
+          results.push({ jobApplicationId: app._id, status: "skipped", error: "No resumeFileId" });
+          failed++;
+          return;
+        }
+
+        const ext = fileMetaMap[fileId] || "pdf";
+        tempPath = path.join(uploadsDir, `reanalyze-${app._id}-${Date.now()}.${ext}`);
+        const downloaded = await fileService.downloadFileToTemp({
+          fileId,
+          destinationPath: tempPath,
+        });
+        if (!supportedExtensions.has(ext)) {
+          results.push({
+            jobApplicationId: app._id,
+            status: "skipped",
+            error: `Unsupported file type: ${ext}`,
+          });
+          failed++;
+          return;
+        }
+
+        const { analysis, processingCost } = await analyzeResumeForReAnalysis({
+          filePath: downloaded.path,
+          originalName: downloaded.name,
+          mimetype: downloaded.mimetype,
+          ext,
+          jobDescription,
+          primarySkills,
+          secondarySkills,
+          clientId,
+          channelId,
+          fileId,
+          jobId,
+        });
+
+        const updateFields = mergeAnalysisWithExisting(app, analysis);
+        if (processingCost) {
+          updateFields.processingCost = processingCost;
+        }
+
+        if (Object.keys(updateFields).length > 0) {
+          await JobApplication.updateOne(
+            { _id: app._id },
+            { $set: updateFields }
+          );
+        }
+
+        results.push({
+          jobApplicationId: app._id,
+          status: "success",
+          updatedFields: Object.keys(updateFields),
+        });
+        processed++;
+      } catch (err) {
+        console.error(`Re-analyze failed for ${app._id}:`, err.message);
+        results.push({
+          jobApplicationId: app._id,
+          status: "failed",
+          error: err.message,
+        });
+        failed++;
+      } finally {
+        if (tempPath) {
+          try {
+            await fs.unlink(tempPath);
+          } catch (e) {
+            console.warn("Failed to delete temp file:", tempPath);
+          }
+        }
+      }
+    };
+
+    await Promise.all(applications.map(processOne));
+
+    return res.status(200).json({
+      message: "Re-analysis completed",
+      processed,
+      failed,
+      total: applications.length,
+      results,
+    });
+  } catch (error) {
+    console.error("Error in reAnalyzeResumes:", error.message, error.stack);
+    return res.status(500).json({
+      error: "An error occurred during re-analysis",
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   analyzeResumes,
   getRequestData,
@@ -1013,4 +1365,5 @@ module.exports = {
   updateCandidate,
   deleteCandidates,
   checkAutofillCredit,
+  reAnalyzeResumes,
 };

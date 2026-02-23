@@ -9,11 +9,13 @@ const {
   updateCandidate,
   deleteCandidates,
   checkAutofillCredit,
+  reAnalyzeResumes,
 } = require("../controllers/resumeScreeningController");
 
 const router = express.Router();
 
 router.post("/analyzeResumes", analyzeResumes);
+router.post("/reAnalyzeResumes", reAnalyzeResumes);
 router.get("/check-autofill-credit", checkAutofillCredit);
 
 router.get("/getRequestData/:requestId", getRequestData);
