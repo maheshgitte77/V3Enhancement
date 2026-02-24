@@ -430,9 +430,9 @@ const generateJobDescriptionFormFile = async (req, res) => {
       return res.json({
         formattedText,
         skillData,
-        ...(cleanedMetaData &&
-          Object.keys(cleanedMetaData).length > 0 && {
-            metaData: cleanedMetaData,
+        ...(metaData &&
+          Object.keys(metaData).length > 0 && {
+            metaData: metaData,
           }),
         documentType: "Analyzed by AI",
         numPages: pdfData.numpages,
