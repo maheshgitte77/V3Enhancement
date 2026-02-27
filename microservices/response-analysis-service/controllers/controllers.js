@@ -170,8 +170,8 @@ const downloadFileFromUri = async (fileUri, providedMimeType) => {
       (fileExtension.toLowerCase() === ".webm"
         ? "video/webm"
         : fileExtension.toLowerCase() === ".mp4"
-        ? "video/mp4"
-        : "video/webm");
+          ? "video/mp4"
+          : "video/webm");
 
     const fileStats = fs.statSync(downloadPath);
 
@@ -479,7 +479,7 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
       }
     } else {
       logger.debug(
-        "No typing analysis provided - will proceed without typing data"
+        "No typing analysis provided - will proceed without typing data",
       );
     }
 
@@ -748,13 +748,19 @@ const analyzeProgrammingHTTP = async (req, res) => {
       });
     }
 
-    // Import programming processor
-    const programmingProcessor = require("../workers/programming-question/programming.processor");
-
     // Process asynchronously (don't block response)
     setImmediate(async () => {
       try {
-        await programmingProcessor.processProgrammingResponse(requestData);
+        if (!orchestrator.isInitialized()) {
+          logger.error(
+            "Processor not initialized for HTTP programming analysis",
+          );
+          return;
+        }
+        await orchestrator.processTypeWiseResponse({
+          ...requestData,
+          type: "programming",
+        });
         logger.info("Programming analysis completed via HTTP", {
           candidateScreeningId: requestData.candidateScreeningId,
           candidateAssessmentId: requestData.candidateAssessmentId,
