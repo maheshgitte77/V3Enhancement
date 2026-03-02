@@ -300,8 +300,11 @@ const generateProgrammingTitlesPrompt = (
   const skillType = category.skills || "unknown";
   const number = questionConfig.number;
   const maxTime = questionConfig.maxTime || 30; // Default to 30 if not provided
-  const promptText =
-    (questionConfig.promptText || questionConfig.customPrompt || "").trim();
+  const promptText = (
+    questionConfig.promptText ||
+    questionConfig.customPrompt ||
+    ""
+  ).trim();
   const complexityPreference = ["Easy", "Medium", "Hard"].includes(
     questionConfig.complexity,
   )
@@ -322,7 +325,7 @@ const generateProgrammingTitlesPrompt = (
   // Use server-side tracked categories (preferred) or parse from questionsArray as fallback
   let usedCategories =
     Array.isArray(usedCategoriesFromServer) &&
-      usedCategoriesFromServer.length > 0
+    usedCategoriesFromServer.length > 0
       ? usedCategoriesFromServer
       : [];
   const usedCategoryIndices = new Set();
@@ -332,9 +335,16 @@ const generateProgrammingTitlesPrompt = (
     existingForPrompt.length > 0
       ? existingForPrompt.map((p) => p.title)
       : Array.isArray(questionsArray)
-        ? questionsArray.map((q) => (typeof q === "string" ? q : (q && q.questionTitle) || (q && q.title) || String(q)))
+        ? questionsArray.map((q) =>
+            typeof q === "string"
+              ? q
+              : (q && q.questionTitle) || (q && q.title) || String(q),
+          )
         : [];
-  if (usedCategories.length === 0 && titleStringsForCategoryFallback.length > 0) {
+  if (
+    usedCategories.length === 0 &&
+    titleStringsForCategoryFallback.length > 0
+  ) {
     // Enhanced matching: check question title against all category examples and keywords
     titleStringsForCategoryFallback.forEach((q) => {
       const questionLower = String(q).toLowerCase();
@@ -407,8 +417,9 @@ maxTime: ${maxTime} minutes
 - Job Role: ${jobRole}
 - Job Seniority Level: ${proposedSeniority}
 - Job Description: ${JD}
-${hasUserPrompt
-      ? `
+${
+  hasUserPrompt
+    ? `
 
 ### 🎯 USER REQUEST (HIGHEST PRIORITY - STRICT - OVERRIDES ALL OTHER TITLE RULES):
 The user has specified exactly what they want. Generate titles ONLY for this topic. IGNORE any requirement to "distribute across different logic categories" or "use unused categories"—when the user gives a prompt, ALL titles must be about the user's topic only.
@@ -420,7 +431,8 @@ The user has specified exactly what they want. Generate titles ONLY for this top
 - Use the logic category prefix that fits the user's topic (e.g. [Queue/Deque Logic] or [Array Logic] for queues/FIFO; [Number-Based Logic] for Fibonacci/prime; [Stack-Based Logic] for stack).
 - FORBIDDEN when user prompt is set: generating any title that is not clearly about the user's stated concept.
 `
-      : ""}
+    : ""
+}
 
 ### 🔴 CRITICAL & IMPORTANT RULES (MUST FOLLOW STRICTLY):
 
@@ -462,39 +474,44 @@ The user has specified exactly what they want. Generate titles ONLY for this top
    - Questions should resemble **real Assessment questions**, not academic exams.
    - Focus on decision-making, reasoning, and practical application.
 
-${isScenarioBased
-      ? `6. **SCENARIO-BASED FORMATTING (MANDATORY)**
+${
+  isScenarioBased
+    ? `6. **SCENARIO-BASED FORMATTING (MANDATORY)**
    - ALL titles must be formatted as REAL-WORLD SCENARIOS relevant to the ${jobRole} role
    - Create scenarios that a ${jobRole} professional would encounter in their daily work
    - Examples:
      * Instead of: "Find Maximum Element"
-     * Use: "As a ${jobRole}, you're analyzing ${experience <= 3
-        ? "user activity logs"
-        : experience <= 7
-          ? "performance metrics data"
-          : "system analytics"
-      } and need to find the peak value..."
+     * Use: "As a ${jobRole}, you're analyzing ${
+       experience <= 3
+         ? "user activity logs"
+         : experience <= 7
+           ? "performance metrics data"
+           : "system analytics"
+     } and need to find the peak value..."
      * Instead of: "Count Vowels"
-     * Use: "You're building a ${jobRole === "Backend Developer"
-        ? "API endpoint"
-        : jobRole === "Frontend Developer"
-          ? "form validation"
-          : "data processing"
-      } feature that needs to validate text input..."
+     * Use: "You're building a ${
+       jobRole === "Backend Developer"
+         ? "API endpoint"
+         : jobRole === "Frontend Developer"
+           ? "form validation"
+           : "data processing"
+     } feature that needs to validate text input..."
    - Make scenarios realistic and relatable to ${jobRole} responsibilities
    - Use domain-specific terminology when appropriate`
-      : `6. **POPULAR INTERVIEW/ASSESSMENT QUESTIONS (MANDATORY)**
+    : `6. **POPULAR INTERVIEW/ASSESSMENT QUESTIONS (MANDATORY)**
    - Generate titles for the MOST POPULAR and FREQUENTLY ASKED programming questions in interviews and assessments
    - Focus on classic coding interview problems that are commonly used across tech companies
    - Keep titles concise and direct - no need for scenario-based formatting
    - Prioritize problems that test fundamental programming concepts, algorithms, and data structures
    - **CRITICAL UNIQUENESS**: Do NOT repeat overused basics (palindrome, reverse string, find max/min in array) - at most ONE such problem per assessment batch
    - For string problems: PREFER anagram, first non-repeating character, string rotation, longest word, count vowels - AVOID multiple palindrome or reverse string titles
-   - Ensure each title uses a DIFFERENT logic approach/algorithm category`}
+   - Ensure each title uses a DIFFERENT logic approach/algorithm category`
+}
 
 Ensure all generated questions strictly follow the above constraints.
-${hasUserPrompt
-      ? `
+${
+  hasUserPrompt
+    ? `
 **PROMPT-ONLY MODE (no categories):** The user provided a specific prompt. Do NOT use or reference any logic category list. Generate EXACTLY ${number} unique one-line titles that are ALL variations of the user's topic only. Each title = one distinct problem under the same theme (e.g. for "queues (FIFO) in array": "Implement queue using circular array", "Enqueue/Dequeue with fixed-size array", "FIFO simulation with array"). Use a short topic prefix in brackets if helpful (e.g. [Queue], [Array]). Do NOT generate titles about unrelated topics (no "print 1 to N", "skip multiples of 5", "palindrome", etc.).**
 
 Each title must:
@@ -504,13 +521,13 @@ Each title must:
 - Avoid mentioning specific implementation details (focus on problem goal)
 - NOT duplicate any previous question in this assessment
 `
-      : `
+    : `
 CRITICAL UNIQUENESS REQUIREMENTS - ASSESSMENT-WIDE:
 - This is part of an ONGOING ASSESSMENT - previous questions have already been generated
 - Each title must represent a DIFFERENT logic category/type from the following ${totalCategories} categories:
 ${PROGRAMMING_LOGIC_CATEGORIES.map(
-        (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`,
-      ).join("\n")}
+  (cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`,
+).join("\n")}
 
 - DISTRIBUTE titles across DIFFERENT logic categories to ensure maximum variety
 - Each title must use a UNIQUE logic approach/implementation type
@@ -525,7 +542,8 @@ Each title must:
 - Avoid mentioning specific implementation details (focus on problem goal)
 - Represent a unique logic category from the list above
 - NOT duplicate any logic approach from previous questions in this assessment
-`}
+`
+}
 `;
 
   if (!hasUserPrompt) {
@@ -544,26 +562,30 @@ Each title must:
 
 PREVIOUSLY USED CATEGORIES (${usedCount}):
 ${usedCategories
-            .slice(0, 20)
-            .map((cat) => `- ${cat}`)
-            .join("\n")}${usedCategories.length > 20
-              ? `\n... and ${usedCategories.length - 20} more`
-              : ""
-          }
+  .slice(0, 20)
+  .map((cat) => `- ${cat}`)
+  .join("\n")}${
+          usedCategories.length > 20
+            ? `\n... and ${usedCategories.length - 20} more`
+            : ""
+        }
 
-UNUSED CATEGORIES (${unusedCategories.length
-          } remaining - prioritize these first):
-${unusedCategories.length > 0
-            ? unusedCategories
-              .slice(0, Math.min(number, unusedCategories.length))
-              .map((cat) => `- ${cat.name}`)
-              .join("\n")
-            : "None - all categories have been used"
-          }
+UNUSED CATEGORIES (${
+          unusedCategories.length
+        } remaining - prioritize these first):
+${
+  unusedCategories.length > 0
+    ? unusedCategories
+        .slice(0, Math.min(number, unusedCategories.length))
+        .map((cat) => `- ${cat.name}`)
+        .join("\n")
+    : "None - all categories have been used"
+}
 
 STRATEGY:
-1. First, use any remaining unused categories (${unusedCategories.length
-          } available)
+1. First, use any remaining unused categories (${
+          unusedCategories.length
+        } available)
 2. If more questions needed, reuse categories but with COMPLETELY DIFFERENT problem variations
 3. Ensure each question has unique logic, constraints, and problem statement
 `;
@@ -592,9 +614,9 @@ PRIORITY: Use categories NOT in the above list. Only use previously used categor
       prompt += `
 📋 RECOMMENDED UNUSED CATEGORIES (prioritize these):
 ${unusedCategories
-          .slice(0, Math.min(number, unusedCategories.length))
-          .map((cat) => `- ${cat.name}`)
-          .join("\n")}
+  .slice(0, Math.min(number, unusedCategories.length))
+  .map((cat) => `- ${cat.name}`)
+  .join("\n")}
 `;
     }
   }
@@ -610,22 +632,22 @@ Tailor titles to the candidate context:
     prompt += `
 **Questions already in this screening (do NOT duplicate - use different title and logic):**
 ${existingForPrompt
-        .map(
-          (p) =>
-            `- Title: ${p.title}${p.description ? `\n  Short description (up to 100 words): ${p.description}` : ""}`,
-        )
-        .join("\n")}
+  .map(
+    (p) =>
+      `- Title: ${p.title}${p.description ? `\n  Short description (up to 100 words): ${p.description}` : ""}`,
+  )
+  .join("\n")}
 `;
   }
   if (deletedForPrompt.length > 0) {
     prompt += `
 **Questions the user removed (generate DIFFERENT logic and topics - do not reuse these):**
 ${deletedForPrompt
-        .map(
-          (p) =>
-            `- Title: ${p.title}${p.description ? `\n  Short description: ${p.description}` : ""}`,
-        )
-        .join("\n")}
+  .map(
+    (p) =>
+      `- Title: ${p.title}${p.description ? `\n  Short description: ${p.description}` : ""}`,
+  )
+  .join("\n")}
 `;
   }
 
@@ -644,9 +666,9 @@ ${requiredLogicCategories.map((cat) => `- ${cat}`).join("\n")}
       prompt += `
 ✅ ALLOWED LOGIC CATEGORIES (use EXACTLY one title per category, no repeats):
 ${unusedCategories
-          .slice(0, Math.min(number, unusedCategories.length))
-          .map((cat) => `- ${cat.name}`)
-          .join("\n")}
+  .slice(0, Math.min(number, unusedCategories.length))
+  .map((cat) => `- ${cat.name}`)
+  .join("\n")}
 
 🧩 TITLE FORMAT RULE (MANDATORY):
 - Prefix each title with its logic category in square brackets, e.g. "[Array Logic] Find the missing number"
@@ -666,14 +688,14 @@ ${unusedCategories
 
 Seed items:
 ${seedPlan
-        .map(
-          (s, idx) =>
-            `${idx + 1}. [${s.category}] Seed example: "${s.example}"` +
-            (s.keywords && s.keywords.length > 0
-              ? ` | Keywords: ${s.keywords.join(", ")}`
-              : ""),
-        )
-        .join("\n")}
+  .map(
+    (s, idx) =>
+      `${idx + 1}. [${s.category}] Seed example: "${s.example}"` +
+      (s.keywords && s.keywords.length > 0
+        ? ` | Keywords: ${s.keywords.join(", ")}`
+        : ""),
+  )
+  .join("\n")}
 `;
   }
 
@@ -710,23 +732,26 @@ CRITICAL JSON RULES:
 - No trailing commas
 - Titles array MUST contain exactly ${number} items
 - logicCategories array MUST contain exactly ${number} items, matching each title to its logic category
-- Each title MUST map to a DIFFERENT logic category from the ${totalCategories} available${isCategoryExhausted
+- Each title MUST map to a DIFFERENT logic category from the ${totalCategories} available${
+    isCategoryExhausted
       ? " (category rotation allowed - ensure unique problem variations)"
       : ""
-    }
-- ${isCategoryExhausted
+  }
+- ${
+    isCategoryExhausted
       ? "You may reuse categories, but each must have a COMPLETELY DIFFERENT problem statement and logic approach"
       : usedCategories.length > 0
         ? "If possible, avoid these previously used categories: " +
-        usedCategories.join(", ")
+          usedCategories.join(", ")
         : "Use any categories"
-    }
+  }
 - Ensure titles cover different logic categories for maximum uniqueness across the entire assessment
 - CONCEPT UNIQUENESS: Across the batch, use each problem concept at most once (e.g. only one "find duplicate", one "pair sum", one "Fibonacci", one "prime check", one "binary search", one "count vowels", one "anagram") - each title must describe a different problem concept, not the same concept under different categories
-- ${isCategoryExhausted
+- ${
+    isCategoryExhausted
       ? "CRITICAL: Even if reusing a category, the problem must be UNIQUE - different constraints, different approach, different scenario"
       : ""
-    }
+  }
 `;
 
   return prompt;
@@ -866,8 +891,14 @@ const validateProgrammingTitles = ({
   }
 
   // Pairwise similarity: block near-duplicate logic (e.g. "Determine if palindrome" vs "Check if palindrome")
-  if (typeof tokenSetFromModule === "function" && typeof jaccardFromModule === "function") {
-    const threshold = typeof BODY_SIMILARITY_THRESHOLD === "number" ? BODY_SIMILARITY_THRESHOLD : 0.65;
+  if (
+    typeof tokenSetFromModule === "function" &&
+    typeof jaccardFromModule === "function"
+  ) {
+    const threshold =
+      typeof BODY_SIMILARITY_THRESHOLD === "number"
+        ? BODY_SIMILARITY_THRESHOLD
+        : 0.65;
     for (let i = 0; i < titles.length; i++) {
       for (let j = i + 1; j < titles.length; j++) {
         const bodyI = getProblemBodyText(titles[i]);
@@ -885,28 +916,34 @@ const validateProgrammingTitles = ({
   }
 
   // When promptTextOnly: category prefix is optional; no enforced [Category] or allowed-list check
-  if (
-    !promptTextOnly &&
-    Array.isArray(titles) &&
-    titles.length > 0
-  ) {
-    const missingPrefix = titles.filter((title) => !extractCategoryPrefix(title));
+  if (!promptTextOnly && Array.isArray(titles) && titles.length > 0) {
+    const missingPrefix = titles.filter(
+      (title) => !extractCategoryPrefix(title),
+    );
     if (missingPrefix.length > 0) {
-      errors.push("Missing logic category prefix in titles (each title must start with [Category])");
+      errors.push(
+        "Missing logic category prefix in titles (each title must start with [Category])",
+      );
     }
   }
 
   if (Array.isArray(questionsArray) && questionsArray.length > 0) {
     const previousTitleSet = new Set(
       questionsArray.map((q) =>
-        normalizeTitle(typeof q === "string" ? q : (q && q.questionTitle) || (q && q.title) || ""),
+        normalizeTitle(
+          typeof q === "string"
+            ? q
+            : (q && q.questionTitle) || (q && q.title) || "",
+        ),
       ),
     );
     const overlaps = titles.filter((t) =>
       previousTitleSet.has(normalizeTitle(t)),
     );
     if (overlaps.length > 0) {
-      errors.push(`Titles overlap with previous questions: ${overlaps.join(", ")}`);
+      errors.push(
+        `Titles overlap with previous questions: ${overlaps.join(", ")}`,
+      );
     }
   }
 
@@ -976,9 +1013,7 @@ const validateProgrammingTitles = ({
     // Only reject prefixes that are not in the master category list (AI made up a category)
     const invalidPrefixes = titles
       .map((title) => extractCategoryPrefix(title))
-      .filter(
-        (prefix) => prefix && !validCategoryNamesSet.has(prefix),
-      );
+      .filter((prefix) => prefix && !validCategoryNamesSet.has(prefix));
     if (invalidPrefixes.length > 0) {
       errors.push(
         `Invalid category prefixes in titles (not in allowed list): ${[
@@ -1124,18 +1159,21 @@ SCENARIO-BASED QUESTION REQUIREMENT (${scenarioBasedCount} out of ${totalNumber}
 - Distribute scenario-based questions across Audio, Video, and Subjective types proportionally based on ${skillName}
 
 Question Distribution:
-${audioNumber > 0
-      ? `- Audio: ${audioNumber} question(s) (maxTime: ${audioConfig.maxTime} minutes)`
-      : ""
-    }
-${videoNumber > 0
-      ? `- Video: ${videoNumber} question(s) (maxTime: ${videoConfig.maxTime} minutes)`
-      : ""
-    }
-${subjectiveNumber > 0
-      ? `- Subjective: ${subjectiveNumber} question(s) (maxTime: ${subjectiveConfig.maxTime} minutes)`
-      : ""
-    }
+${
+  audioNumber > 0
+    ? `- Audio: ${audioNumber} question(s) (maxTime: ${audioConfig.maxTime} minutes)`
+    : ""
+}
+${
+  videoNumber > 0
+    ? `- Video: ${videoNumber} question(s) (maxTime: ${videoConfig.maxTime} minutes)`
+    : ""
+}
+${
+  subjectiveNumber > 0
+    ? `- Subjective: ${subjectiveNumber} question(s) (maxTime: ${subjectiveConfig.maxTime} minutes)`
+    : ""
+}
 
 `;
 
@@ -1179,23 +1217,23 @@ ${questionsArray.map((q) => `- ${q}`).join("\n")}
   let audioScenarioCount =
     audioNumber > 0
       ? Math.max(
-        0,
-        Math.round(scenarioBasedCount * (audioNumber / totalNumber)),
-      )
+          0,
+          Math.round(scenarioBasedCount * (audioNumber / totalNumber)),
+        )
       : 0;
   let videoScenarioCount =
     videoNumber > 0
       ? Math.max(
-        0,
-        Math.round(scenarioBasedCount * (videoNumber / totalNumber)),
-      )
+          0,
+          Math.round(scenarioBasedCount * (videoNumber / totalNumber)),
+        )
       : 0;
   let subjectiveScenarioCount =
     subjectiveNumber > 0
       ? Math.max(
-        0,
-        Math.round(scenarioBasedCount * (subjectiveNumber / totalNumber)),
-      )
+          0,
+          Math.round(scenarioBasedCount * (subjectiveNumber / totalNumber)),
+        )
       : 0;
 
   // Ensure at least one scenario-based question if total > 0 and distribute remaining count
@@ -1255,7 +1293,8 @@ Return JSON in this format:
 {
   "skillName": "${skillName}",
   "skillType": "${skillType}",
-  "Audio": ${audioNumber > 0
+  "Audio": ${
+    audioNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -1264,8 +1303,9 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-    },
-  "Video": ${videoNumber > 0
+  },
+  "Video": ${
+    videoNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -1274,8 +1314,9 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-    },
-  "Subjective": ${subjectiveNumber > 0
+  },
+  "Subjective": ${
+    subjectiveNumber > 0
       ? `[
     {
       "questionTitle": "Brief summary",
@@ -1284,7 +1325,7 @@ Return JSON in this format:
     }
   ]`
       : "[]"
-    }
+  }
 }
 
 VERIFY UNIQUENESS: Before returning, ensure that:
@@ -1324,8 +1365,11 @@ const generatePromptForType = (
   const verbalWordMax = Math.round(maxTime * 45);
   const writtenWordMin = Math.round(maxTime * 15);
   const writtenWordMax = Math.round(maxTime * 25);
-  const promptText =
-    (questionConfig.promptText || questionConfig.customPrompt || "").trim();
+  const promptText = (
+    questionConfig.promptText ||
+    questionConfig.customPrompt ||
+    ""
+  ).trim();
   const complexityPreference = ["Easy", "Medium", "Hard"].includes(
     questionConfig.complexity,
   )
@@ -1359,8 +1403,9 @@ maxTime: ${maxTime} minutes
    - Avoid questions that are:
      - Too basic for senior candidates
      - Too complex or system-level for junior/mid candidates
-${questionType === "Programming"
-      ? `
+${
+  questionType === "Programming"
+    ? `
 4. **Programming Questions (MANDATORY TIME FEASIBILITY)**
    - The candidate with **${experience} years of experience** MUST be able to:
      - Understand the problem
@@ -1374,9 +1419,9 @@ ${questionType === "Programming"
      - Advanced algorithms unless explicitly justified by role & experience
 
 6. **Resume & JD Alignment**`
-      : `
+    : `
 5. **Resume & JD Alignment**`
-    }
+}
    - Prefer technologies, frameworks, patterns, and scenarios that appear in:
      - Job Description
      - Candidate Resume Data if available
@@ -1445,17 +1490,19 @@ ${lines.join("\n")}
 - **CRITICAL DECISION**: Analyze the skillType "${skillType}" and skillName "${skillName}" to determine if this is a programming-related skill
 - **IF programming-related skill** (e.g., programming languages, frameworks, technologies that involve code):
   * Apply 50%-50% distribution: exactly ${Math.ceil(
-        number / 2,
-      )} questions WITH code snippets AND exactly ${number - Math.ceil(number / 2)
-        } general/conceptual questions (NO code snippets)
+    number / 2,
+  )} questions WITH code snippets AND exactly ${
+    number - Math.ceil(number / 2)
+  } general/conceptual questions (NO code snippets)
   * For questions with code snippets, use markers: [SNIPPET_START:languageIdentifier]code content[SNIPPET_END]
   * Detect the programming language from skillType and use lowercase identifier (e.g., "Java" → "java", "Python" → "python", "JavaScript" → "javascript", "C++" → "cpp", "Node.js" → "javascript")
   * Inside snippet markers, use \\n for newlines (NOT <br/>)
   * Use <br/> for line breaks in question text surrounding code snippets
   * **VERIFY**: Count your questions - exactly ${Math.ceil(
-          number / 2,
-        )} should have [SNIPPET_START] markers, exactly ${number - Math.ceil(number / 2)
-        } should NOT have any code snippets
+    number / 2,
+  )} should have [SNIPPET_START] markers, exactly ${
+    number - Math.ceil(number / 2)
+  } should NOT have any code snippets
 - **IF NOT programming-related skill** (e.g., soft skills, domain knowledge, tools without code):
   * Generate all ${number} questions as general/conceptual (NO code snippets)
   * Use <br/> for line breaks in question text
@@ -1530,10 +1577,13 @@ ${lines.join("\n")}
 
     case "Programming":
       const programmingConfig = questionConfig.programmingConfig || {};
-      const promptText =
-        (questionConfig.promptText || questionConfig.customPrompt || "").trim();
+      const promptText = (
+        questionConfig.promptText ||
+        questionConfig.customPrompt ||
+        ""
+      ).trim();
       const complexityPreference = ["Easy", "Medium", "Hard"].includes(
-        questionConfig.complexity
+        questionConfig.complexity,
       )
         ? questionConfig.complexity
         : "Easy";
@@ -1560,9 +1610,14 @@ ${lines.join("\n")}
       const totalCategories = PROGRAMMING_LOGIC_CATEGORIES.length;
 
       // When promptText is set: no categories; content depends ONLY on user prompt. Titles are labels only.
-      const hasUserPromptForContent = typeof promptText === "string" && promptText.length > 0;
+      const hasUserPromptForContent =
+        typeof promptText === "string" && promptText.length > 0;
       let logicCategoryInfo = "";
-      if (hasUserPromptForContent && Array.isArray(titles) && titles.length > 0) {
+      if (
+        hasUserPromptForContent &&
+        Array.isArray(titles) &&
+        titles.length > 0
+      ) {
         logicCategoryInfo = `
 **PROMPT-ONLY MODE (no categories):** Do NOT use logic categories. The problem content (description, input/output, constraints, test cases) for EVERY question must be based ONLY on the user's prompt (see USER PROMPT section below). Use the titles below ONLY as the questionTitle label for each question; do NOT derive the problem from the title—derive it from the user's prompt. Each question = one distinct variation of the user's topic (e.g. for "queues (FIFO) in array": implement queue with array, circular queue, enqueue/dequeue simulation, etc.).
 
@@ -1616,8 +1671,8 @@ ${titles.map((t, idx) => `${idx + 1}. ${t}`).join("\n")}
           logicCategoryInfo += `
 Available logic categories (${totalCategories} total):
 ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 20)
-              .map((cat, idx) => `${idx + 1}. ${cat.name}`)
-              .join("\n")}
+  .map((cat, idx) => `${idx + 1}. ${cat.name}`)
+  .join("\n")}
 ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 `;
         }
@@ -1636,8 +1691,8 @@ ${totalCategories > 20 ? `... and ${totalCategories - 20} more categories` : ""}
 
 Available logic categories (${totalCategories} total):
 ${PROGRAMMING_LOGIC_CATEGORIES.slice(0, 25)
-            .map((cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`)
-            .join("\n")}
+  .map((cat, idx) => `${idx + 1}. ${cat.name}: ${cat.description}`)
+  .join("\n")}
 ${totalCategories > 25 ? `... and ${totalCategories - 25} more categories` : ""}
 `;
       }
@@ -1659,34 +1714,41 @@ The user has specified exactly what they want. Generate programming questions th
 - Generate EXACTLY ${effectiveNumber} Programming questions
 - **Preferred Complexity**: ${complexityPreference} (adjust down if maxTime requires simpler problems)
 ${logicCategoryInfo}
-${isScenarioBased
-          ? `- **CRITICAL: SCENARIO-BASED FORMATTING** - ALL questions must be scenario-based:`
-          : `- **CRITICAL: POPULAR INTERVIEW/ASSESSMENT QUESTIONS** - Generate classic, frequently asked programming problems:`}
-${isScenarioBased
-          ? `  * Job Role Context: "${jobRole}" with ${experience} years of experience
+${
+  isScenarioBased
+    ? `- **CRITICAL: SCENARIO-BASED FORMATTING** - ALL questions must be scenario-based:`
+    : `- **CRITICAL: POPULAR INTERVIEW/ASSESSMENT QUESTIONS** - Generate classic, frequently asked programming problems:`
+}
+${
+  isScenarioBased
+    ? `  * Job Role Context: "${jobRole}" with ${experience} years of experience
   * **MANDATORY**: Even if using frequently asked/common problems, format them as REAL-WORLD SCENARIOS relevant to the job role
   * Create scenarios that a ${jobRole} professional would encounter in their daily work
   * Examples of scenario-based formatting:
     - Instead of: "Find the maximum element in an array"
-    - Use: "As a ${jobRole}, you're analyzing ${experience <= 3
-            ? "user activity logs"
-            : experience <= 7
-              ? "performance metrics data"
-              : "system analytics"
-          } and need to find the peak ${experience <= 3 ? "usage" : experience <= 7 ? "performance" : "efficiency"
-          } value..."
+    - Use: "As a ${jobRole}, you're analyzing ${
+      experience <= 3
+        ? "user activity logs"
+        : experience <= 7
+          ? "performance metrics data"
+          : "system analytics"
+    } and need to find the peak ${
+      experience <= 3 ? "usage" : experience <= 7 ? "performance" : "efficiency"
+    } value..."
     - Instead of: "Count vowels in a string"
-    - Use: "You're building a ${jobRole === "Backend Developer"
-            ? "API endpoint"
-            : jobRole === "Frontend Developer"
-              ? "form validation"
-              : "data processing"
-          } feature that needs to ${experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
-          } text input..."
+    - Use: "You're building a ${
+      jobRole === "Backend Developer"
+        ? "API endpoint"
+        : jobRole === "Frontend Developer"
+          ? "form validation"
+          : "data processing"
+    } feature that needs to ${
+      experience <= 3 ? "validate" : experience <= 7 ? "analyze" : "optimize"
+    } text input..."
   * Make scenarios realistic and relatable to ${jobRole} responsibilities
   * Use domain-specific terminology when appropriate (but keep it understandable)
   * Connect the problem to actual work situations a ${jobRole} would face`
-          : `  * Generate classic, well-known programming problems commonly asked in coding interviews and assessments
+    : `  * Generate classic, well-known programming problems commonly asked in coding interviews and assessments
   * Focus on popular problems like: "Two Sum", "Reverse Linked List", "Valid Parentheses", "Merge Two Sorted Arrays", "Find Maximum Element in Array", "Binary Search", "Palindrome Check", etc.
   * These should be problems that test fundamental programming concepts, algorithms, and data structures
   * Keep problem statements direct and clear - no need for elaborate scenario-based context
@@ -1696,7 +1758,8 @@ ${isScenarioBased
     - "Reverse a singly linked list"
     - "Check if a string contains valid parentheses"
     - "Merge two sorted arrays into one sorted array"
-  * Focus on clarity and standard problem formulations rather than job-role specific scenarios`}
+  * Focus on clarity and standard problem formulations rather than job-role specific scenarios`
+}
 - **EXECUTABLE ONLY - JUDGE0 COMPATIBILITY** (MANDATORY - NO EXCEPTIONS):
   * EVERY question MUST be a runnable coding problem that executes in Judge0. Boilerplate is generated separately.
   * FORBIDDEN: Theoretical, analysis, or explanation-only questions. NEVER generate:
@@ -1712,19 +1775,22 @@ ${isScenarioBased
     - WRONG: "Analyze iterative vs recursive Fibonacci complexity"
     - RIGHT: "Given n, compute the nth Fibonacci number" (with input n, output the number)
 - **Experience Level Tailoring** (${experience} years):
-  * ${experience <= 3
-          ? "Junior Level"
-          : experience <= 7
-            ? "Mid-Level"
-            : "Senior Level"
-        } - Adjust scenario complexity accordingly
-  * ${experience <= 3 ? "Junior" : experience <= 7 ? "Mid-level" : "Senior"
-        } ${jobRole} scenarios should reflect ${experience <= 3
-          ? "learning and basic tasks"
-          : experience <= 7
-            ? "standard project work"
-            : "complex system design and optimization"
-        }
+  * ${
+    experience <= 3
+      ? "Junior Level"
+      : experience <= 7
+        ? "Mid-Level"
+        : "Senior Level"
+  } - Adjust scenario complexity accordingly
+  * ${
+    experience <= 3 ? "Junior" : experience <= 7 ? "Mid-level" : "Senior"
+  } ${jobRole} scenarios should reflect ${
+    experience <= 3
+      ? "learning and basic tasks"
+      : experience <= 7
+        ? "standard project work"
+        : "complex system design and optimization"
+  }
   * Use appropriate technical depth based on ${experience} years of experience & Question MUST be solvable within ${maxTime} minutes by an average candidate.
 - Each question must include:
   * **WELL-FORMATTED problem statement** with clear sections and proper HTML formatting:
@@ -1739,7 +1805,8 @@ ${isScenarioBased
     - Use <br/> ONLY within paragraphs for line breaks between sentences or between content elements (like between example input/output pairs)
     - **CRITICAL**: The <h3> heading tags have built-in CSS spacing - adding <br/> before them creates DOUBLE spacing which looks wrong
     - Structure the problem statement as follows:
-      * <h3>Problem Description</h3>: ${isScenarioBased
+      * <h3>Problem Description</h3>: ${
+        isScenarioBased
           ? `Scenario-based explanation relevant to ${jobRole} role with ${experience} years experience (add <br/> after important sentences WITHIN the paragraph)
         - Start with a real-world scenario/context
         - Connect the problem to ${jobRole} work responsibilities
@@ -1749,7 +1816,8 @@ ${isScenarioBased
         - Describe the problem concisely and clearly
         - Use standard problem formulations that candidates recognize
         - Focus on the core algorithmic challenge
-        - Keep it straightforward without elaborate scenarios`}
+        - Keep it straightforward without elaborate scenarios`
+      }
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
       * <h3>Input Format</h3>: Detailed input specification with examples
         - **DO NOT add <br/> after this section's closing tag - the next <h3> heading will provide spacing**
@@ -1767,24 +1835,29 @@ ${isScenarioBased
     - **CRITICAL**: In Examples section, always use <strong>Input:</strong> and <strong>Output:</strong> (bold/dark) for labels
     - **FORMATTING EXAMPLE** (follow this EXACT structure - NO <br/> tags before <h3> headings):
       <h3>Problem Description</h3>
-      <p>${isScenarioBased
-          ? `As a ${jobRole}, you're working on a ${experience <= 3
-            ? "data processing module"
-            : experience <= 7
-              ? "performance monitoring system"
-              : "analytics dashboard"
-          } that receives an array of <strong>n</strong> ${experience <= 3
-            ? "user activity"
-            : experience <= 7
-              ? "transaction"
-              : "performance metric"
-          } values. You need to find the <code>maximum</code> value to ${experience <= 3
-            ? "identify peak usage"
-            : experience <= 7
-              ? "determine system capacity"
-              : "optimize resource allocation"
-          }.`
-          : `Given an array of <strong>n</strong> integers, find the <code>maximum</code> element in the array.`}</p>
+      <p>${
+        isScenarioBased
+          ? `As a ${jobRole}, you're working on a ${
+              experience <= 3
+                ? "data processing module"
+                : experience <= 7
+                  ? "performance monitoring system"
+                  : "analytics dashboard"
+            } that receives an array of <strong>n</strong> ${
+              experience <= 3
+                ? "user activity"
+                : experience <= 7
+                  ? "transaction"
+                  : "performance metric"
+            } values. You need to find the <code>maximum</code> value to ${
+              experience <= 3
+                ? "identify peak usage"
+                : experience <= 7
+                  ? "determine system capacity"
+                  : "optimize resource allocation"
+            }.`
+          : `Given an array of <strong>n</strong> integers, find the <code>maximum</code> element in the array.`
+      }</p>
       <h3>Input Format</h3>
       <p>The first line contains an integer <strong>n</strong> representing the size of the array.<br/>The second line contains <strong>n</strong> space-separated integers.</p>
       <h3>Output Format</h3>
@@ -1815,8 +1888,9 @@ ${isScenarioBased
   * Solvable using ONLY standard library functions (NO third-party libraries)
 - **CRITICAL TIME CONSTRAINT - STRICTLY ENFORCED**: maxTime = ${maxTime} minutes
   * **MANDATORY**: Question MUST be solvable within ${maxTime} minutes by an average candidate
-  * **Time-based complexity guidelines** (STRICTLY follow for ${maxTime} minutes):${maxTime <= 10
-          ? `
+  * **Time-based complexity guidelines** (STRICTLY follow for ${maxTime} minutes):${
+    maxTime <= 10
+      ? `
     - **${maxTime} minutes (5-10 minute range)**:
       * VERY SIMPLE problems only
       * Single loop or basic conditionals
@@ -1825,8 +1899,8 @@ ${isScenarioBased
       * NO nested loops, NO complex algorithms, NO multiple data structures
       * Solution should be 10-30 lines of code
       * Examples: Find maximum in array, Count vowels, Sum of digits, Check palindrome`
-          : maxTime <= 20
-            ? `
+      : maxTime <= 20
+        ? `
     - **${maxTime} minutes (11-20 minute range)**:
       * SIMPLE to EASY problems
       * Single or double loops acceptable
@@ -1834,8 +1908,8 @@ ${isScenarioBased
       * One data structure (array, string, or simple map)
       * Solution should be 20-50 lines of code
       * Examples: Remove duplicates, Rotate array, Two sum (brute force), Frequency count`
-            : maxTime <= 30
-              ? `
+        : maxTime <= 30
+          ? `
     - **${maxTime} minutes (21-30 minute range)**:
       * EASY to MEDIUM problems
       * Can use nested loops or optimized single pass
@@ -1843,29 +1917,30 @@ ${isScenarioBased
       * One or two data structures
       * Solution should be 30-70 lines of code
       * Examples: Valid parentheses, Merge sorted arrays, Find missing number`
-              : maxTime <= 45
-                ? `
+          : maxTime <= 45
+            ? `
     - **${maxTime} minutes (31-45 minute range)**:
       * MEDIUM problems
       * Can use standard algorithms (sorting, hashing, two pointers)
       * Multiple data structures acceptable
       * Solution should be 40-100 lines of code
       * Examples: Group anagrams, Longest substring, Array manipulation`
-                : `
+            : `
     - **${maxTime} minutes (46+ minute range)**:
       * MEDIUM to HARD problems
       * Complex algorithms acceptable
       * Multiple data structures and optimizations
       * Solution can be 50-150 lines of code
       * Examples: Dynamic programming basics, Graph traversal basics, Advanced array problems`
-        }
+  }
   * **VERIFICATION**: Before generating, estimate if an average candidate can:
     1. Understand the problem: 1-2 minutes
     2. Plan the solution: 1-2 minutes
     3. Write the code: remaining time
     4. Test and debug: 1-2 minutes buffer
-  * **For ${maxTime} minutes, ensure the problem can be solved in ${maxTime - 2
-        } minutes of actual coding time**
+  * **For ${maxTime} minutes, ensure the problem can be solved in ${
+    maxTime - 2
+  } minutes of actual coding time**
 - Difficulty based on experience (${experience} years) - BUT TIME CONSTRAINT TAKES PRIORITY:
   * 0-3 years: Easy (basic loops, conditionals, simple data structures) - adjust for time limit
   * 3-7 years: Medium (algorithms, data structures, problem-solving) - adjust for time limit
@@ -1888,23 +1963,27 @@ If titles are provided, you MUST (NO EXCEPTIONS):
 - Implement THE EXACT PROBLEM described by that title. For example: if the title is "Find the intersection of two sorted arrays", the problem description MUST be about finding the intersection of two sorted arrays—NOT "find maximum element" or "find minimum". If the title is "Determine if a number is an Armstrong number", the problem MUST be about Armstrong numbers—NOT "palindrome number". Do NOT substitute a different problem from the same category.
 - Each question's problem statement, input/output format, and test cases MUST match the title's problem (e.g. "Evaluate a postfix expression" → problem about postfix evaluation, not "Valid Parentheses").
 - **CRITICAL**: Adjust only complexity/detail to fit maxTime (${maxTime} minutes); do not change which problem you are implementing.
-${isScenarioBased
-          ? `- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
+${
+  isScenarioBased
+    ? `- **SCENARIO-BASED FORMATTING**: Even if the title is a common problem (e.g., "Find Maximum Element"), format it as a scenario relevant to ${jobRole}:
   * Create a real-world context where a ${jobRole} would encounter this problem
   * Use job-role appropriate terminology and domain context
-  * Make it relatable to ${experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
-          } ${jobRole} work
-  * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${experience <= 3
-            ? "user data"
-            : experience <= 7
-              ? "transaction logs"
-              : "system performance metrics"
-          } and need to identify the peak value..."`
-          : `- **POPULAR INTERVIEW QUESTIONS**: Use standard, well-known problem formulations:
+  * Make it relatable to ${
+    experience <= 3 ? "junior" : experience <= 7 ? "mid-level" : "senior"
+  } ${jobRole} work
+  * Example: "Find Maximum Element" → "As a ${jobRole}, you're processing ${
+    experience <= 3
+      ? "user data"
+      : experience <= 7
+        ? "transaction logs"
+        : "system performance metrics"
+  } and need to identify the peak value..."`
+    : `- **POPULAR INTERVIEW QUESTIONS**: Use standard, well-known problem formulations:
   * Keep titles and problem descriptions direct and recognizable
   * Focus on classic coding interview problems
   * No need for elaborate scenario-based context
-  * Example: "Find Maximum Element" → Keep as a straightforward problem: "Given an array of integers, find the maximum element"`}
+  * Example: "Find Maximum Element" → Keep as a straightforward problem: "Given an array of integers, find the maximum element"`
+}
 
 **FINAL VALIDATION CHECKS** (MUST verify before outputting):
 1. **LINE BREAK CHECK**: Search your generated HTML for <br/><h3> pattern - if found, REMOVE the <br/> tag. The correct pattern is </p><h3> or </ul><h3>, NOT </p><br/><h3>
@@ -1939,13 +2018,13 @@ Return JSON in this format:
   "type": "MCQ",
   "MCQ": [
     ${Array(number)
-          .fill(0)
-          .map((_, idx) => {
-            const isMultipleCorrect = idx < multipleCorrectCount;
-            const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
+      .fill(0)
+      .map((_, idx) => {
+        const isMultipleCorrect = idx < multipleCorrectCount;
+        const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
 
-            if (idx < withCode) {
-              return `{
+        if (idx < withCode) {
+          return `{
       "questionTitle": "Brief summary with code snippet",
       "question": "Question text with [SNIPPET_START:detectedLanguage]code\\nhere[SNIPPET_END]. Use <br/> for line breaks in question text. Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers - NO markdown fences.",
       "options": {"A": "Option with code: format as markdown code block with triple backticks and language", "B": "Plain text option", "C": "Option with inline code: use single backticks around code", "D": "Another plain text option"},
@@ -1953,8 +2032,8 @@ Return JSON in this format:
       "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
-            } else {
-              return `{
+        } else {
+          return `{
       "questionTitle": "Brief summary",
       "question": "General question text with NO code snippets. Use <br/> for line breaks.",
       "options": {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"},
@@ -1962,9 +2041,9 @@ Return JSON in this format:
       "isMultipleCorrect": ${isMultipleCorrect},
       "maxTime": ${maxTime}
     }`;
-            }
-          })
-          .join(",")}
+        }
+      })
+      .join(",")}
   ]
 }
 **CRITICAL INSTRUCTIONS**:
@@ -1991,15 +2070,15 @@ Return JSON in this format:
   "type": "${questionType}",
   "${questionType}": [
     ${Array(number)
-          .fill(0)
-          .map(
-            (_, idx) => `{
+      .fill(0)
+      .map(
+        (_, idx) => `{
       "questionTitle": "Brief summary",
       "question": "Question text. Use <br/> for line breaks.",
       "maxTime": ${maxTime}
     }`,
-          )
-          .join(",")}
+      )
+      .join(",")}
   ]
 }`;
       break;
@@ -2030,55 +2109,56 @@ Return JSON in this format:
   "type": "Programming",
   "Programming": [
     ${Array(programmingCount)
-          .fill(0)
-          .map((_, idx) => {
-            const title =
-              Array.isArray(titles) && titles[idx]
-                ? String(titles[idx]).replace(/"/g, '\\"')
-                : `Coding problem title`;
-            return `{
+      .fill(0)
+      .map((_, idx) => {
+        const title =
+          Array.isArray(titles) && titles[idx]
+            ? String(titles[idx]).replace(/"/g, '\\"')
+            : `Coding problem title`;
+        return `{
       "questionTitle": "${title}",
       "question": "<h3>Problem Description</h3><p>Clear problem explanation here. Use <strong>bold</strong> for important terms and <code>code</code> for variable names.</p><br/><h3>Input Format</h3><p>Input specification with examples. Use <ul><li> for lists.</li></ul></p><br/><h3>Output Format</h3><p>Output specification here.</p><br/><h3>Constraints</h3><ul><li>Constraint 1</li><li>Constraint 2</li></ul><br/><h3>Examples</h3><p><strong>Input:</strong> example input description</p><p><strong>Output:</strong> example output description</p><br/><p><strong>Input:</strong> 5<br/>1 2 3 4 5</p><p><strong>Output:</strong> 15</p>",
       "maxTime": ${maxTime},
       "testCases": [
         ${testCasesConfigForTemplate
-                .map(
-                  (tc, tcIdx) => `{
+          .map(
+            (tc, tcIdx) => `{
           "input": "Actual test input value ${tcIdx + 1}",
           "output": "EXACT expected output value ${tcIdx + 1}",
           "explanation": "Why this output is correct",
           "visible": ${tc.visible !== undefined ? tc.visible : tcIdx < 2},
-          "weightage": ${tc.weightage !== undefined
-                      ? tc.weightage
-                      : Math.floor(100 / testCasesConfigForTemplate.length)
-                    }
+          "weightage": ${
+            tc.weightage !== undefined
+              ? tc.weightage
+              : Math.floor(100 / testCasesConfigForTemplate.length)
+          }
         }`,
-                )
-                .join(",")}
+          )
+          .join(",")}
       ],
       "supportedLanguages": ${JSON.stringify(
-                  supportedLanguagesInfoForTemplate.map((lang) => ({
-                    languageId: lang.languageId,
-                    languageName: lang.languageName,
-                    language: lang.languageName.split(" (")[0],
-                    version: lang.languageName.includes("(")
-                      ? lang.languageName.split("(")[1].replace(")", "")
-                      : "",
-                  })),
-                )},
+        supportedLanguagesInfoForTemplate.map((lang) => ({
+          languageId: lang.languageId,
+          languageName: lang.languageName,
+          language: lang.languageName.split(" (")[0],
+          version: lang.languageName.includes("(")
+            ? lang.languageName.split("(")[1].replace(")", "")
+            : "",
+        })),
+      )},
       "supportedLanguages": ${JSON.stringify(
-                  supportedLanguagesInfoForTemplate.map((lang) => ({
-                    languageId: lang.languageId,
-                    languageName: lang.languageName,
-                    language: lang.languageName.split(" (")[0],
-                    version: lang.languageName.includes("(")
-                      ? lang.languageName.split("(")[1].replace(")", "")
-                      : "",
-                  })),
-                )}
+        supportedLanguagesInfoForTemplate.map((lang) => ({
+          languageId: lang.languageId,
+          languageName: lang.languageName,
+          language: lang.languageName.split(" (")[0],
+          version: lang.languageName.includes("(")
+            ? lang.languageName.split("(")[1].replace(")", "")
+            : "",
+        })),
+      )}
     }`;
-          })
-          .join(",")}
+      })
+      .join(",")}
   ]
 }`;
       break;
@@ -2149,10 +2229,12 @@ const createConsumer = async (id) => {
           if (!boilerplateRequest) {
             throw new Error("Missing boilerplateRequest payload");
           }
-          const { questionTitle, question, testCases, languages } = boilerplateRequest;
+          const { questionTitle, question, testCases, languages } =
+            boilerplateRequest;
           const boilerplateResult = await generateBoilerplateWithGemini({
             genAI,
-            modelName: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+            modelName:
+              process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
             questionTitle,
             question,
             testCases,
@@ -2173,7 +2255,9 @@ const createConsumer = async (id) => {
               languages,
               boilerplateCode: boilerplateResult.boilerplateCode,
               genAI,
-              modelName: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+              modelName:
+                process.env.PROGRAMMING_VERIFICATION_MODEL ||
+                "gemini-2.5-flash",
             });
             finalBoilerplateCode = verificationResult.boilerplateCode;
             verified = verificationResult.verified;
@@ -2188,10 +2272,13 @@ const createConsumer = async (id) => {
             try {
               await CreditServiceClient.deductAiUsage({
                 clientId,
-                modelId: process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+                modelId:
+                  process.env.PROGRAMMING_VERIFICATION_MODEL ||
+                  "gemini-2.5-flash",
                 referenceId: `ai_code_gen_${Date.now()}`,
                 inputTokens: boilerplateResult.tokenUsage.promptTokens || 0,
-                outputTokens: boilerplateResult.tokenUsage.completionTokens || 0,
+                outputTokens:
+                  boilerplateResult.tokenUsage.completionTokens || 0,
                 meta: {
                   type: "ai_code_generation",
                   serviceKey: "AI_CODE_GENERATION",
@@ -2365,30 +2452,9 @@ const createConsumer = async (id) => {
           tokenUsage.completionTokens += responseTokenUsage.completionTokens;
           tokenUsage.totalTokens += responseTokenUsage.totalTokens;
 
-          //Deduct Credits
-          const reqBody = {
-            clientId,
-            modelId: "gemini-2.0-flash",
-            referenceId: `ai_question_gen_${Date.now()}`,
-            inputTokens: tokenUsage.promptTokens,
-            outputTokens: tokenUsage.completionTokens,
-            meta: {
-              type: "question_generation",
-              serviceKey: "AI_QUESTION_GENERATION",
-            },
-            channelId,
-            jobId,
-          };
-
-          if (screeningAssessmentId) {
-            reqBody.screeningAssessmentId = screeningAssessmentId;
-          }
-
-          if (tempId) {
-            reqBody.tempId = tempId;
-          }
-
-          await CreditServiceClient.deductAiUsage(reqBody);
+          // NOTE: Credit deduction is handled by server.js after all Kafka responses are
+          // aggregated. Do NOT deduct here — doing so causes double deduction.
+          // The server deducts once using referenceId `ai_questions_${requestId}` (idempotent).
 
           const aiResponseText = candidate.parts[0]?.text || "";
           const combinedResponse = extractJsonFromGeminiText(
@@ -2529,7 +2595,8 @@ const createConsumer = async (id) => {
         // Programming: always use 2-step flow (titles -> questions) to guarantee uniqueness,
         // even when number is 1 or 2.
         if (questionType === "Programming") {
-          const programmingContext = normalizeProgrammingContext(questionsArray);
+          const programmingContext =
+            normalizeProgrammingContext(questionsArray);
 
           const totalCategories = PROGRAMMING_LOGIC_CATEGORIES.length;
           const unusedCategories = PROGRAMMING_LOGIC_CATEGORIES.filter(
@@ -2538,12 +2605,14 @@ const createConsumer = async (id) => {
           const usedCount = usedCategories.length;
           const usagePercentage = (usedCount / totalCategories) * 100;
           const isCategoryExhausted =
-            usagePercentage >= 90 || unusedCategories.length < questionConfig.number;
+            usagePercentage >= 90 ||
+            unusedCategories.length < questionConfig.number;
           const requiredLogicCategories =
-            !isCategoryExhausted && unusedCategories.length >= questionConfig.number
+            !isCategoryExhausted &&
+            unusedCategories.length >= questionConfig.number
               ? unusedCategories
-                .slice(0, questionConfig.number)
-                .map((cat) => cat.name)
+                  .slice(0, questionConfig.number)
+                  .map((cat) => cat.name)
               : [];
 
           const maxTitleAttempts = 3;
@@ -2572,14 +2641,22 @@ const createConsumer = async (id) => {
           const seedPlan = [];
           const nextExamplePointers = {};
           const hasUserPrompt =
-            (questionConfig.promptText || questionConfig.customPrompt || "").trim().length > 0;
+            (
+              questionConfig.promptText ||
+              questionConfig.customPrompt ||
+              ""
+            ).trim().length > 0;
           if (!hasUserPrompt) {
             selectedCategoryNames.forEach((catName) => {
               const catObj = PROGRAMMING_LOGIC_CATEGORIES.find(
                 (c) => c.name === catName,
               );
-              const examples = Array.isArray(catObj?.examples) ? catObj.examples : [];
-              const keywords = Array.isArray(catObj?.keywords) ? catObj.keywords : [];
+              const examples = Array.isArray(catObj?.examples)
+                ? catObj.examples
+                : [];
+              const keywords = Array.isArray(catObj?.keywords)
+                ? catObj.keywords
+                : [];
               const currentPtr =
                 typeof examplePointers?.[catName] === "number"
                   ? examplePointers[catName]
@@ -2600,7 +2677,9 @@ const createConsumer = async (id) => {
           const titleGenerationOptions = {
             bannedTitles: [],
             bannedLogicCategories: [],
-            requiredLogicCategories: hasUserPrompt ? [] : requiredLogicCategories,
+            requiredLogicCategories: hasUserPrompt
+              ? []
+              : requiredLogicCategories,
             seedPlan,
           };
 
@@ -2642,33 +2721,12 @@ const createConsumer = async (id) => {
               tokenUsage.completionTokens += titlesTokenUsage.completionTokens;
               tokenUsage.totalTokens += titlesTokenUsage.totalTokens;
 
-              const reqBody = {
-                clientId,
-                modelId: "gemini-2.0-flash",
-                referenceId: `ai_question_gen_${Date.now()}`,
-                inputTokens: titlesTokenUsage.promptTokens,
-                outputTokens: titlesTokenUsage.completionTokens,
-                meta: {
-                  type: "question_generation",
-                  serviceKey: "AI_QUESTION_GENERATION",
-                },
-                channelId,
-                jobId,
-                tempId,
-              };
-
-              if (screeningAssessmentId) {
-                reqBody.screeningAssessmentId = screeningAssessmentId;
-              }
-
-              if (tempId) {
-                reqBody.tempId = tempId;
-              }
-
-              await CreditServiceClient.deductAiUsage(reqBody);
+              // NOTE: Credit deduction is handled by server.js after all Kafka responses are
+              // aggregated. Do NOT deduct here — doing so causes double deduction.
             } catch (geminiError) {
               lastTitleError = new Error(
-                `Gemini API error (titles): ${geminiError.message || "Unknown error"
+                `Gemini API error (titles): ${
+                  geminiError.message || "Unknown error"
                 }`,
               );
               if (attempt < maxTitleAttempts) {
@@ -2699,7 +2757,10 @@ const createConsumer = async (id) => {
               );
               if (attempt < maxTitleAttempts) {
                 titleGenerationOptions.bannedTitles = [
-                  ...new Set([...titleGenerationOptions.bannedTitles, ...titles]),
+                  ...new Set([
+                    ...titleGenerationOptions.bannedTitles,
+                    ...titles,
+                  ]),
                 ];
                 continue;
               }
@@ -2731,8 +2792,7 @@ const createConsumer = async (id) => {
                     category.category,
                     nextExamplePointers,
                   );
-                } catch (e) {
-                }
+                } catch (e) {}
               }
               break;
             }
@@ -2806,7 +2866,6 @@ const createConsumer = async (id) => {
             // Create promise for this batch
             const batchPromise = (async () => {
               try {
-
                 const batchResult = await retryGeminiCall(
                   () => model.generateContent(batchPrompt),
                   3,
@@ -2844,7 +2903,8 @@ const createConsumer = async (id) => {
                 };
               } catch (geminiError) {
                 throw new Error(
-                  `Gemini API error (Programming batch ${batchIndex}): ${geminiError.message || "Unknown error"
+                  `Gemini API error (Programming batch ${batchIndex}): ${
+                    geminiError.message || "Unknown error"
                   }`,
                 );
               }
@@ -2942,30 +3002,8 @@ const createConsumer = async (id) => {
           tokenUsage.completionTokens += responseTokenUsage.completionTokens;
           tokenUsage.totalTokens += responseTokenUsage.totalTokens;
 
-          const reqBody = {
-            clientId,
-            modelId: "gemini-2.0-flash",
-            referenceId: `ai_question_gen_${Date.now()}`,
-            inputTokens: responseTokenUsage.promptTokens,
-            outputTokens: responseTokenUsage.completionTokens,
-            meta: {
-              type: "question_generation",
-              serviceKey: "AI_QUESTION_GENERATION",
-            },
-            channelId,
-            jobId,
-          };
-
-          if (screeningAssessmentId) {
-            reqBody.screeningAssessmentId = screeningAssessmentId;
-          }
-
-          if (tempId) {
-            reqBody.tempId = tempId;
-          }
-
-          // Deduc Credits
-          await CreditServiceClient.deductAiUsage(reqBody);
+          // NOTE: Credit deduction is handled by server.js after all Kafka responses are
+          // aggregated. Do NOT deduct here — doing so causes double deduction.
 
           const aiResponseText = candidate.parts[0]?.text || "";
           aiResponse = extractJsonFromGeminiText(aiResponseText, id);
@@ -3267,34 +3305,41 @@ const createConsumer = async (id) => {
               });
 
               // Generate boilerplate AFTER question+testcase generation.
-              const boilerplatePromises = aiResponse.Programming.map(async (question) => {
-                const supportedLanguages = Array.isArray(question.supportedLanguages)
-                  ? question.supportedLanguages
-                  : [];
-                if (!supportedLanguages.length) return question;
-                try {
-                  const bp = await generateBoilerplateWithGemini({
-                    genAI,
-                    modelName:
-                      process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
-                    questionTitle: question.questionTitle,
-                    question: question.question,
-                    testCases: question.testCases || [],
-                    languages: supportedLanguages,
-                  });
-                  question.supportedLanguages = supportedLanguages.map((lang) => ({
-                    ...lang,
-                    codeSnippet:
-                      getBoilerplateForLanguage(
-                        bp.boilerplateCode,
-                        lang.languageName || lang.name,
-                      ) || "",
-                  }));
-                } catch (bpErr) {
-                  // Boilerplate generation failed - continue with empty snippet
-                }
-                return question;
-              });
+              const boilerplatePromises = aiResponse.Programming.map(
+                async (question) => {
+                  const supportedLanguages = Array.isArray(
+                    question.supportedLanguages,
+                  )
+                    ? question.supportedLanguages
+                    : [];
+                  if (!supportedLanguages.length) return question;
+                  try {
+                    const bp = await generateBoilerplateWithGemini({
+                      genAI,
+                      modelName:
+                        process.env.PROGRAMMING_VERIFICATION_MODEL ||
+                        "gemini-2.5-flash",
+                      questionTitle: question.questionTitle,
+                      question: question.question,
+                      testCases: question.testCases || [],
+                      languages: supportedLanguages,
+                    });
+                    question.supportedLanguages = supportedLanguages.map(
+                      (lang) => ({
+                        ...lang,
+                        codeSnippet:
+                          getBoilerplateForLanguage(
+                            bp.boilerplateCode,
+                            lang.languageName || lang.name,
+                          ) || "",
+                      }),
+                    );
+                  } catch (bpErr) {
+                    // Boilerplate generation failed - continue with empty snippet
+                  }
+                  return question;
+                },
+              );
               aiResponse.Programming = await Promise.all(boilerplatePromises);
 
               const verificationEnabled =
@@ -3305,7 +3350,8 @@ const createConsumer = async (id) => {
                     questions: aiResponse.Programming,
                     genAI,
                     modelName:
-                      process.env.PROGRAMMING_VERIFICATION_MODEL || "gemini-2.5-flash",
+                      process.env.PROGRAMMING_VERIFICATION_MODEL ||
+                      "gemini-2.5-flash",
                     requestId,
                     consumerId: id,
                   });
@@ -3395,8 +3441,8 @@ const createConsumer = async (id) => {
                     questionType: questionType || "unknown",
                   }),
                 },
-                ],
-              });
+              ],
+            });
           } catch (errorSendError) {
             // Failed to send error response
           }

@@ -216,7 +216,9 @@ const deductCreditsForQuestion = async (responseData, result, questionType) => {
       clientId: responseData.clientId,
       channelId: responseData.channelId,
       jobId: responseData.jobId,
-      screeningAssessmentId: responseData.screeningAssessmentId,
+      screeningAssessmentId:
+        responseData.screeningAssessmentId || responseData.screeningTestId,
+      assessmentId: responseData.assessmentId,
       modelId: config?.ai?.model || "gemini-2.0-flash",
       referenceId: `${questionType}_analysis_${Date.now()}`,
       inputTokens: totalInputTokens,
@@ -224,6 +226,8 @@ const deductCreditsForQuestion = async (responseData, result, questionType) => {
       serviceKey: SERVICE_KEY_MAP[questionType],
       meta: {
         candidateScreeningId: responseData.candidateScreeningId,
+        candidateAssessmentId: responseData.candidateAssessmentId,
+        assessmentId: responseData.assessmentId,
         questionId: responseData.questionId,
         type: questionType,
       },
@@ -340,7 +344,7 @@ const initializeV2_5Processor = (dependencies) => {
 const processTypeWiseResponse = async (responseData) => {
   if (!initialized) {
     throw new Error(
-      "V2.5 Processor not initialized. Call initializeV2_5Processor first."
+      "V2.5 Processor not initialized. Call initializeV2_5Processor first.",
     );
   }
 
@@ -364,18 +368,16 @@ const processTypeWiseResponse = async (responseData) => {
         result = await audioProcessor.processAudioResponse(responseData);
         break;
       case "subjective":
-        result = await subjectiveProcessor.processSubjectiveResponse(
-          responseData
-        );
+        result =
+          await subjectiveProcessor.processSubjectiveResponse(responseData);
         break;
       case "programming":
-        result = await programmingProcessor.processProgrammingResponse(
-          responseData
-        );
+        result =
+          await programmingProcessor.processProgrammingResponse(responseData);
         break;
       default:
         throw new Error(
-          `Unsupported type for V2.5 processing: ${normalizedType}`
+          `Unsupported type for V2.5 processing: ${normalizedType}`,
         );
     }
 

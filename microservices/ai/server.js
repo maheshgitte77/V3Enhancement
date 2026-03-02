@@ -170,6 +170,41 @@ const ensureTopics = async () => {
             if (requestInfo.timeoutId) {
               clearTimeout(requestInfo.timeoutId);
             }
+
+            // --- Credit System Integration ---
+            try {
+              const tokenUsage = responseData.tokenUsage || {};
+              const inputTokens = tokenUsage.promptTokens || 0;
+              const outputTokens = tokenUsage.completionTokens || 0;
+              const { clientId, channelId, jobId, tempId } = requestInfo;
+
+              if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+                await CreditServiceClient.deductAiUsage({
+                  clientId,
+                  modelId: "gemini-2.0-flash",
+                  referenceId: `ai_code_gen_${key}`,
+                  inputTokens,
+                  outputTokens,
+                  meta: {
+                    type: "ai_code_generation",
+                    serviceKey: "AI_CODE_GENERATION",
+                  },
+                  channelId,
+                  jobId,
+                  tempId,
+                });
+                console.log(
+                  `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`,
+                );
+              }
+            } catch (creditError) {
+              console.error(
+                "❌ AI Credit deduction failed (Non-blocking):",
+                creditError.message,
+              );
+            }
+            // ---------------------------------
+
             requestInfo.res
               .status(200)
               .json(responseData.boilerplateResponse || {});
