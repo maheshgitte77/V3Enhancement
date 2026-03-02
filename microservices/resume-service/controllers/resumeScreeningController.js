@@ -257,7 +257,7 @@ const analyzeResumes = async (req, res) => {
 
       if (isLive || validFiles.length === 1) {
         req.pendingRequests.set(requestId, {
-          res: validFiles.length === 1 ? res : { json: () => {} },
+          res: validFiles.length === 1 ? res : { json: () => { } },
           expectedResponses: validFiles.length,
           jobId: jobId,
           requestBy: addedBy || null,
@@ -519,9 +519,9 @@ const addToJobApplication = async (req, res) => {
             const experience =
               record.experience && typeof record.experience === "object"
                 ? {
-                    years: Number(record.experience.years) || undefined,
-                    months: Number(record.experience.months) || undefined,
-                  }
+                  years: Number(record.experience.years) || undefined,
+                  months: Number(record.experience.months) || undefined,
+                }
                 : undefined;
 
             // Validate and clean the email
@@ -537,9 +537,9 @@ const addToJobApplication = async (req, res) => {
               mobile:
                 record.mobile && typeof record.mobile === "object"
                   ? {
-                      countryCode: record.mobile.countryCode?.trim() || "+91",
-                      number: record.mobile.number?.trim() || undefined,
-                    }
+                    countryCode: record.mobile.countryCode?.trim() || "+91",
+                    number: record.mobile.number?.trim() || undefined,
+                  }
                   : undefined,
               gender: record.gender?.trim() || undefined,
               dateOfBirth: safeDate(record.dateOfBirth),
@@ -597,8 +597,8 @@ const addToJobApplication = async (req, res) => {
               offersInHand: record.offersInHand?.trim() || undefined,
               noticePeriod:
                 record.noticePeriod !== undefined &&
-                record.noticePeriod !== null &&
-                record.noticePeriod !== ""
+                  record.noticePeriod !== null &&
+                  record.noticePeriod !== ""
                   ? Number(record.noticePeriod)
                   : undefined,
               expectedJoiningDate: safeDate(record.expectedJoiningDate),
@@ -692,7 +692,9 @@ const addToJobApplication = async (req, res) => {
       name: candidate.name,
     }));
     try {
-      // Notify external service
+      // // Notify external service
+      // const serviceKey =
+      //   process.env.COMMUNICATION_SERVICE_KEY || process.env.INTERNAL_SERVICE_KEY || "hirecorrectorservice";
 
       await axios.post(
         `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
@@ -701,7 +703,11 @@ const addToJobApplication = async (req, res) => {
           expiryDate: ExpiredOn,
           candidateList,
           channelId, // For credit tracking
+          clientId, // Required for credit eligibility
         },
+        // {
+        //   headers: serviceKey ? { "x-service-key": serviceKey } : undefined,
+        // },
       );
     } catch (error) {
       console.error(
