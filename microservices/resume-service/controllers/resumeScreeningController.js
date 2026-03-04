@@ -694,7 +694,7 @@ const addToJobApplication = async (req, res) => {
     try {
       // Notify external service
       const serviceKey =
-        process.env.COMMUNICATION_SERVICE_KEY || process.env.INTERNAL_SERVICE_KEY || "hirecorrectorservice";
+        process.env.COMMUNICATION_SERVICE_KEY;
 
       await axios.post(
         `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
