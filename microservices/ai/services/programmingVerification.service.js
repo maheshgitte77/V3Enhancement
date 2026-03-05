@@ -19,7 +19,7 @@ const VERIFICATION_LOG_ENABLED =
 // Skip Phase 3.7 (re-verification) and Phase 3.8 (boilerplate regen) - saves ~1-2 min per failing question.
 // Default: true (skip for faster response). Set to "false" to run full recovery for all questions.
 const SKIP_RECOVERY_PHASES =
-  process.env.SKIP_VERIFICATION_RECOVERY_PHASES !== "false" ||
+  process.env.SKIP_VERIFICATION_RECOVERY_PHASES === "true" ||
   process.env.VERIFICATION_FAST_MODE === "true";
 const ENABLE_PHASE_37 =
   !SKIP_RECOVERY_PHASES && process.env.ENABLE_VERIFICATION_PHASE_37 !== "false";
@@ -149,10 +149,16 @@ const withRetry = async (fn, retries = 3, delayMs = 1000) => {
   throw lastError;
 };
 
+const stripHtmlForTestCase = (value) =>
+  sanitizeText(value)
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s*\n\s*/g, "\n")
+    .trim();
+
 const normalizeTestCases = (testCases) =>
   (Array.isArray(testCases) ? testCases : []).map((tc) => ({
-    input: sanitizeText(tc?.input || "1"),
-    output: sanitizeText(tc?.output || "0"),
+    input: stripHtmlForTestCase(tc?.input || "1"),
+    output: stripHtmlForTestCase(tc?.output || "0"),
     explanation: tc?.explanation || "",
     visible: !!tc?.visible,
     weightage: Number(tc?.weightage || 0),
@@ -310,6 +316,53 @@ const normalizePythonStdin = (code = "") => {
   return c;
 };
 
+/**
+ * Wrap the entire solve() function with HC_IMPLEMENTATION_BLOCK markers.
+ * Returns the modified code string, or null if no solve() definition was found.
+ */
+const wrapSolveFunctionWithMarkersForVerification = (code, family) => {
+  const pfx = markerPrefix(family);
+  const isIndentBased = family === "python" || family === "ruby" || family === "r" || family === "haskell";
+  const isEndBased = family === "lua" || family === "octave" || family === "pascal";
+  const sigPattern = getSignaturePattern(family);
+  const lines = code.split("\n");
+  const sigIdx = lines.findIndex((line) => {
+    const trimmed = line.trimStart();
+    if (/^(#|\/\/|--|%)/.test(trimmed)) return false;
+    return sigPattern.test(line);
+  });
+  if (sigIdx === -1) return null;
+  let endIdx = sigIdx;
+  if (isIndentBased) {
+    const sigIndent = (lines[sigIdx].match(/^(\s*)/) || [null, ""])[1].length;
+    for (let i = sigIdx + 1; i < lines.length; i++) {
+      if (!lines[i].trim()) { endIdx = i; continue; }
+      const lineIndent = (lines[i].match(/^(\s*)/) || [null, ""])[1].length;
+      if (lineIndent <= sigIndent) break;
+      endIdx = i;
+    }
+  } else if (isEndBased) {
+    for (let i = sigIdx + 1; i < lines.length; i++) {
+      if (/^\s*end[;]?\s*$/.test(lines[i])) { endIdx = i; break; }
+    }
+  } else {
+    let braceCount = 0;
+    let started = false;
+    for (let i = sigIdx; i < lines.length; i++) {
+      for (const ch of lines[i]) {
+        if (ch === "{") { braceCount++; started = true; }
+        else if (ch === "}") { braceCount--; }
+      }
+      if (started && braceCount === 0) { endIdx = i; break; }
+    }
+  }
+  const indent = (lines[sigIdx].match(/^(\s*)/) || [null, ""])[1];
+  const result = [...lines];
+  result.splice(endIdx + 1, 0, `${indent}${pfx} ${BLOCK_MARKERS.implEnd}`);
+  result.splice(sigIdx, 0, `${indent}${pfx} ${BLOCK_MARKERS.implStart}`);
+  return result.join("\n");
+};
+
 const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
   const family = detectLanguageFamily(languageName);
   if (!codeSnippet) return codeSnippet;
@@ -321,18 +374,24 @@ const ensureBoilerplateMarkers = (codeSnippet = "", languageName = "") => {
     code.includes(BLOCK_MARKERS.implStart) &&
     code.includes(BLOCK_MARKERS.implEnd);
   if (!hasImplMarkers) {
-    const todoIdx = lines.findIndex((line) =>
-      /TODO|Implement the solution here/i.test(line),
-    );
-    if (todoIdx !== -1) {
-      const indent = (lines[todoIdx].match(/^(\s*)/) || [null, ""])[1];
-      lines.splice(
-        todoIdx,
-        1,
-        markerLine(family, BLOCK_MARKERS.implStart, indent),
-        lines[todoIdx],
-        markerLine(family, BLOCK_MARKERS.implEnd, indent),
+    const wrapped = wrapSolveFunctionWithMarkersForVerification(code, family);
+    if (wrapped) {
+      code = wrapped;
+      lines = code.split("\n");
+    } else {
+      const todoIdx = lines.findIndex((line) =>
+        /TODO|Implement the solution here/i.test(line),
       );
+      if (todoIdx !== -1) {
+        const indent = (lines[todoIdx].match(/^(\s*)/) || [null, ""])[1];
+        lines.splice(
+          todoIdx,
+          1,
+          markerLine(family, BLOCK_MARKERS.implStart, indent),
+          lines[todoIdx],
+          markerLine(family, BLOCK_MARKERS.implEnd, indent),
+        );
+      }
     }
   }
 
@@ -432,11 +491,14 @@ ${JSON.stringify(testCases, null, 2)}
 const indentLines = (text, spaces) =>
   String(text || "")
     .split("\n")
+    .map((line) => line.replace(/\r$/, ""))
     .map((line) => `${" ".repeat(spaces)}${line}`)
     .join("\n");
 
 const normalizeMinIndent = (text) => {
-  const lines = String(text || "").split("\n");
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""));
   let minSpaces = Infinity;
   for (const line of lines) {
     if (line.trim().length === 0) continue;
@@ -456,6 +518,7 @@ const normalizeMinIndent = (text) => {
 const normalizePythonBodyForInjection = (text) => {
   return String(text || "")
     .split("\n")
+    .map((line) => line.replace(/\r$/, ""))
     .map((line) => line.trimStart())
     .join("\n")
     .trim();
@@ -534,7 +597,10 @@ const injectLogicIntoBoilerplate = ({
     const endMarkerLine = code.substring(endLineStart + 1, code.length);
     // Block content = everything between the two marker lines (the solve function body + signature + closing brace)
     const blockContent = code.substring(startLineEnd + 1, endLineStart);
-    const blockLines = blockContent.split("\n").filter((l) => l !== undefined);
+    const blockLines = blockContent
+      .split("\n")
+      .map((l) => l.replace(/\r$/, ""))
+      .filter((l) => l !== undefined);
     if (blockLines.length === 0) {
       code = String(code || "");
     } else {
@@ -646,6 +712,7 @@ const injectLogicIntoBoilerplate = ({
   }
 
   // Fallback injectors by language family.
+  const codeBeforeFallback = code;
   if (family === "python") {
     code = code.replace(/^(\s*)pass\s*$/im, (_, indent) =>
       indentLines(logic, indent.length),
@@ -731,7 +798,7 @@ const injectLogicIntoBoilerplate = ({
     );
   }
 
-  return { mergedCode: code, injected: true };
+  return { mergedCode: code, injected: code !== codeBeforeFallback };
 };
 
 const buildExecutionHeaders = () => {
@@ -1325,6 +1392,7 @@ const verifyOneProgrammingQuestion = async ({
       timeLimit: workingQuestion.timeLimit,
       memoryLimit: workingQuestion.memoryLimit,
       clientId,
+      isAiVerification: true,
     });
     // Add code execution units for Phase 2: each runnable language * number of test cases
     totalExecutionUnits +=
@@ -1488,6 +1556,7 @@ const verifyOneProgrammingQuestion = async ({
         timeLimit: workingQuestion.timeLimit,
         memoryLimit: workingQuestion.memoryLimit,
         clientId,
+        isAiVerification: true,
       });
       // Add code execution units for Phase 3.5 re-execution: each runnable language * number of correct test cases
       totalExecutionUnits +=
@@ -1636,6 +1705,7 @@ const verifyOneProgrammingQuestion = async ({
         timeLimit: workingQuestion.timeLimit,
         memoryLimit: workingQuestion.memoryLimit,
         clientId,
+        isAiVerification: true,
       });
       // Add units for Phase 3.6 complete solution execution: executed language fallback * test cases used
       totalExecutionUnits +=
@@ -1754,7 +1824,8 @@ const verifyOneProgrammingQuestion = async ({
     (lang) => lang.passed === lang.total && lang.total > 0,
   );
   const totalLanguages = languagePassSummary.length;
-  const majorityThreshold = Math.ceil(totalLanguages * 0.7); // 70% threshold
+  const majorityThreshold =
+    totalLanguages > 0 ? Math.ceil(totalLanguages * 0.7) : Infinity; // 70% threshold
 
   const hasMajority100Percent =
     languagesWith100Percent.length >= majorityThreshold;

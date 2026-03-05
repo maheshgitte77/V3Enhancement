@@ -2145,16 +2145,6 @@ Return JSON in this format:
             ? lang.languageName.split("(")[1].replace(")", "")
             : "",
         })),
-      )},
-      "supportedLanguages": ${JSON.stringify(
-        supportedLanguagesInfoForTemplate.map((lang) => ({
-          languageId: lang.languageId,
-          languageName: lang.languageName,
-          language: lang.languageName.split(" (")[0],
-          version: lang.languageName.includes("(")
-            ? lang.languageName.split("(")[1].replace(")", "")
-            : "",
-        })),
       )}
     }`;
       })
@@ -3314,29 +3304,43 @@ const createConsumer = async (id) => {
                     ? question.supportedLanguages
                     : [];
                   if (!supportedLanguages.length) return question;
-                  try {
-                    const bp = await generateBoilerplateWithGemini({
-                      genAI,
-                      modelName:
-                        process.env.PROGRAMMING_VERIFICATION_MODEL ||
-                        "gemini-2.5-flash",
-                      questionTitle: question.questionTitle,
-                      question: question.question,
-                      testCases: question.testCases || [],
-                      languages: supportedLanguages,
-                    });
-                    question.supportedLanguages = supportedLanguages.map(
-                      (lang) => ({
-                        ...lang,
-                        codeSnippet:
-                          getBoilerplateForLanguage(
-                            bp.boilerplateCode,
-                            lang.languageName || lang.name,
-                          ) || "",
-                      }),
+                  let bpErr;
+                  for (let attempt = 0; attempt < 2; attempt++) {
+                    try {
+                      const bp = await generateBoilerplateWithGemini({
+                        genAI,
+                        modelName:
+                          process.env.PROGRAMMING_VERIFICATION_MODEL ||
+                          "gemini-2.5-flash",
+                        questionTitle: question.questionTitle,
+                        question: question.question,
+                        testCases: question.testCases || [],
+                        languages: supportedLanguages,
+                      });
+                      question.supportedLanguages = supportedLanguages.map(
+                        (lang) => ({
+                          ...lang,
+                          codeSnippet:
+                            getBoilerplateForLanguage(
+                              bp.boilerplateCode,
+                              lang.languageName || lang.name,
+                            ) || "",
+                        }),
+                      );
+                      bpErr = null;
+                      break;
+                    } catch (err) {
+                      bpErr = err;
+                      if (attempt < 1) {
+                        await new Promise((r) => setTimeout(r, 1000));
+                      }
+                    }
+                  }
+                  if (bpErr) {
+                    console.error(
+                      `[questionsWorker] Boilerplate generation failed after retries for "${question.questionTitle}":`,
+                      bpErr?.message || bpErr,
                     );
-                  } catch (bpErr) {
-                    // Boilerplate generation failed - continue with empty snippet
                   }
                   return question;
                 },
