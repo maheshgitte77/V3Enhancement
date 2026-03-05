@@ -135,19 +135,27 @@ class CreditServiceClient {
    * Estimate cost for a single AI action
    * @param {string} modelId - AI model identifier (e.g., 'gemini-2.0-flash')
    * @param {string} actionKey - Action key (e.g., 'AI_JOB_DESCRIPTION_GENERATION')
+   * @param {number} [expectedCodeExecutions] - Expected number of code executions (for programming)
    * @returns {Promise<Object>} Estimation response with estimatedCost, breakdown, etc.
    */
-  static async estimateActionCost(modelId, actionKey) {
+  static async estimateActionCost(modelId, actionKey, expectedCodeExecutions) {
     try {
       const baseUrl = process.env.CREDIT_SERVICE_URL;
-      const response = await axios.get(
+      const url = new URL(
         `${baseUrl}/ai-action-benchmarks/estimate/${modelId}/${actionKey}`,
-        {
-          headers: {
-            "x-service-key": process.env.CREDIT_SERVICE_KEY,
-          },
-        },
       );
+      if (
+        expectedCodeExecutions !== undefined &&
+        expectedCodeExecutions !== null
+      ) {
+        url.searchParams.append("executions", expectedCodeExecutions);
+      }
+
+      const response = await axios.get(url.toString(), {
+        headers: {
+          "x-service-key": process.env.CREDIT_SERVICE_KEY,
+        },
+      });
       return response.data?.data || null;
     } catch (error) {
       console.error(
@@ -160,7 +168,7 @@ class CreditServiceClient {
 
   /**
    * Estimate costs for multiple actions in parallel
-   * @param {Array<{modelId: string, actionKey: string, count?: number}>} actions
+   * @param {Array<{modelId: string, actionKey: string, count?: number, expectedCodeExecutions?: number}>} actions
    * @returns {Promise<Array<Object>>} Array of estimation responses
    */
   static async estimateActionCostBatch(actions) {
@@ -169,6 +177,7 @@ class CreditServiceClient {
         CreditServiceClient.estimateActionCost(
           action.modelId,
           action.actionKey,
+          action.expectedCodeExecutions,
         ).then((estimate) => ({
           ...estimate,
           actionKey: action.actionKey,
