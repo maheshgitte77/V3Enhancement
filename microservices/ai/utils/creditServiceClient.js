@@ -88,6 +88,50 @@ class CreditServiceClient {
   }
 
   /**
+   * Deduct credits for unit usage (e.g. Code Execution)
+   */
+  static async deductUnitUsage(reqBody) {
+    try {
+      const baseUrl = process.env.CREDIT_SERVICE_URL;
+
+      const response = await axios.post(
+        `${baseUrl}/credits/transaction/unit-usage`,
+        CreditServiceClient.filterReqBody(reqBody),
+        {
+          headers: {
+            "x-service-key": process.env.CREDIT_SERVICE_KEY,
+          },
+        },
+      );
+      console.log(`✅ Unit Credit deduction SUCCESS:`, response.data);
+      return response.data;
+    } catch (error) {
+      console.error(
+        `❌ Unit Credit deduction FAILED: `,
+        error.response?.data || error.message,
+      );
+      if (error.response) {
+        const { status, data } = error.response;
+        if (status === 402) {
+          throw new Error("INSUFFICIENT_FUNDS");
+        }
+        if (status === 409) {
+          return data; // Already processed
+        }
+        console.error(
+          "❌ Credit service error:",
+          data.message || "Unknown error",
+        );
+      } else if (error.request) {
+        console.error("❌ Credit service unreachable");
+      } else {
+        console.error("❌ Error:", error.message);
+      }
+      return null; // Non-blocking
+    }
+  }
+
+  /**
    * Estimate cost for a single AI action
    * @param {string} modelId - AI model identifier (e.g., 'gemini-2.0-flash')
    * @param {string} actionKey - Action key (e.g., 'AI_JOB_DESCRIPTION_GENERATION')

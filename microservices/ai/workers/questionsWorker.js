@@ -2258,6 +2258,7 @@ const createConsumer = async (id) => {
               modelName:
                 process.env.PROGRAMMING_VERIFICATION_MODEL ||
                 "gemini-2.5-flash",
+              clientId,
             });
             finalBoilerplateCode = verificationResult.boilerplateCode;
             verified = verificationResult.verified;
@@ -3344,6 +3345,7 @@ const createConsumer = async (id) => {
 
               const verificationEnabled =
                 process.env.ENABLE_PROGRAMMING_VERIFICATION !== "false";
+              console.log("verificationEnabled", verificationEnabled);
               if (verificationEnabled) {
                 try {
                   const verificationResult = await verifyProgrammingQuestions({
@@ -3354,10 +3356,22 @@ const createConsumer = async (id) => {
                       "gemini-2.5-flash",
                     requestId,
                     consumerId: id,
+                    clientId,
                   });
                   aiResponse.Programming = verificationResult.questions;
+
+                  // Track code execution units for credit deduction
+                  if (verificationResult.codeExecutionUnits) {
+                    tokenUsage.codeExecutionUnits =
+                      (tokenUsage.codeExecutionUnits || 0) +
+                      verificationResult.codeExecutionUnits;
+                  }
                 } catch (verificationError) {
                   // Verification failed - use unverified questions
+                  console.error(
+                    "Verification failed in questionsWorker:",
+                    verificationError.message || verificationError,
+                  );
                 }
               }
 
