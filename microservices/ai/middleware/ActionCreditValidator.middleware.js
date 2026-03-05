@@ -190,6 +190,7 @@ class ActionCreditValidator {
         modelId,
         actionKey: this._mapQuestionTypeToActionKey(item.type),
         count: item.count,
+        expectedCodeExecutions: item.expectedCodeExecutions,
       }));
 
       // Execute parallel cost estimations
@@ -252,15 +253,27 @@ class ActionCreditValidator {
           const count = questionConfig.number || 1;
 
           if (type) {
-            typeCounts[type] = (typeCounts[type] || 0) + count;
+            if (!typeCounts[type]) {
+              typeCounts[type] = { count: 0, expectedCodeExecutions: 0 };
+            }
+            typeCounts[type].count += count;
+
+            if (type === "Programming") {
+              // Extract test cases (fallback 5) and supported languages (fallback 5)
+              const testCases = questionConfig.numberOfTestCases || 5;
+              const langs = questionConfig.supportedLanguages?.length || 5;
+              typeCounts[type].expectedCodeExecutions +=
+                count * testCases * langs;
+            }
           }
         });
       }
     });
 
-    return Object.entries(typeCounts).map(([type, count]) => ({
+    return Object.entries(typeCounts).map(([type, stats]) => ({
       type,
-      count,
+      count: stats.count,
+      expectedCodeExecutions: stats.expectedCodeExecutions,
     }));
   }
 

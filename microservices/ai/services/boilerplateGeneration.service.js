@@ -43,6 +43,55 @@ const ensureBlockMarkersOnOwnLine = (code, langName) => {
   return fixed;
 };
 
+/**
+ * Wrap the entire solve() function with HC_IMPLEMENTATION_BLOCK markers.
+ * Supports brace-delimited, indent-delimited (Python/Ruby/Haskell), and
+ * end-delimited (Lua/Octave/Pascal) languages.
+ * Returns the modified code, or null if no solve() definition was found.
+ */
+const wrapSolveFunctionWithMarkers = (code, langName) => {
+  const pfx = getMarkerPrefix(langName);
+  const langLower = String(langName || "").toLowerCase();
+  const isIndentBased = /python|ruby|r\s*\(|haskell/.test(langLower);
+  const isEndBased = /\blua\b|octave|pascal/.test(langLower);
+  const lines = code.split("\n");
+  const sigIdx = lines.findIndex((line) => {
+    const trimmed = line.trimStart();
+    if (/^(#|\/\/|--|%)/.test(trimmed)) return false;
+    return /\bsolve\s*[(<]/.test(line) || /\bsolve\s*<-/.test(line);
+  });
+  if (sigIdx === -1) return null;
+  let endIdx = sigIdx;
+  if (isIndentBased) {
+    const sigIndent = (lines[sigIdx].match(/^(\s*)/) || [null, ""])[1].length;
+    for (let i = sigIdx + 1; i < lines.length; i++) {
+      if (!lines[i].trim()) { endIdx = i; continue; }
+      const lineIndent = (lines[i].match(/^(\s*)/) || [null, ""])[1].length;
+      if (lineIndent <= sigIndent) break;
+      endIdx = i;
+    }
+  } else if (isEndBased) {
+    for (let i = sigIdx + 1; i < lines.length; i++) {
+      if (/^\s*end[;]?\s*$/.test(lines[i])) { endIdx = i; break; }
+    }
+  } else {
+    let braceCount = 0;
+    let started = false;
+    for (let i = sigIdx; i < lines.length; i++) {
+      for (const ch of lines[i]) {
+        if (ch === "{") { braceCount++; started = true; }
+        else if (ch === "}") { braceCount--; }
+      }
+      if (started && braceCount === 0) { endIdx = i; break; }
+    }
+  }
+  const indent = (lines[sigIdx].match(/^(\s*)/) || [null, ""])[1];
+  const result = [...lines];
+  result.splice(endIdx + 1, 0, `${indent}${pfx} ${BLOCK_MARKERS.implEnd}`);
+  result.splice(sigIdx, 0, `${indent}${pfx} ${BLOCK_MARKERS.implStart}`);
+  return result.join("\n");
+};
+
 const normalizeJavaScriptJudge0Input = (code = "") => {
   const source = String(code || "");
   const hasReadline =
@@ -108,13 +157,18 @@ const normalizeGeneratedBoilerplateMap = (boilerplateMap = {}) => {
     }
     cleaned = ensureBlockMarkersOnOwnLine(cleaned, langName);
 
-    const markerPrefix = /python/i.test(String(langName)) ? "#" : "//";
-    if (!cleaned.includes(BLOCK_MARKERS.implStart) && /TODO|Implement the solution here/i.test(cleaned)) {
-      cleaned = cleaned.replace(
-        /^(\s*)(#|\/\/)\s*.*TODO.*$/im,
-        (_, indent, commentPrefix) =>
-          `${indent}${commentPrefix} ${BLOCK_MARKERS.implStart}\n${indent}${commentPrefix} TODO: Implement the solution here\n${indent}${commentPrefix} ${BLOCK_MARKERS.implEnd}`,
-      );
+    if (!cleaned.includes(BLOCK_MARKERS.implStart)) {
+      const wrapped = wrapSolveFunctionWithMarkers(cleaned, langName);
+      if (wrapped) {
+        cleaned = wrapped;
+      } else if (/TODO|Implement the solution here/i.test(cleaned)) {
+        const pfx = getMarkerPrefix(langName);
+        cleaned = cleaned.replace(
+          /^(\s*)(#|\/\/|--|%)\s*.*TODO.*$/im,
+          (_, indent) =>
+            `${indent}${pfx} ${BLOCK_MARKERS.implStart}\n${indent}${pfx} TODO: Implement the solution here\n${indent}${pfx} ${BLOCK_MARKERS.implEnd}`,
+        );
+      }
     }
     if (!cleaned.includes(BLOCK_MARKERS.inputStart)) {
       const lines = cleaned.split("\n");
