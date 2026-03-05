@@ -1732,14 +1732,17 @@ const calculateAndUpdateRankings = async (
     );
   }
 
-  const candidateRank =
-    sortedScreenings.findIndex(
-      (s) => s.candidateScreeningId.toString() === candidateScreeningId
-    ) + 1;
+  const candidateRank = candidateScreeningId
+    ? sortedScreenings.findIndex(
+        (s) =>
+          s.candidateScreeningId?.toString() ===
+          candidateScreeningId?.toString()
+      ) + 1
+    : null;
 
   return {
     totalCandidates: sortedScreenings.length,
-    candidateRank,
+    candidateRank: candidateRank === 0 ? null : candidateRank,
   };
 };
 
@@ -1836,6 +1839,7 @@ module.exports = {
   processScreeningSummary,
   handleImmediateScoreRelease,
   sendKafkaNotification,
+  calculateAndUpdateRankings,
   // Exported for testing/utilities
   calculateCandidateFitScore,
   calculateIntegrityScore,

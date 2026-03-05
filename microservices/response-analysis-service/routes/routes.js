@@ -19,6 +19,7 @@ const {
   healthCheckV2_5,
   analyzeProgrammingHTTP,
   generateAssessmentSummaryHTTP,
+  recalculateScreeningRankingsHTTP,
 } = require("../controllers/controllers");
 const ActionCreditValidator = require("../middleware/ActionCreditValidator.middleware");
 
@@ -210,6 +211,23 @@ router.post(
   uploadNone,
   ActionCreditValidator.validateAssessmentSummaryCredit,
   generateAssessmentSummaryHTTP,
+);
+
+/**
+ * @route POST /api/response/v2.5/recalculateScreeningRankings
+ * @description Recalculate candidate ranks and betterThanOfCandidates for a screening assessment
+ *              Uses enhanced ranking logic (e.g. after candidate reset)
+ * @access Public
+ *
+ * @param {Object} req.body - Request body
+ * @param {string} req.body.screeningAssessmentId - Screening assessment ID
+ *
+ * @returns {Object} Recalculation result
+ */
+router.post(
+  "/recalculateScreeningRankings",
+  uploadNone,
+  recalculateScreeningRankingsHTTP,
 );
 
 /**
