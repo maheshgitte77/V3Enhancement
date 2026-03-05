@@ -15,6 +15,7 @@ const Candidate =
 const CandidateJourney = require("../model/CandidateJourney");
 const creditServiceClient = require("../utils/creditServiceClient");
 const ActionCreditValidator = require("../middleware/ActionCreditValidator.middleware");
+const { normalizeEmail, escapeRegex } = require("../utils/emailUtils");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -379,9 +380,10 @@ const addToJobApplication = async (req, res) => {
     const notFoundEmails = [];
 
     for (const email of emails) {
+      const normalizedEmail = normalizeEmail(email);
       const matchingRecord = jobDataList.find(
         (record) =>
-          (record.email === email &&
+          (normalizeEmail(record.email) === normalizedEmail &&
             record.jobId === jobId &&
             record.status === "Valid") ||
           changeStatus === "Valid",
@@ -390,6 +392,7 @@ const addToJobApplication = async (req, res) => {
       if (matchingRecord) {
         recordsToAdd.push({
           ...matchingRecord,
+          email: normalizedEmail,
           status: "Added",
           InvitedOn,
           ExpiredOn,
@@ -400,13 +403,14 @@ const addToJobApplication = async (req, res) => {
     }
 
     for (const email of notFoundEmails) {
-      const cacheKey = `resume:${email}:${jobId}`;
+      const cacheKey = `resume:${normalizeEmail(email)}:${jobId}`;
       const cachedData = await redis.get(cacheKey);
 
       if (cachedData) {
         const analysis = JSON.parse(cachedData);
         const jobData = {
           ...analysis,
+          email: normalizeEmail(email),
           jobId,
           status: "Added",
           ExpiredOn,
@@ -424,10 +428,15 @@ const addToJobApplication = async (req, res) => {
     }
 
     const bulkOps = recordsToAdd.map((record) => {
+      const normalizedRecordEmail = normalizeEmail(record.email);
+      const escapedEmail = escapeRegex(normalizedRecordEmail);
       return {
         updateOne: {
-          filter: { jobId: record.jobId, email: record.email },
-          update: { $set: record },
+          filter: {
+            jobId: record.jobId,
+            email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
+          },
+          update: { $set: { ...record, email: normalizedRecordEmail } },
           upsert: true,
         },
       };
@@ -439,10 +448,10 @@ const addToJobApplication = async (req, res) => {
 
     // Add CandidateJourney entries for each JobApplication
     try {
-      // Fetch all JobApplications that were just created/updated
+      // Fetch all JobApplications that were just created/updated (use normalized email)
       const jobApplicationQueries = recordsToAdd.map((record) => ({
         jobId: new ObjectId(record.jobId),
-        email: record.email,
+        email: normalizeEmail(record.email),
       }));
 
       const jobApplications = await JobApplication.find({
@@ -524,8 +533,8 @@ const addToJobApplication = async (req, res) => {
                   }
                 : undefined;
 
-            // Validate and clean the email
-            const email = record.email?.toLowerCase()?.trim();
+            // Validate and clean the email (normalize for consistency)
+            const email = normalizeEmail(record.email);
             if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
               console.warn(`Invalid email for candidate: ${record.email}`);
               return null; // Skip this record
@@ -628,9 +637,12 @@ const addToJobApplication = async (req, res) => {
               return null; // Skip this record
             }
 
+            const escapedCandidateEmail = escapeRegex(candidateDoc.email);
             return {
               updateOne: {
-                filter: { email: candidateDoc.email },
+                filter: {
+                  email: { $regex: new RegExp(`^${escapedCandidateEmail}$`, "i") },
+                },
                 // Update existing candidate profiles or create if missing
                 update: { $set: candidateDoc },
                 upsert: true,
@@ -720,7 +732,10 @@ const addToJobApplication = async (req, res) => {
       message: "Successfully added records to JobApplication",
       addedRecords: recordsToAdd.length,
       notFoundEmails: notFoundEmails.filter(
-        (email) => !recordsToAdd.some((record) => record.email === email),
+        (email) =>
+          !recordsToAdd.some(
+            (record) => normalizeEmail(record.email) === normalizeEmail(email),
+          ),
       ),
     });
   } catch (error) {
@@ -792,8 +807,10 @@ const approveCandidates = async (req, res) => {
     const updatedRecords = [];
     const notFoundEmails = [];
 
+    const normalizedEmails = new Set(emails.map((e) => normalizeEmail(e)));
     jobDataList = jobDataList.map((record) => {
-      if (emails.includes(record.email) && record.jobId === jobId) {
+      const recordEmailNorm = normalizeEmail(record.email);
+      if (normalizedEmails.has(recordEmailNorm) && record.jobId === jobId) {
         const updatedRecord = {
           ...record,
           status: "Valid",
@@ -807,7 +824,10 @@ const approveCandidates = async (req, res) => {
 
     notFoundEmails.push(
       ...emails.filter(
-        (email) => !updatedRecords.some((record) => record.email === email),
+        (email) =>
+          !updatedRecords.some(
+            (record) => normalizeEmail(record.email) === normalizeEmail(email),
+          ),
       ),
     );
 
@@ -902,7 +922,7 @@ const updateCandidate = async (req, res) => {
 
     const updatedCandidate = {
       ...candidate,
-      email: newEmail,
+      email: normalizeEmail(newEmail),
       mobile: {
         countryCode: candidate.mobile?.countryCode || "+91",
         number: newMobile || candidate.mobile?.number,
