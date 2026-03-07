@@ -1075,6 +1075,38 @@ const generateCombinedAudioVideoSubjectivePrompt = (
   const videoNumber = videoConfig ? videoConfig.number : 0;
   const subjectiveNumber = subjectiveConfig ? subjectiveConfig.number : 0;
 
+  const audioPromptText = (
+    audioConfig?.promptText ||
+    audioConfig?.customPrompt ||
+    ""
+  ).trim();
+  const videoPromptText = (
+    videoConfig?.promptText ||
+    videoConfig?.customPrompt ||
+    ""
+  ).trim();
+  const subjectivePromptText = (
+    subjectiveConfig?.promptText ||
+    subjectiveConfig?.customPrompt ||
+    ""
+  ).trim();
+
+  const audioComplexity =
+    audioConfig?.complexity &&
+    ["Easy", "Medium", "Hard"].includes(audioConfig.complexity)
+      ? audioConfig.complexity
+      : null;
+  const videoComplexity =
+    videoConfig?.complexity &&
+    ["Easy", "Medium", "Hard"].includes(videoConfig.complexity)
+      ? videoConfig.complexity
+      : null;
+  const subjectiveComplexity =
+    subjectiveConfig?.complexity &&
+    ["Easy", "Medium", "Hard"].includes(subjectiveConfig.complexity)
+      ? subjectiveConfig.complexity
+      : null;
+
   const totalNumber = audioNumber + videoNumber + subjectiveNumber;
 
   // Calculate scenario-based questions (<= 25% of total)
@@ -1144,6 +1176,14 @@ skillName: "${skillName}"
    - Questions should resemble **real Assessment questions**, not academic exams.
    - Focus on decision-making, reasoning, and practical application.
 
+${
+  audioComplexity || videoComplexity || subjectiveComplexity
+    ? `**Preferred Complexity** (adjust down if maxTime requires simpler problems):
+${audioComplexity ? `- Audio: ${audioComplexity}\n` : ""}${videoComplexity ? `- Video: ${videoComplexity}\n` : ""}${subjectiveComplexity ? `- Subjective: ${subjectiveComplexity}\n` : ""}
+
+`
+    : ""
+}
 Ensure all generated questions strictly follow the above constraints.
 
 CRITICAL UNIQUENESS REQUIREMENT:
@@ -1158,6 +1198,14 @@ SCENARIO-BASED QUESTION REQUIREMENT (${scenarioBasedCount} out of ${totalNumber}
 - Generate EXACTLY ${scenarioBasedCount} scenario-based, real-world questions based on ${skillName} only & are answerable within the specified maxTime for its question type
 - Distribute scenario-based questions across Audio, Video, and Subjective types proportionally based on ${skillName}
 
+${
+  audioPromptText || videoPromptText || subjectivePromptText
+    ? `**USER PROMPTS (HIGHEST PRIORITY - follow strictly)**:
+${audioPromptText ? `- For Audio questions: ${audioPromptText}\n` : ""}${videoPromptText ? `- For Video questions: ${videoPromptText}\n` : ""}${subjectivePromptText ? `- For Subjective questions: ${subjectivePromptText}\n` : ""}- Treat the user prompt as the top priority for scenario, focus, and constraints.
+
+`
+    : ""
+}
 Question Distribution:
 ${
   audioNumber > 0
