@@ -31,6 +31,12 @@ const initializeProgrammingProcessor = (dependencies) => {
 const extractCandidateCode = (code, starterCode, languageId) => {
   if (!starterCode || !code) return code;
 
+  // Normalize both for comparison
+  const normalize = (c) => c.replace(/\s+/g, " ").trim();
+  if (normalize(code) === normalize(starterCode)) {
+    return ""; // Pure boilerplate
+  }
+
   // For Java, handle class wrapper specially
   if (languageId === 62 || languageId === 91) {
     const methodMatch = code.match(
@@ -42,19 +48,28 @@ const extractCandidateCode = (code, starterCode, languageId) => {
   }
 
   // General approach: remove lines that exist in starter code
-  const starterLines = starterCode
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l);
+  const starterLines = new Set(
+    starterCode
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l),
+  );
   const codeLines = code.split("\n");
 
   const candidateLines = codeLines.filter((line) => {
     const trimmed = line.trim();
-    // Keep if not in starter code
-    return !starterLines.includes(trimmed);
+    // Keep if not in starter code OR if it's a significant implementation line
+    return !trimmed || !starterLines.has(trimmed);
   });
 
-  return candidateLines.join("\n").trim();
+  const extracted = candidateLines.join("\n").trim();
+
+  // Final check: if the extracted code is just a few braces/comments, it's boilerplate
+  if (extracted.replace(/[\s{};/]+/g, "").length < 5) {
+    return "";
+  }
+
+  return extracted;
 };
 
 /**
@@ -250,6 +265,7 @@ const processProgrammingResponse = async (responseData) => {
         analyticalThinking: aiAnalysis.analyticalThinking,
         problemSolvingAbility: aiAnalysis.problemSolvingAbility,
         overallAssessment: aiAnalysis.overallAssessment,
+        isBoilerplateOnly: false, // Explicitly mark as NOT boilerplate
       },
       tokenUsage,
       processingCost,

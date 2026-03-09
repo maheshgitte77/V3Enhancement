@@ -93,7 +93,7 @@ const extractTokenUsage = (result, prompt, aiResponse, questionId) => {
     };
     logger.info(
       "Token usage captured via response.usageMetadata",
-      capturedTokenUsage
+      capturedTokenUsage,
     );
   }
   // Strategy 2: Root level usageMetadata
@@ -105,7 +105,7 @@ const extractTokenUsage = (result, prompt, aiResponse, questionId) => {
     };
     logger.info(
       "Token usage captured via root usageMetadata",
-      capturedTokenUsage
+      capturedTokenUsage,
     );
   }
   // Strategy 3: Alternative field names
@@ -123,7 +123,7 @@ const extractTokenUsage = (result, prompt, aiResponse, questionId) => {
     };
     logger.info(
       "Token usage captured via alternative field names",
-      capturedTokenUsage
+      capturedTokenUsage,
     );
   }
   // Strategy 4: Estimate from content length
@@ -160,7 +160,25 @@ const parseAIResponse = (aiResponse, attempt, maxRetries) => {
     }
 
     // Parse JSON
-    const parsedAnalysis = JSON.parse(jsonText);
+    let parsedAnalysis;
+    try {
+      parsedAnalysis = JSON.parse(jsonText);
+    } catch (initialError) {
+      logger.warn("Initial JSON parse failed, attempting repair", {
+        attempt,
+        error: initialError.message,
+      });
+
+      // Try to repair truncated JSON
+      const repairedJson = tryRepairJson(jsonText);
+      try {
+        parsedAnalysis = JSON.parse(repairedJson);
+        logger.info("Successfully repaired truncated JSON", { attempt });
+      } catch (repairError) {
+        // If repair fails, re-throw the original error
+        throw initialError;
+      }
+    }
 
     logger.info("Successfully parsed AI response", {
       attempt,
@@ -180,14 +198,88 @@ const parseAIResponse = (aiResponse, attempt, maxRetries) => {
 
     if (attempt < maxRetries) {
       throw new Error(
-        `JSON parsing failed (attempt ${attempt}/${maxRetries}): ${parseError.message}`
+        `JSON parsing failed (attempt ${attempt}/${maxRetries}): ${parseError.message}`,
       );
     } else {
       throw new Error(
-        `Failed to parse AI response after ${maxRetries} attempts: ${parseError.message}`
+        `Failed to parse AI response after ${maxRetries} attempts: ${parseError.message}`,
       );
     }
   }
+};
+
+/**
+ * Attempt to repair truncated JSON by closing open braces and brackets
+ */
+const tryRepairJson = (json) => {
+  let repaired = json.trim();
+
+  // If it doesn't even start with {, we can't do much
+  if (!repaired.startsWith("{")) return repaired;
+
+  // Find the last valid character (not whitespace)
+  let lastCharIndex = repaired.length - 1;
+  while (lastCharIndex >= 0 && /\s/.test(repaired[lastCharIndex])) {
+    lastCharIndex--;
+  }
+  repaired = repaired.substring(0, lastCharIndex + 1);
+
+  // Stack to track open structures
+  const stack = [];
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < repaired.length; i++) {
+    const char = repaired[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escape = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === "{" || char === "[") {
+        stack.push(char === "{" ? "}" : "]");
+      } else if (char === "}" || char === "]") {
+        if (stack.length > 0 && stack[stack.length - 1] === char) {
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  // If we are left in a string, close it
+  if (inString) {
+    repaired += '"';
+  }
+
+  // Handle cases where it's cut off mid-key or mid-value
+  // Remove trailing comma if present
+  if (repaired.endsWith(",")) {
+    repaired = repaired.substring(0, repaired.length - 1);
+  }
+
+  // If the last character is a colon, it's cut off at the value
+  if (repaired.endsWith(":")) {
+    repaired += " null";
+  }
+
+  // Close all open structures in reverse order
+  while (stack.length > 0) {
+    repaired += stack.pop();
+  }
+
+  return repaired;
 };
 
 /**
@@ -214,7 +306,7 @@ const executeAICall = async (
   prompt,
   responseData,
   stage,
-  maxRetries = 3
+  maxRetries = 3,
 ) => {
   const RETRY_BASE_DELAY = 2000;
   const aiTimeoutMs = V2_CONFIG?.ai?.timeoutMs || DEFAULT_AI_TIMEOUT_MS;
@@ -235,6 +327,10 @@ const executeAICall = async (
         client.models.generateContent({
           model: V2_CONFIG.ai.model,
           contents: [...fileInput, { text: prompt }],
+          generationConfig: {
+            maxOutputTokens: 2048,
+            temperature: 0.1, // Lower temperature for more consistent JSON
+          },
         }),
         createAITimeout(aiTimeoutMs, stage),
       ]);
@@ -246,7 +342,7 @@ const executeAICall = async (
         result,
         prompt,
         aiResponse,
-        responseData?.questionId
+        responseData?.questionId,
       );
 
       // Parse response
@@ -269,13 +365,13 @@ const executeAICall = async (
           stack: error.stack,
           questionId: responseData?.questionId,
           isTimeout,
-        }
+        },
       );
 
       // If this was the last attempt, throw error
       if (attempt === maxRetries) {
         throw new Error(
-          `Stage ${stage} failed after ${maxRetries} attempts: ${error.message}`
+          `Stage ${stage} failed after ${maxRetries} attempts: ${error.message}`,
         );
       }
 
@@ -319,14 +415,14 @@ const executeBehavioralAnalysis = async (fileInput, responseData, type) => {
     prompt,
     responseData,
     "1-Behavioral",
-    3 // maxRetries
+    3, // maxRetries
   );
 
   // Calculate cost
   const processingCost = calculateProcessingCost(
     tokenUsage.inputTokens,
     tokenUsage.outputTokens,
-    type
+    type,
   );
 
   const duration = Date.now() - startTime;
@@ -371,14 +467,14 @@ const executeScoring = async (stage1Results, responseData, type) => {
     prompt,
     responseData,
     "2-Scoring",
-    3 // maxRetries
+    3, // maxRetries
   );
 
   // Calculate cost (use 'text' for scoring since it's transcript-based)
   const processingCost = calculateProcessingCost(
     tokenUsage.inputTokens,
     tokenUsage.outputTokens,
-    "text"
+    "text",
   );
 
   const duration = Date.now() - startTime;
@@ -407,7 +503,7 @@ const executeScoring = async (stage1Results, responseData, type) => {
  */
 const executeSubjectiveScoring = async (
   responseData,
-  typingAnalysis = null
+  typingAnalysis = null,
 ) => {
   logger.info("Stage 1: Starting subjective scoring", {
     questionId: responseData?.questionId,
@@ -425,14 +521,14 @@ const executeSubjectiveScoring = async (
     prompt,
     responseData,
     "1-Subjective-Scoring",
-    3 // maxRetries
+    3, // maxRetries
   );
 
   // Calculate cost
   const processingCost = calculateProcessingCost(
     tokenUsage.inputTokens,
     tokenUsage.outputTokens,
-    "text"
+    "text",
   );
 
   const duration = Date.now() - startTime;
@@ -475,7 +571,7 @@ const executeProgrammingAnalysis = async (responseData) => {
     prompt,
     responseData,
     "1-ProgrammingAnalysis",
-    3 // maxRetries
+    3, // maxRetries
   );
 
   // Remove grade field if it exists (backward compatibility with old prompts)
@@ -487,7 +583,7 @@ const executeProgrammingAnalysis = async (responseData) => {
   const processingCost = calculateProcessingCost(
     tokenUsage.inputTokens,
     tokenUsage.outputTokens,
-    "text"
+    "text",
   );
 
   const duration = Date.now() - startTime;

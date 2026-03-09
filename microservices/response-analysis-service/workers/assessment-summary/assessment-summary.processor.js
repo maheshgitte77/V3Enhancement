@@ -114,13 +114,19 @@ const buildTechnicalContext = (assessmentResult, aiLogics = []) => {
                     );
                     if (aiLogic) {
                       if (aiLogic.isBoilerplateOnly) {
-                        context += `  - AI ANALYSIS: !! STARTER CODE SUBMITTED (NO CHANGES DETECTED) !!\n`;
+                        context += `  - STATUS: !! STARTER CODE SUBMITTED (NO CHANGES DETECTED) !!\n`;
                         context += `  - AI Feedback: ${aiLogic.logicalCorrectness?.reasoning || "The candidate submitted the starter code as is without implementing logic."}\n`;
                       } else {
+                        context += `  - STATUS: ANALYZED SUCCESS\n`;
                         context += `  - AI Logical Quality: ${aiLogic.logicalCorrectness?.score || 0}% | Code Quality: ${aiLogic.codeQuality?.score || 0}%\n`;
                         context += `  - AI Analysis: ${aiLogic.logicalCorrectness?.reasoning || "Logic matches requirements."}\n`;
                       }
+                    } else if (q.obtainedScore > 0) {
+                      // Question has score but AI logic is missing
+                      context += `  - STATUS: !! LOGIC IMPLEMENTED BUT AI ANALYSIS FAILED/TIMEOUT !!\n`;
+                      context += `  - NOTE: Candidate's code passed test cases (Score: ${score}), but detailed AI feedback is currently unavailable.\n`;
                     } else {
+                      context += `  - STATUS: UNKNOWN (Analysis Pending or Not Available)\n`;
                       context += `  - AI Analysis: Still Processing or not available.\n`;
                     }
                   }

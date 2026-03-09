@@ -1254,10 +1254,11 @@ ${metadata.technicalContext || "No detailed question-level data available."}
 
 **AI INSTRUCTION FOR SUMMARY:**
 - Base your analysis on the provided scores, integrity indicators, and the detailed TECHNICAL BREAKDOWN.
-- In the summary, mention specific skills or question types where the candidate excelled or struggled (e.g., "Excelled in Hard Programming tasks but struggled with Medium SQL queries").
-- If MCQ scores are high but practical scores (Programming/SQL) are low, highlight the gap between theory and practice.
-- If integrity score is low, mention the "Area to Watch" accordingly.
-- If the TECHNICAL BREAKDOWN indicates "STARTER CODE SUBMITTED (NO CHANGES DETECTED)" for a programming question, the summary MUST explicitly state that the candidate submitted the original starter code without making any modifications.
+- **PRIORITIZE SUCCESS**: If the candidate successfully implemented logic in ANY question (evidenced by high scores or "ANALYZED SUCCESS" status), highlight this as a primary achievement, even if other questions were not attempted or submitted as starter code.
+- **MIXED PERFORMANCE**: For assessments with both successful logic and starter-code submissions, clearly differentiate between them (e.g., "The candidate demonstrated strong algorithmic skills in JavaScript basics but did not attempt the advanced sorting question, submitting only the starter template").
+- **ANALYSIS FAILURES**: If a question has high score but "AI ANALYSIS FAILED/TIMEOUT", acknowledge the correct logic implementation based on the score while noting that detailed quality feedback for that specific question is limited.
+- **STARTER CODE RULE**: Only mention "candidate submitted starter code" if it's a significant part of the assessment. If the TECHNICAL BREAKDOWN indicates "STARTER CODE SUBMITTED (NO CHANGES DETECTED)" for a question, state it specifically for that question rather than generalizing to the entire assessment unless it applies to all.
+- Mention specific skills or question types where the candidate excelled or struggled (e.g., "Excelled in Hard Programming tasks but struggled with Medium SQL queries").
 - Ensure the summary reflects the specific technical context of the assessment.
 - DO NOT mention "Programming" if it wasn't part of the test (N/A). Stick to what was actually tested.
 
