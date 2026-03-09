@@ -11,6 +11,7 @@ const JobApplication = require("../model/JobApplication");
 const { ObjectId } = require("mongodb");
 const mongoose = require("mongoose");
 const creditServiceClient = require("../utils/creditServiceClient");
+const { normalizeEmail, escapeRegex } = require("../utils/emailUtils");
 
 dotenv.config();
 
@@ -351,7 +352,13 @@ async function checkCandidateStatus(
     };
   }
 
-  if (processedEmails.includes(email)) {
+  const normalizedEmail = normalizeEmail(email);
+
+  // Case-insensitive batch duplicate check
+  const isBatchDuplicate = processedEmails.some(
+    (e) => normalizeEmail(e) === normalizedEmail
+  );
+  if (isBatchDuplicate) {
     return {
       status: "Duplicate",
       details: "Resume is a duplicate in this batch.",
@@ -359,7 +366,12 @@ async function checkCandidateStatus(
     };
   }
 
-  const existingApplication = await JobApplication.findOne({ email, jobId });
+  // Case-insensitive DB lookup (handles existing records with mixed case)
+  const escapedEmail = escapeRegex(normalizedEmail);
+  const existingApplication = await JobApplication.findOne({
+    email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
+    jobId,
+  });
   if (existingApplication) {
     return {
       status: "AlreadyAdded",
@@ -385,7 +397,7 @@ async function checkCandidateStatus(
   const clientJobIds = clientJobs.map((job) => job._id);
 
   const latestApplication = await JobApplication.findOne({
-    email,
+    email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
     jobId: { $in: clientJobIds, $ne: jobId },
     status: { $nin: ["Applied", "Added"] },
   }).sort({ updatedAt: -1 });
@@ -639,7 +651,9 @@ const processResume = async (data, topic, reqId, partition, retryCount = 0) => {
       throw new Error("Invalid resume format: Failed to parse JSON");
     }
 
-    const email = parsedAnalysis?.analysis?.email;
+    const rawEmail = parsedAnalysis?.analysis?.email;
+    const email = normalizeEmail(rawEmail);
+    parsedAnalysis.analysis = { ...parsedAnalysis.analysis, email };
     const name = parsedAnalysis?.analysis?.name;
 
     // Email format regex

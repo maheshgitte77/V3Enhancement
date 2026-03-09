@@ -15,6 +15,7 @@ const Candidate =
 const CandidateJourney = require("../model/CandidateJourney");
 const creditServiceClient = require("../utils/creditServiceClient");
 const ActionCreditValidator = require("../middleware/ActionCreditValidator.middleware");
+const { normalizeEmail, escapeRegex } = require("../utils/emailUtils");
 
 const supportedExtensions = new Set([
   "pdf",
@@ -379,9 +380,10 @@ const addToJobApplication = async (req, res) => {
     const notFoundEmails = [];
 
     for (const email of emails) {
+      const normalizedEmail = normalizeEmail(email);
       const matchingRecord = jobDataList.find(
         (record) =>
-          (record.email === email &&
+          (normalizeEmail(record.email) === normalizedEmail &&
             record.jobId === jobId &&
             record.status === "Valid") ||
           changeStatus === "Valid",
@@ -390,6 +392,7 @@ const addToJobApplication = async (req, res) => {
       if (matchingRecord) {
         recordsToAdd.push({
           ...matchingRecord,
+          email: normalizedEmail,
           status: "Added",
           InvitedOn,
           ExpiredOn,
@@ -400,13 +403,14 @@ const addToJobApplication = async (req, res) => {
     }
 
     for (const email of notFoundEmails) {
-      const cacheKey = `resume:${email}:${jobId}`;
+      const cacheKey = `resume:${normalizeEmail(email)}:${jobId}`;
       const cachedData = await redis.get(cacheKey);
 
       if (cachedData) {
         const analysis = JSON.parse(cachedData);
         const jobData = {
           ...analysis,
+          email: normalizeEmail(email),
           jobId,
           status: "Added",
           ExpiredOn,
@@ -424,10 +428,15 @@ const addToJobApplication = async (req, res) => {
     }
 
     const bulkOps = recordsToAdd.map((record) => {
+      const normalizedRecordEmail = normalizeEmail(record.email);
+      const escapedEmail = escapeRegex(normalizedRecordEmail);
       return {
         updateOne: {
-          filter: { jobId: record.jobId, email: record.email },
-          update: { $set: record },
+          filter: {
+            jobId: record.jobId,
+            email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
+          },
+          update: { $set: { ...record, email: normalizedRecordEmail } },
           upsert: true,
         },
       };
@@ -439,10 +448,10 @@ const addToJobApplication = async (req, res) => {
 
     // Add CandidateJourney entries for each JobApplication
     try {
-      // Fetch all JobApplications that were just created/updated
+      // Fetch all JobApplications that were just created/updated (use normalized email)
       const jobApplicationQueries = recordsToAdd.map((record) => ({
         jobId: new ObjectId(record.jobId),
-        email: record.email,
+        email: normalizeEmail(record.email),
       }));
 
       const jobApplications = await JobApplication.find({
@@ -524,8 +533,8 @@ const addToJobApplication = async (req, res) => {
                   }
                 : undefined;
 
-            // Validate and clean the email
-            const email = record.email?.toLowerCase()?.trim();
+            // Validate and clean the email (normalize for consistency)
+            const email = normalizeEmail(record.email);
             if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
               console.warn(`Invalid email for candidate: ${record.email}`);
               return null; // Skip this record
@@ -628,9 +637,12 @@ const addToJobApplication = async (req, res) => {
               return null; // Skip this record
             }
 
+            const escapedCandidateEmail = escapeRegex(candidateDoc.email);
             return {
               updateOne: {
-                filter: { email: candidateDoc.email },
+                filter: {
+                  email: { $regex: new RegExp(`^${escapedCandidateEmail}$`, "i") },
+                },
                 // Update existing candidate profiles or create if missing
                 update: { $set: candidateDoc },
                 upsert: true,
@@ -693,14 +705,30 @@ const addToJobApplication = async (req, res) => {
     }));
     try {
       // Notify external service
+      const serviceKey =
+        process.env.INTERNAL_SERVICE_KEY ||
+        process.env.COMMUNICATION_SERVICE_KEY;
+
+      const formData = new FormData();
+      formData.append("jobId", jobId.toString());
+      if (ExpiredOn) {
+        formData.append("expiryDate", new Date(ExpiredOn).toISOString());
+      }
+      formData.append("candidateList", JSON.stringify(candidateList));
+      if (channelId) {
+        formData.append("channelId", channelId.toString());
+      }
+      if (clientId) {
+        formData.append("clientId", clientId.toString());
+      }
 
       await axios.post(
         `${process.env.NOTIFICATION_SER_URL}/coreServiceHandler/add-resume-bulk-Invite`,
+        formData,
         {
-          jobId,
-          expiryDate: ExpiredOn,
-          candidateList,
-          channelId, // For credit tracking
+          headers: {
+            ...(serviceKey ? { "x-service-key": serviceKey } : {}),
+          },
         },
       );
     } catch (error) {
@@ -714,7 +742,10 @@ const addToJobApplication = async (req, res) => {
       message: "Successfully added records to JobApplication",
       addedRecords: recordsToAdd.length,
       notFoundEmails: notFoundEmails.filter(
-        (email) => !recordsToAdd.some((record) => record.email === email),
+        (email) =>
+          !recordsToAdd.some(
+            (record) => normalizeEmail(record.email) === normalizeEmail(email),
+          ),
       ),
     });
   } catch (error) {
@@ -786,8 +817,10 @@ const approveCandidates = async (req, res) => {
     const updatedRecords = [];
     const notFoundEmails = [];
 
+    const normalizedEmails = new Set(emails.map((e) => normalizeEmail(e)));
     jobDataList = jobDataList.map((record) => {
-      if (emails.includes(record.email) && record.jobId === jobId) {
+      const recordEmailNorm = normalizeEmail(record.email);
+      if (normalizedEmails.has(recordEmailNorm) && record.jobId === jobId) {
         const updatedRecord = {
           ...record,
           status: "Valid",
@@ -801,7 +834,10 @@ const approveCandidates = async (req, res) => {
 
     notFoundEmails.push(
       ...emails.filter(
-        (email) => !updatedRecords.some((record) => record.email === email),
+        (email) =>
+          !updatedRecords.some(
+            (record) => normalizeEmail(record.email) === normalizeEmail(email),
+          ),
       ),
     );
 
@@ -896,7 +932,7 @@ const updateCandidate = async (req, res) => {
 
     const updatedCandidate = {
       ...candidate,
-      email: newEmail,
+      email: normalizeEmail(newEmail),
       mobile: {
         countryCode: candidate.mobile?.countryCode || "+91",
         number: newMobile || candidate.mobile?.number,
@@ -1054,14 +1090,24 @@ function mergeAnalysisWithExisting(existing, analysis) {
   for (const field of fieldsToMerge) {
     const existingVal = existing[field];
     const analysisVal = analysis[field];
-    if (isEmpty(existingVal) && analysisVal !== undefined && analysisVal !== null) {
+    if (
+      isEmpty(existingVal) &&
+      analysisVal !== undefined &&
+      analysisVal !== null
+    ) {
       if (Array.isArray(analysisVal) && analysisVal.length > 0) {
         update[field] = analysisVal;
-      } else if (typeof analysisVal === "object" && !Array.isArray(analysisVal)) {
+      } else if (
+        typeof analysisVal === "object" &&
+        !Array.isArray(analysisVal)
+      ) {
         if (Object.keys(analysisVal).length > 0) update[field] = analysisVal;
       } else if (typeof analysisVal === "string" && analysisVal.trim() !== "") {
         update[field] = analysisVal;
-      } else if (typeof analysisVal === "number" && !Number.isNaN(analysisVal)) {
+      } else if (
+        typeof analysisVal === "number" &&
+        !Number.isNaN(analysisVal)
+      ) {
         update[field] = analysisVal;
       }
     }
@@ -1122,7 +1168,10 @@ const reAnalyzeResumes = async (req, res) => {
         code: "INVALID_PAYLOAD",
       });
     }
-    if (channelId != null && (typeof channelId !== "string" || !channelId.trim())) {
+    if (
+      channelId != null &&
+      (typeof channelId !== "string" || !channelId.trim())
+    ) {
       return res.status(400).json({
         error: "channelId must be a non-empty string when provided",
         code: "INVALID_PAYLOAD",
@@ -1137,16 +1186,19 @@ const reAnalyzeResumes = async (req, res) => {
       }
       if (jobApplicationIds.length > 0) {
         const invalidIds = jobApplicationIds.filter(
-          (id) => !id || !isValidObjectId(String(id).trim())
+          (id) => !id || !isValidObjectId(String(id).trim()),
         );
         if (invalidIds.length > 0) {
           return res.status(400).json({
-            error: "jobApplicationIds must contain valid 24-character hex ObjectIds",
+            error:
+              "jobApplicationIds must contain valid 24-character hex ObjectIds",
             code: "INVALID_PAYLOAD",
             invalidCount: invalidIds.length,
           });
         }
-        const uniqueIds = [...new Set(jobApplicationIds.map((id) => String(id).trim()))];
+        const uniqueIds = [
+          ...new Set(jobApplicationIds.map((id) => String(id).trim())),
+        ];
         if (uniqueIds.length !== jobApplicationIds.length) {
           return res.status(400).json({
             error: "jobApplicationIds must not contain duplicates",
@@ -1204,11 +1256,10 @@ const reAnalyzeResumes = async (req, res) => {
           skills: 1,
           jobRoleId: 1,
         },
-      }
+      },
     );
 
-    const jobDescription =
-      job?.description || job?.jobDescription || "";
+    const jobDescription = job?.description || job?.jobDescription || "";
     const primarySkills = Array.isArray(job?.skills?.requiredSkills)
       ? job.skills.requiredSkills.join(",")
       : job?.skills?.requiredSkills || "";
@@ -1216,10 +1267,11 @@ const reAnalyzeResumes = async (req, res) => {
       ? job.skills.goodToHaveSkills.join(",")
       : job?.skills?.goodToHaveSkills || "";
 
-    const validation = await ActionCreditValidator.validateResumeAnalysisCredits(
-      clientId,
-      applications.length
-    );
+    const validation =
+      await ActionCreditValidator.validateResumeAnalysisCredits(
+        clientId,
+        applications.length,
+      );
 
     if (!validation.sufficient) {
       return res.status(402).json({
@@ -1237,7 +1289,10 @@ const reAnalyzeResumes = async (req, res) => {
 
     const fileService = require("../utils/fileService");
     const File = require("../model/File");
-    const { analyzeResumeForReAnalysis, supportedExtensions } = require("../services/resumeAnalysisService");
+    const {
+      analyzeResumeForReAnalysis,
+      supportedExtensions,
+    } = require("../services/resumeAnalysisService");
     const fs = require("fs").promises;
     const path = require("path");
     const uploadsDir = path.join(__dirname, "../Uploads");
@@ -1252,7 +1307,11 @@ const reAnalyzeResumes = async (req, res) => {
         .select("extension name")
         .lean();
       fileDocs.forEach((f) => {
-        const ext = (f.extension || f.name?.split(".").pop() || "pdf").toLowerCase();
+        const ext = (
+          f.extension ||
+          f.name?.split(".").pop() ||
+          "pdf"
+        ).toLowerCase();
         fileMetaMap[f._id.toString()] = ext;
       });
     }
@@ -1266,13 +1325,20 @@ const reAnalyzeResumes = async (req, res) => {
       try {
         const fileId = app.resumeFileId?.toString?.() || app.resumeFileId;
         if (!fileId) {
-          results.push({ jobApplicationId: app._id, status: "skipped", error: "No resumeFileId" });
+          results.push({
+            jobApplicationId: app._id,
+            status: "skipped",
+            error: "No resumeFileId",
+          });
           failed++;
           return;
         }
 
         const ext = fileMetaMap[fileId] || "pdf";
-        tempPath = path.join(uploadsDir, `reanalyze-${app._id}-${Date.now()}.${ext}`);
+        tempPath = path.join(
+          uploadsDir,
+          `reanalyze-${app._id}-${Date.now()}.${ext}`,
+        );
         const downloaded = await fileService.downloadFileToTemp({
           fileId,
           destinationPath: tempPath,
@@ -1309,7 +1375,7 @@ const reAnalyzeResumes = async (req, res) => {
         if (Object.keys(updateFields).length > 0) {
           await JobApplication.updateOne(
             { _id: app._id },
-            { $set: updateFields }
+            { $set: updateFields },
           );
         }
 

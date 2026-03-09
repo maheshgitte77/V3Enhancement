@@ -170,6 +170,41 @@ const ensureTopics = async () => {
             if (requestInfo.timeoutId) {
               clearTimeout(requestInfo.timeoutId);
             }
+
+            // --- Credit System Integration ---
+            try {
+              const tokenUsage = responseData.tokenUsage || {};
+              const inputTokens = tokenUsage.promptTokens || 0;
+              const outputTokens = tokenUsage.completionTokens || 0;
+              const { clientId, channelId, jobId, tempId } = requestInfo;
+
+              if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+                await CreditServiceClient.deductAiUsage({
+                  clientId,
+                  modelId: "gemini-2.0-flash",
+                  referenceId: `ai_code_gen_${key}`,
+                  inputTokens,
+                  outputTokens,
+                  meta: {
+                    type: "ai_code_generation",
+                    serviceKey: "AI_CODE_GENERATION",
+                  },
+                  channelId,
+                  jobId,
+                  tempId,
+                });
+                console.log(
+                  `💰 AI Credits deducted for boilerplate (ClientId: ${clientId})`,
+                );
+              }
+            } catch (creditError) {
+              console.error(
+                "❌ AI Credit deduction failed (Non-blocking):",
+                creditError.message,
+              );
+            }
+            // ---------------------------------
+
             requestInfo.res
               .status(200)
               .json(responseData.boilerplateResponse || {});
@@ -200,6 +235,7 @@ const ensureTopics = async () => {
                 promptTokens: 0,
                 completionTokens: 0,
                 totalTokens: 0,
+                codeExecutionUnits: 0,
               },
             };
           }
@@ -212,6 +248,7 @@ const ensureTopics = async () => {
               completionTokens: typeTokenUsage.completionTokens || 0,
               totalTokens: typeTokenUsage.totalTokens || 0,
               batches: typeTokenUsage.batches || [], // For Programming batches
+              codeExecutionUnits: typeTokenUsage.codeExecutionUnits || 0, // For Code Executions
             };
 
             // Add to total
@@ -221,6 +258,8 @@ const ensureTopics = async () => {
               typeTokenUsage.completionTokens || 0;
             requestInfo.tokenUsage.total.totalTokens +=
               typeTokenUsage.totalTokens || 0;
+            requestInfo.tokenUsage.total.codeExecutionUnits +=
+              typeTokenUsage.codeExecutionUnits || 0;
           }
 
           if (!categoryCache[categoryName]) {
@@ -337,7 +376,7 @@ const ensureTopics = async () => {
             if (requestInfo.tokenUsage) {
               console.log(`\n📊 Token Usage Summary for Request ${key}:`);
               console.log(
-                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens})`,
+                `Total: ${requestInfo.tokenUsage.total.totalTokens} tokens (Prompt: ${requestInfo.tokenUsage.total.promptTokens}, Completion: ${requestInfo.tokenUsage.total.completionTokens}), Code Executions: ${requestInfo.tokenUsage.total.codeExecutionUnits || 0}`,
               );
 
               // --- Credit System Integration ---
@@ -347,6 +386,8 @@ const ensureTopics = async () => {
               const inputTokens = requestInfo.tokenUsage.total.promptTokens;
               const outputTokens =
                 requestInfo.tokenUsage.total.completionTokens;
+              const codeExecutionUnits =
+                requestInfo.tokenUsage.total.codeExecutionUnits || 0;
 
               if (clientId && (inputTokens > 0 || outputTokens > 0)) {
                 try {
@@ -373,6 +414,26 @@ const ensureTopics = async () => {
                 } catch (creditError) {
                   console.error(
                     `❌ AI Credit deduction failed for Request ${key}:`,
+                    creditError.message,
+                  );
+                }
+              }
+
+              if (clientId && codeExecutionUnits > 0) {
+                try {
+                  await CreditServiceClient.deductUnitUsage({
+                    clientId,
+                    itemKey: "CODE_EXECUTION",
+                    serviceKey: "CODE_EXECUTION",
+                    units: codeExecutionUnits,
+                    referenceId: `ai_questions_code_exec_${key}`,
+                  });
+                  console.log(
+                    `💰 Unit Credits deducted for Request ${key} Code Executions (ClientId: ${clientId}, Units: ${codeExecutionUnits})`,
+                  );
+                } catch (creditError) {
+                  console.error(
+                    `❌ Unit Credit deduction failed for Request ${key}:`,
                     creditError.message,
                   );
                 }

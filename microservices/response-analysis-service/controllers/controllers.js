@@ -170,8 +170,8 @@ const downloadFileFromUri = async (fileUri, providedMimeType) => {
       (fileExtension.toLowerCase() === ".webm"
         ? "video/webm"
         : fileExtension.toLowerCase() === ".mp4"
-        ? "video/mp4"
-        : "video/webm");
+          ? "video/mp4"
+          : "video/webm");
 
     const fileStats = fs.statSync(downloadPath);
 
@@ -479,7 +479,7 @@ const analyzeSubjectiveV2_5 = async (req, res) => {
       }
     } else {
       logger.debug(
-        "No typing analysis provided - will proceed without typing data"
+        "No typing analysis provided - will proceed without typing data",
       );
     }
 
@@ -748,13 +748,19 @@ const analyzeProgrammingHTTP = async (req, res) => {
       });
     }
 
-    // Import programming processor
-    const programmingProcessor = require("../workers/programming-question/programming.processor");
-
     // Process asynchronously (don't block response)
     setImmediate(async () => {
       try {
-        await programmingProcessor.processProgrammingResponse(requestData);
+        if (!orchestrator.isInitialized()) {
+          logger.error(
+            "Processor not initialized for HTTP programming analysis",
+          );
+          return;
+        }
+        await orchestrator.processTypeWiseResponse({
+          ...requestData,
+          type: "programming",
+        });
         logger.info("Programming analysis completed via HTTP", {
           candidateScreeningId: requestData.candidateScreeningId,
           candidateAssessmentId: requestData.candidateAssessmentId,
@@ -863,6 +869,56 @@ const generateAssessmentSummaryHTTP = async (req, res) => {
   }
 };
 
+/**
+ * Recalculate screening rankings (e.g. after a candidate reset)
+ * Uses the same enhanced ranking logic as screening summary (calculateEnhancedRankingScores, compareScreeningsEnhanced)
+ * POST /api/response/v2.5/recalculateScreeningRankings
+ */
+const recalculateScreeningRankingsHTTP = async (req, res) => {
+  const { screeningAssessmentId } = req.body || {};
+
+  try {
+    if (!screeningAssessmentId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required parameter: screeningAssessmentId",
+      });
+    }
+
+    logger.info("Recalculating screening rankings", {
+      screeningAssessmentId,
+    });
+
+    const result = await summaryProcessor.calculateAndUpdateRankings(
+      null,
+      screeningAssessmentId
+    );
+
+    logger.info("Screening rankings recalculated successfully", {
+      screeningAssessmentId,
+      totalCandidates: result.totalCandidates,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Screening rankings recalculated",
+      screeningAssessmentId,
+      totalCandidates: result.totalCandidates,
+    });
+  } catch (error) {
+    logger.error("Error recalculating screening rankings", {
+      error: error.message,
+      stack: error.stack,
+      screeningAssessmentId,
+    });
+    return res.status(500).json({
+      success: false,
+      error: "Failed to recalculate screening rankings",
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   analyzeMediaResponseV2_5,
   analyzeSubjectiveV2_5,
@@ -870,4 +926,5 @@ module.exports = {
   healthCheckV2_5,
   analyzeProgrammingHTTP,
   generateAssessmentSummaryHTTP,
+  recalculateScreeningRankingsHTTP,
 };

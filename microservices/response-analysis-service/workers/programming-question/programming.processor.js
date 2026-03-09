@@ -14,9 +14,6 @@ let logger = console;
 let aiExecutor = null;
 let databaseHandler = null;
 
-// Import Credit Service Client for billing
-const CreditServiceClient = require("../../utils/creditServiceClient");
-
 /**
  * Initialize programming processor with dependencies
  */
@@ -274,66 +271,6 @@ const processProgrammingResponse = async (responseData) => {
         codeQuality: aiAnalysis.codeQuality,
       },
     });
-
-    // Deduct credits for AI programming analysis (non-blocking)
-    logger.info("Checking credit deduction requirements", {
-      hasClientId: !!responseData.clientId,
-      hasTokens: tokenUsage.totalTokens > 0,
-      clientId: responseData.clientId,
-      jobId: responseData.jobId,
-      channelId: responseData.channelId,
-      tokens: tokenUsage.totalTokens,
-      questionId,
-      contextType,
-    });
-
-    if (responseData.clientId && tokenUsage.totalTokens > 0) {
-      try {
-        await CreditServiceClient.deductAiUsage({
-          clientId: responseData.clientId,
-          modelId: "gemini-2.0-flash",
-          serviceKey: "AI_PROGRAMMING_ANALYSIS",
-          tokens: tokenUsage.totalTokens,
-          inputTokens: tokenUsage.inputTokens,
-          outputTokens: tokenUsage.outputTokens,
-          referenceId: `prog-analysis-${analysisId}`,
-          meta: {
-            questionId,
-            skill,
-            contextType,
-            analysisId,
-            ...(isAssessment && { candidateAssessmentId, assessmentId }),
-            ...(!isAssessment && { candidateScreeningId, screeningTestId }),
-          },
-          jobId: responseData.jobId,
-          channelId: responseData.channelId,
-          assessmentId: isAssessment ? assessmentId : undefined,
-          screeningAssessmentId: !isAssessment ? screeningTestId : undefined,
-        });
-        logger.info("Credit deducted for programming analysis", {
-          questionId,
-          contextType,
-          tokens: tokenUsage.totalTokens,
-          clientId: responseData.clientId,
-        });
-      } catch (creditError) {
-        logger.error("Failed to deduct credits for programming analysis", {
-          error: creditError.message,
-          questionId,
-          contextType,
-        });
-        // Non-blocking - analysis already saved
-      }
-    } else {
-      logger.warn("Credit deduction skipped for programming analysis", {
-        reason: !responseData.clientId ? "Missing clientId" : "No tokens used",
-        hasClientId: !!responseData.clientId,
-        clientId: responseData.clientId,
-        tokens: tokenUsage.totalTokens,
-        questionId,
-        contextType,
-      });
-    }
 
     const totalDuration = Date.now() - startTime;
 

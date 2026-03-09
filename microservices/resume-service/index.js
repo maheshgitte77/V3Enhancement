@@ -37,7 +37,7 @@ const redis = new Redis({
 redis.on("error", (err) => console.error("❌ Redis Client Error:", err));
 
 const kafkaBrokers = process.env.KAFKA_BROKER.split(",").map((broker) =>
-  broker.trim()
+  broker.trim(),
 );
 
 const kafka = new Kafka({
@@ -80,7 +80,7 @@ const createConsumerInstance = async (id) => {
           } catch (jsonError) {
             console.error(
               `❌ Consumer ${id} failed to parse JSON:`,
-              messageValue
+              messageValue,
             );
             return;
           }
@@ -122,7 +122,7 @@ const createConsumerInstance = async (id) => {
             if (requestInfo.expectedResponses > 1) {
               try {
                 await axios.post(
-                  `${process.env.NOTIFICATION_SERVICE_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`
+                  `${process.env.NOTIFICATION_SERVICE_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`,
                 );
 
                 const db = mongoose.connection.db;
@@ -133,7 +133,7 @@ const createConsumerInstance = async (id) => {
                       activeRequestId: requestId,
                       requestStatus: "Completed",
                     },
-                  }
+                  },
                 );
               } catch (error) {
                 console.error("Error while completing request:", error);
@@ -183,4 +183,6 @@ app.use((req, res, next) => {
 app.use("/resume", resumeScreeningRoutes);
 
 const PORT = process.env.PORT || 5010;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, "0.0.0.0", () =>
+  console.log(`Server running on port ${PORT}`),
+);
