@@ -113,8 +113,15 @@ const buildTechnicalContext = (assessmentResult, aiLogics = []) => {
                       (a) => a.questionId?.toString() === qId?.toString(),
                     );
                     if (aiLogic) {
-                      context += `  - AI Logical Quality: ${aiLogic.logicalCorrectness?.score || 0}% | Code Quality: ${aiLogic.codeQuality?.score || 0}%\n`;
-                      context += `  - AI Analysis: ${aiLogic.logicalCorrectness?.reasoning || "Logic matches requirements."}\n`;
+                      if (aiLogic.isBoilerplateOnly) {
+                        context += `  - AI ANALYSIS: !! STARTER CODE SUBMITTED (NO CHANGES DETECTED) !!\n`;
+                        context += `  - AI Feedback: ${aiLogic.logicalCorrectness?.reasoning || "The candidate submitted the starter code as is without implementing logic."}\n`;
+                      } else {
+                        context += `  - AI Logical Quality: ${aiLogic.logicalCorrectness?.score || 0}% | Code Quality: ${aiLogic.codeQuality?.score || 0}%\n`;
+                        context += `  - AI Analysis: ${aiLogic.logicalCorrectness?.reasoning || "Logic matches requirements."}\n`;
+                      }
+                    } else {
+                      context += `  - AI Analysis: Still Processing or not available.\n`;
                     }
                   }
                 });
@@ -460,6 +467,56 @@ const calculateTimeEfficiencyScore = (assessmentResult) => {
 };
 
 /**
+ * Wait for pending programming analyses to complete
+ */
+const waitForProgrammingAnalyses = async (
+  candidateAssessmentId,
+  assessmentResult,
+  maxRetries = 15,
+) => {
+  // Count how many programming questions were attempted
+  let attemptedCount = 0;
+  assessmentResult.testQuestions?.skills?.forEach((skill) => {
+    ["easyQuestions", "mediumQuestions", "hardQuestions"].forEach((level) => {
+      skill.programmingQuestions?.[level]?.forEach((q) => {
+        if (q.isAttempted) attemptedCount++;
+      });
+    });
+  });
+
+  if (attemptedCount === 0) return true;
+
+  logger.info(
+    `Checking for ${attemptedCount} programming analyses before summary...`,
+  );
+
+  for (let i = 0; i < maxRetries; i++) {
+    const analysisCount = await AssessmentProgrammingAnalysis.countDocuments({
+      candidateAssessmentId: candidateAssessmentId,
+    });
+
+    if (analysisCount >= attemptedCount) {
+      logger.info(
+        `Programming analyses ready: ${analysisCount}/${attemptedCount}`,
+      );
+      return true;
+    }
+
+    logger.info(
+      `Waiting for programming analyses... (${analysisCount}/${attemptedCount}), retry ${
+        i + 1
+      }/${maxRetries}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait 3 seconds
+  }
+
+  logger.warn(
+    `Proceeding with incomplete programming analyses after timeout (${maxRetries} retries)`,
+  );
+  return false;
+};
+
+/**
  * Process assessment summary
  * @param {Object} requestData - Request data from HTTP endpoint
  * @returns {Promise<Object>} Processing result
@@ -483,6 +540,11 @@ const processAssessmentSummary = async (requestData) => {
     if (!assessmentResult) {
       throw new Error("Assessment result not found");
     }
+
+    // 1.5 Wait for programming analyses if needed
+    // This ensures that if the candidate submitted a programming question as the last step,
+    // we wait for its AI analysis to complete before building the final summary.
+    await waitForProgrammingAnalyses(candidateAssessmentId, assessmentResult);
 
     // 2. Calculate Base Scores
     const candidateFitScore = calculateCandidateFitScore(assessmentResult);

@@ -1257,6 +1257,7 @@ ${metadata.technicalContext || "No detailed question-level data available."}
 - In the summary, mention specific skills or question types where the candidate excelled or struggled (e.g., "Excelled in Hard Programming tasks but struggled with Medium SQL queries").
 - If MCQ scores are high but practical scores (Programming/SQL) are low, highlight the gap between theory and practice.
 - If integrity score is low, mention the "Area to Watch" accordingly.
+- If the TECHNICAL BREAKDOWN indicates "STARTER CODE SUBMITTED (NO CHANGES DETECTED)" for a programming question, the summary MUST explicitly state that the candidate submitted the original starter code without making any modifications.
 - Ensure the summary reflects the specific technical context of the assessment.
 - DO NOT mention "Programming" if it wasn't part of the test (N/A). Stick to what was actually tested.
 
