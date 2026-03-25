@@ -2121,7 +2121,8 @@ ${mcqMode === "OUTPUT"
           ? `  * MODE=OUTPUT: Generate ALL ${number} questions as predicted-output questions with code snippets in QUESTION TEXT ONLY`
           : mcqMode === "THEORY"
             ? `  * MODE=THEORY: Generate ALL ${number} questions as theoretical/fundamentals questions with NO code snippets`
-            : `  * DEFAULT: Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers in QUESTION TEXT ONLY and exactly ${general} general questions (NO code)`
+            : `  * DEFAULT (MUST FOLLOW EXACTLY): Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers in QUESTION TEXT ONLY and exactly ${general} general questions (NO code)
+  * VALIDATION (MUST SELF-CHECK): Count the questions that contain [SNIPPET_START]. It MUST be exactly ${withCode}. Count the questions with NO [SNIPPET_START]. It MUST be exactly ${general}. If not, FIX before returning JSON.`
         }
 - IF NOT programming-related: Generate all ${number} questions as general (NO code snippets)
 - Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code in QUESTION TEXT - NO markdown fences (\`\`\`)
