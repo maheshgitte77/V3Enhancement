@@ -63,6 +63,42 @@ const validateFiles = (files) => {
   );
 };
 
+/** Keep jobs.totalResumes aligned with Redis batch length for analysisComplete / progress UI. */
+async function syncJobPendingResumeCount(jobId, remainingCount) {
+  if (!jobId || remainingCount == null || remainingCount < 1) return;
+  const db = mongoose.connection.db;
+  await db.collection("jobs").updateOne(
+    { _id: new ObjectId(jobId) },
+    { $set: { totalResumes: remainingCount } },
+  );
+}
+
+/** Clear pending resume batch markers when Redis is empty or Add & Invite completed. */
+async function clearJobResumeRequestBatchMeta(jobId) {
+  if (!jobId) return;
+  const db = mongoose.connection.db;
+  await db.collection("jobs").updateOne(
+    { _id: new ObjectId(jobId) },
+    {
+      $set: { activeRequestId: "", requestStatus: "Completed" },
+      $unset: { totalResumes: "" },
+    },
+  );
+}
+
+/** Clear batch meta by active request id (e.g. removeData). */
+async function clearJobResumeRequestBatchMetaByRequestId(requestId) {
+  if (!requestId) return;
+  const db = mongoose.connection.db;
+  await db.collection("jobs").updateOne(
+    { activeRequestId: requestId },
+    {
+      $set: { activeRequestId: "", requestStatus: "Completed" },
+      $unset: { totalResumes: "" },
+    },
+  );
+}
+
 const analyzeResumes = async (req, res) => {
   try {
     uploads(req, res, async (err) => {
@@ -177,6 +213,7 @@ const analyzeResumes = async (req, res) => {
             $set: {
               activeRequestId: requestId,
               requestStatus: "Pending",
+              totalResumes: validFiles.length,
             },
           },
         );
@@ -347,9 +384,26 @@ const getRequestData = async (req, res) => {
 
     const data = JSON.parse(jobDataList);
 
+    const db = mongoose.connection.db;
+    const job = await db.collection("jobs").findOne(
+      { activeRequestId: requestId },
+      { projection: { requestStatus: 1, totalResumes: 1 } },
+    );
+
+    const processed = data.length;
+    // Expected batch size for multi-upload; fall back to current Redis length if not stored (legacy jobs).
+    const total = job?.totalResumes ?? processed;
+    // All resumes analyzed and stored in Redis (independent of job.requestStatus, which may stay Pending until Add & Invite).
+    const analysisComplete = total > 0 && processed >= total;
+    const isCompleted = job?.requestStatus === "Completed";
+
     res.status(200).json({
       requestId,
       data: data,
+      total,
+      processed,
+      analysisComplete,
+      isCompleted,
     });
   } catch (error) {
     console.error("Error fetching request data:", error.message, error.stack);
@@ -689,14 +743,7 @@ const addToJobApplication = async (req, res) => {
     }
 
     await redis.del(redisKey);
-    // Use existing mongoose connection for schemaless operations
-    const db = mongoose.connection.db;
-    await db
-      .collection("jobs")
-      .updateOne(
-        { _id: new ObjectId(jobId) },
-        { $set: { activeRequestId: "", requestStatus: "Completed" } },
-      );
+    await clearJobResumeRequestBatchMeta(jobId);
 
     // Prepare candidate list for notification API
     const candidateList = recordsToAdd.map((candidate) => ({
@@ -768,6 +815,7 @@ const removeData = async (req, res) => {
   const redisKey = `request:${requestId}:jobData`;
   try {
     await redis.del(redisKey);
+    await clearJobResumeRequestBatchMetaByRequestId(requestId);
     res.status(200).json({
       message: "Successfully removed records.",
     });
@@ -999,23 +1047,16 @@ const deleteCandidates = async (req, res) => {
 
     if (updatedJobDataList.length === 0) {
       await redis.del(redisKey);
-
-      // Use existing mongoose connection for schemaless operations
-      const db = mongoose.connection.db;
-      await db.collection("jobs").updateOne(
-        { _id: new ObjectId(jobId) },
-        {
-          $set: {
-            activeRequestId: "",
-            requestStatus: "Completed",
-          },
-        },
-      );
+      await clearJobResumeRequestBatchMeta(jobId);
+    } else {
+      await syncJobPendingResumeCount(jobId, updatedJobDataList.length);
     }
 
     res.status(200).json({
       message: "Candidates deleted successfully",
       deletedCount: deletedIds.length,
+      remainingCount: updatedJobDataList.length,
+      requestCleared: updatedJobDataList.length === 0,
       notFoundIds: ids.filter((id) => !deletedIds.includes(id)),
     });
   } catch (error) {
