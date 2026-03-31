@@ -181,7 +181,7 @@ const ensureTopics = async () => {
               if (clientId && (inputTokens > 0 || outputTokens > 0)) {
                 await CreditServiceClient.deductAiUsage({
                   clientId,
-                  modelId: "gemini-2.0-flash",
+                  modelId: "gemini-2.5-flash",
                   referenceId: `ai_code_gen_${key}`,
                   inputTokens,
                   outputTokens,
@@ -393,7 +393,7 @@ const ensureTopics = async () => {
                 try {
                   await CreditServiceClient.deductAiUsage({
                     clientId,
-                    modelId: "gemini-2.0-flash",
+                    modelId: "gemini-2.5-flash",
                     referenceId: `ai_questions_${key}`,
                     inputTokens,
                     outputTokens,

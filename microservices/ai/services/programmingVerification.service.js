@@ -1,4 +1,6 @@
 const axios = require("axios");
+const crypto = require("crypto");
+const CreditServiceClient = require("../utils/creditServiceClient");
 const {
   getLanguageInstruction,
 } = require("../utils/judge0LanguageInstructions");
@@ -993,6 +995,13 @@ const generateLogicBlockOnly = async ({
   question,
   testCases,
   language,
+  clientId,
+  channelId,
+  jobId,
+  tempId,
+  requestId,
+  consumerId,
+  phase = "logic_block",
 }) => {
   // vLog("solution-generate", "Generating solution for language", {
   //     language: language.languageName,
@@ -1007,6 +1016,40 @@ const generateLogicBlockOnly = async ({
     2,
     500,
   );
+  // --- Credit System Integration (Logic block generation) ---
+  try {
+    const usage = response?.response?.usageMetadata;
+    const inputTokens = usage?.promptTokenCount || 0;
+    const outputTokens = usage?.candidatesTokenCount || 0;
+    if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+      const refHash = crypto
+        .createHash("sha1")
+        .update(
+          `${requestId || ""}|${consumerId || ""}|${phase}|${question?.questionTitle || ""}|${language?.languageId || language?.languageName || ""}`,
+        )
+        .digest("hex")
+        .slice(0, 16);
+      await CreditServiceClient.deductAiUsage({
+        clientId,
+        modelId: modelName || DEFAULT_MODEL,
+        referenceId: `ai_verify_logic_block_${refHash}`,
+        inputTokens,
+        outputTokens,
+        meta: {
+          type: "ai_code_generation",
+          serviceKey: "AI_CODE_GENERATION",
+          subType: "verification_logic_block",
+          phase,
+        },
+        channelId,
+        jobId,
+        tempId,
+      });
+    }
+  } catch (creditError) {
+    // Non-blocking
+  }
+  // ----------------------------------------------------------
   const text =
     response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = safeJsonParse(text);
@@ -1120,6 +1163,12 @@ const generateCompleteSolutionWithBoilerplate = async ({
   testCases,
   boilerplateCode,
   language,
+  clientId,
+  channelId,
+  jobId,
+  tempId,
+  requestId,
+  consumerId,
 }) => {
   const langInstruction = getLanguageInstruction(language.languageName);
   const isPython = detectLanguageFamily(language.languageName) === "python";
@@ -1173,6 +1222,42 @@ Return ONLY JSON:
 
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
   const response = await withRetry(() => model.generateContent(prompt), 2, 500);
+
+  // --- Credit System Integration (Complete solution generation) ---
+  // Deduct credits for this Gemini call. Use idempotent referenceId to avoid double charges on retries/replays.
+  try {
+    const usage = response?.response?.usageMetadata;
+    const inputTokens = usage?.promptTokenCount || 0;
+    const outputTokens = usage?.candidatesTokenCount || 0;
+    if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+      const refHash = crypto
+        .createHash("sha1")
+        .update(
+          `${requestId || ""}|${consumerId || ""}|complete_solution|${question?.questionTitle || ""}|${language?.languageId || language?.languageName || ""}`,
+        )
+        .digest("hex")
+        .slice(0, 16);
+      await CreditServiceClient.deductAiUsage({
+        clientId,
+        modelId: modelName || DEFAULT_MODEL,
+        referenceId: `ai_verify_complete_solution_${refHash}`,
+        inputTokens,
+        outputTokens,
+        meta: {
+          type: "ai_code_generation",
+          serviceKey: "AI_CODE_GENERATION",
+          subType: "verification_complete_solution",
+        },
+        channelId,
+        jobId,
+        tempId,
+      });
+    }
+  } catch (creditError) {
+    // Non-blocking
+  }
+  // ---------------------------------------------------------------
+
   const text =
     response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = safeJsonParse(text);
@@ -1197,6 +1282,12 @@ const reEvaluateTestCases = async ({
   question,
   testCases,
   languagePassSummary,
+  clientId,
+  channelId,
+  jobId,
+  tempId,
+  requestId,
+  consumerId,
 }) => {
   // Prepare language summary for AI (only languageName, passed, total)
   const langSummary = languagePassSummary.map((lang) => ({
@@ -1224,6 +1315,40 @@ If correct: correctedTestCases=[]. If wrong: same-length array with fixed output
 
   const model = genAI.getGenerativeModel({ model: modelName || DEFAULT_MODEL });
   const response = await withRetry(() => model.generateContent(prompt), 2, 500);
+  // --- Credit System Integration (Test case re-evaluation) ---
+  try {
+    const usage = response?.response?.usageMetadata;
+    const inputTokens = usage?.promptTokenCount || 0;
+    const outputTokens = usage?.candidatesTokenCount || 0;
+    if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+      const refHash = crypto
+        .createHash("sha1")
+        .update(
+          `${requestId || ""}|${consumerId || ""}|testcase_eval|${question?.questionTitle || ""}`,
+        )
+        .digest("hex")
+        .slice(0, 16);
+      await CreditServiceClient.deductAiUsage({
+        clientId,
+        modelId: modelName || DEFAULT_MODEL,
+        referenceId: `ai_verify_testcase_eval_${refHash}`,
+        inputTokens,
+        outputTokens,
+        meta: {
+          type: "ai_code_generation",
+          serviceKey: "AI_CODE_GENERATION",
+          subType: "verification_testcase_eval",
+          phase: "3.5",
+        },
+        channelId,
+        jobId,
+        tempId,
+      });
+    }
+  } catch (creditError) {
+    // Non-blocking
+  }
+  // -----------------------------------------------------------
   const text =
     response?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = safeJsonParse(text);
@@ -1246,6 +1371,9 @@ const verifyOneProgrammingQuestion = async ({
   requestId,
   consumerId,
   clientId,
+  channelId,
+  jobId,
+  tempId,
 }) => {
   const workingQuestion = JSON.parse(JSON.stringify(question || {}));
   let totalExecutionUnits = 0; // Accumulates units across all execution phases
@@ -1311,6 +1439,13 @@ const verifyOneProgrammingQuestion = async ({
         question: workingQuestion,
         testCases: workingQuestion.testCases,
         language: state,
+        clientId,
+        channelId,
+        jobId,
+        tempId,
+        requestId,
+        consumerId,
+        phase: "3.1",
       });
       state.logicBlock = logicBlock;
       const injected = injectLogicIntoBoilerplate({
@@ -1478,6 +1613,12 @@ const verifyOneProgrammingQuestion = async ({
       question: workingQuestion,
       testCases: workingQuestion.testCases,
       languagePassSummary,
+      clientId,
+      channelId,
+      jobId,
+      tempId,
+      requestId,
+      consumerId,
     }).catch((err) => ({ _error: err }));
 
     const phase36SpeculativePromise = (async () => {
@@ -1500,6 +1641,12 @@ const verifyOneProgrammingQuestion = async ({
                 testCases: testCasesToUse,
                 boilerplateCode: origBp,
                 language: langState,
+                clientId,
+                channelId,
+                jobId,
+                tempId,
+                requestId,
+                consumerId,
               });
             return { langState, failingLang, completeSolution };
           } catch {
@@ -1672,6 +1819,12 @@ const verifyOneProgrammingQuestion = async ({
               testCases: testCasesToUse,
               boilerplateCode: originalBoilerplate,
               language: langState,
+              clientId,
+              channelId,
+              jobId,
+              tempId,
+              requestId,
+              consumerId,
             });
 
           langState.mergedCode = completeSolution;
@@ -1941,6 +2094,13 @@ const verifyOneProgrammingQuestion = async ({
             question: workingQuestion,
             testCases: workingQuestion.testCases,
             language: state,
+            clientId,
+            channelId,
+            jobId,
+            tempId,
+            requestId,
+            consumerId,
+            phase: "3.7",
           });
           state.logicBlock = logicBlock;
           const injected = injectLogicIntoBoilerplate({
@@ -2047,6 +2207,12 @@ const verifyOneProgrammingQuestion = async ({
                 testCases: testCasesToUse,
                 boilerplateCode: origBp,
                 language: langState,
+                clientId,
+                channelId,
+                jobId,
+                tempId,
+                requestId,
+                consumerId,
               });
             langState.mergedCode = completeSolution;
             return {
@@ -2171,6 +2337,45 @@ const verifyOneProgrammingQuestion = async ({
         })),
       });
 
+      // --- Credit System Integration (Verification Phase 3.8 boilerplate regen) ---
+      // Deduct credits for this extra Gemini call in verification.
+      // Use idempotent referenceId so retries or replays won't double-charge.
+      try {
+        const inputTokens = bpResult?.tokenUsage?.promptTokens || 0;
+        const outputTokens = bpResult?.tokenUsage?.completionTokens || 0;
+        if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+          const langKey = failedLangStates
+            .map((ls) => ls.languageId || ls.languageName)
+            .join(",");
+          const refHash = crypto
+            .createHash("sha1")
+            .update(
+              `${requestId || ""}|${consumerId || ""}|phase38_boilerplate|${workingQuestion.questionTitle || ""}|${langKey}`,
+            )
+            .digest("hex")
+            .slice(0, 16);
+          await CreditServiceClient.deductAiUsage({
+            clientId,
+            modelId: modelName || DEFAULT_MODEL,
+            referenceId: `ai_verify_boilerplate_${refHash}`,
+            inputTokens,
+            outputTokens,
+            meta: {
+              type: "ai_code_generation",
+              serviceKey: "AI_CODE_GENERATION",
+              subType: "verification_boilerplate_regen",
+              phase: "3.8",
+            },
+            channelId,
+            jobId,
+            tempId,
+          });
+        }
+      } catch (creditError) {
+        // Non-blocking: credit deduction failure should not fail verification
+      }
+      // ---------------------------------------------------------------
+
       const bpMap = bpResult.boilerplateCode || {};
       failedLangStates.forEach((ls) => {
         const newCode =
@@ -2198,6 +2403,13 @@ const verifyOneProgrammingQuestion = async ({
             question: workingQuestion,
             testCases: workingQuestion.testCases,
             language: state,
+            clientId,
+            channelId,
+            jobId,
+            tempId,
+            requestId,
+            consumerId,
+            phase: "3.8",
           });
           state.logicBlock = logicBlock;
           const injected = injectLogicIntoBoilerplate({
@@ -2356,6 +2568,9 @@ const verifyProgrammingQuestions = async ({
   requestId = "",
   consumerId = "",
   clientId = "",
+  channelId,
+  jobId,
+  tempId,
 }) => {
   // vLog("verify-batch", "Starting programming verification batch", {
   //     requestId,
@@ -2373,6 +2588,9 @@ const verifyProgrammingQuestions = async ({
         requestId,
         consumerId,
         clientId,
+        channelId,
+        jobId,
+        tempId,
       });
       const result =
         VERIFICATION_QUESTION_TIMEOUT_MS > 0

@@ -592,6 +592,15 @@ const generatePromptForType = (
     typeof mcqModeRaw === "string"
       ? mcqModeRaw.trim().toUpperCase()
       : undefined;
+  // Optional explicit answer-mode override for segmented MCQ generation.
+  // SINGLE_ONLY => all questions single-correct
+  // MULTI_ONLY  => all questions multi-correct
+  // undefined   => use mode/default distribution logic
+  const mcqAnswerModeRaw = questionConfig.mcqAnswerMode;
+  const mcqAnswerMode =
+    typeof mcqAnswerModeRaw === "string"
+      ? mcqAnswerModeRaw.trim().toUpperCase()
+      : undefined;
 
   // `looksLikeReferencePrompt` imported from utils for maintainability.
 
@@ -709,52 +718,149 @@ const generatePromptForType = (
   // Type-specific instructions
   switch (questionType) {
     case "MCQ":
-      const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
-      const singleCorrectCount = number - multipleCorrectCount;
+      const withCodeCount =
+        mcqMode === "OUTPUT"
+          ? number
+          : mcqMode === "THEORY"
+            ? 0
+            : Math.ceil(number / 2);
+      const generalCount = number - withCodeCount;
+      const multiCorrectTarget =
+        mcqAnswerMode === "SINGLE_ONLY"
+          ? 0
+          : mcqAnswerMode === "MULTI_ONLY"
+            ? number
+            : mcqMode === "OUTPUT"
+          ? 0
+          : mcqMode === "THEORY"
+            ? Math.round(number * 0.25)
+            : Math.min(generalCount, Math.round(number * 0.25));
+      const mcqFlowMode =
+        mcqMode === "OUTPUT"
+          ? "OUTPUT_ONLY"
+          : mcqMode === "THEORY"
+            ? "THEORY_ONLY"
+            : "DEFAULT_MIXED";
+      const outputStartIdx = 1;
+      const outputEndIdx = withCodeCount;
+      const theoryStartIdx = withCodeCount + 1;
+      const theoryEndIdx = number;
+      const multiTheoryIdx = Array.from({ length: multiCorrectTarget }, (_, i) =>
+        String(theoryStartIdx + i),
+      );
+      const multiTheoryIdxStr =
+        multiTheoryIdx.length > 0 ? multiTheoryIdx.join(", ") : "(none)";
+      const singleTheoryCount = Math.max(0, generalCount - multiCorrectTarget);
+      const singleTheoryIdxStr =
+        singleTheoryCount > 0
+          ? `${theoryStartIdx + multiCorrectTarget}..${theoryEndIdx}`
+          : "(none)";
+      const singleCorrectPrompt = `**SINGLE-CORRECT PROMPT (STRICT)**:
+    - Question must have exactly ONE objectively correct option.
+    - Set "isMultipleCorrect": false.
+    - Set "correctAnswer" to exactly 1 option key.
+    - Do NOT use wording like "Select all that apply".
+    - Distractors must be plausible but clearly incorrect.`;
+      const multiCorrectPrompt = `**MULTI-CORRECT PROMPT (STRICT)**:
+    - Question must have 2-4 objectively correct options.
+    - Set "isMultipleCorrect": true.
+    - Set "correctAnswer" to 2-4 option keys.
+    - Use wording like "Select all that apply" only for these questions.
+    - Ensure each selected option is independently true; each unselected option is false.`;
 
+      let flowSpecificMcqRules = "";
+      if (mcqFlowMode === "OUTPUT_ONLY") {
+        flowSpecificMcqRules = `  **COMMON INSTRUCTIONS (ALL MCQs)**:
+    - Options A/B/C/D must be unique (no duplicates).
+    - correctAnswer keys must exist in options.
+    - Do NOT bias toward option A.
+
+  **OUTPUT-BASED INSTRUCTIONS (OUTPUT_ONLY)**:
+    - All questions are OUTPUT-BASED and SINGLE-correct.
+    - Every question MUST include code in QUESTION TEXT using [SNIPPET_START:lang]...[SNIPPET_END].
+    - Every question MUST ask for output/final value/error prediction.
+    - Exactly ONE option must match the true output; other 3 must be plausible but different.
+    - FORBIDDEN: theory/concept-only questions, “Select all that apply”, multiple-correct answers.
+    - REQUIRED CHECK: all ${number} questions contain [SNIPPET_START] markers.
+
+  ${singleCorrectPrompt}`;
+      } else if (mcqFlowMode === "THEORY_ONLY") {
+        flowSpecificMcqRules = `  **COMMON INSTRUCTIONS (ALL MCQs)**:
+    - Options A/B/C/D must be unique (no duplicates).
+    - correctAnswer keys must exist in options.
+    - Do NOT bias toward option A.
+
+  **THEORY/FUNDAMENTALS INSTRUCTIONS (THEORY_ONLY)**:
+    - All questions are THEORY/FUNDAMENTALS (NO code snippets).
+    - FORBIDDEN: output prediction questions, code snippets, snippet markers.
+    - REQUIRED CHECK: zero questions contain [SNIPPET_START] markers.
+
+  **ANSWER-TYPE SPLIT (THEORY_ONLY)**:
+    - MULTI-correct question indices: ${multiTheoryIdxStr} (these must have 2-4 correctAnswer keys, and question text may say "Select all that apply")
+    - SINGLE-correct question indices: ${singleTheoryIdxStr} (exactly 1 correctAnswer key; do NOT say "Select all that apply")
+
+  Apply this prompt only for SINGLE indices (${singleTheoryIdxStr}):
+  ${singleCorrectPrompt}
+
+  Apply this prompt only for MULTI indices (${multiTheoryIdxStr}):
+  ${multiCorrectPrompt}`;
+      } else {
+        flowSpecificMcqRules = `  **COMMON INSTRUCTIONS (ALL MCQs)**:
+    - Options A/B/C/D must be unique (no duplicates).
+    - correctAnswer keys must exist in options.
+    - Do NOT bias toward option A.
+
+  **DEFAULT MIX (STRICT 50/50)**:
+    - OUTPUT-BASED (SINGLE-correct) indices: ${outputStartIdx}..${outputEndIdx}
+      * Must include snippet markers and ask output prediction only.
+      * Exactly ONE option matches the true output.
+      * FORBIDDEN: “Select all that apply”, multi-correct answers.
+    - THEORY/FUNDAMENTALS indices: ${theoryStartIdx}..${theoryEndIdx}
+      * NO snippets, NO output-prediction wording.
+      * MULTI-correct theory indices: ${multiTheoryIdxStr} (2-4 correctAnswer keys; do not say "Select all that apply")
+      * SINGLE-correct theory indices: ${singleTheoryIdxStr} (exactly 1 correctAnswer key; do NOT say "Select all that apply")
+
+  **VALIDATION (MUST SELF-CHECK BEFORE OUTPUT)**:
+    - Exactly ${withCodeCount} questions contain [SNIPPET_START]
+    - Exactly ${generalCount} questions contain NO [SNIPPET_START]
+
+  Apply this prompt for OUTPUT indices (${outputStartIdx}..${outputEndIdx}):
+  ${singleCorrectPrompt}
+
+  Apply this prompt for THEORY SINGLE indices (${singleTheoryIdxStr}):
+  ${singleCorrectPrompt}
+
+  Apply this prompt for THEORY MULTI indices (${multiTheoryIdxStr}):
+  ${multiCorrectPrompt}`;
+      }
       prompt += `\n**MCQ Question Requirements**:
   - Generate EXACTLY ${number} MCQ questions total
-  - **MULTIPLE CORRECT ANSWER REQUIREMENT**: 
-    * EXACTLY ${multipleCorrectCount} questions (20% of total) must have MULTIPLE correct answers
-    * These questions must have "isMultipleCorrect": true
-    * For multiple correct questions, provide correctAnswer as array with 2-4 options: ["A", "B"] or ["A", "C", "D"] etc.
-    * EXACTLY ${singleCorrectCount} questions must have SINGLE correct answer
-    * These questions must have "isMultipleCorrect": false
-    * For single correct questions, provide correctAnswer as array with exactly 1 option: ["A"]
-  - **CRITICAL DECISION**: Analyze the skillType "${skillType}" and skillName "${skillName}" to determine if this is a programming-related skill
-  - **IF programming-related skill** (e.g., programming languages, frameworks, technologies that involve code):
-  ${mcqMode === "OUTPUT"
-          ? `  * **MODE OVERRIDE (OUTPUT)**: Generate 100% "predicted output" based questions.
-    * ALL ${number} questions MUST include a code snippet in the QUESTION TEXT using: [SNIPPET_START:languageIdentifier]code content[SNIPPET_END]
-    * Every question MUST ask the candidate to predict the output (or final printed value / returned value / thrown error).
-    * Ensure snippets are runnable/valid for the detected language; avoid ambiguous undefined behavior.
-    * Detect the programming language from skillType and use lowercase identifier (e.g., "Java" → "java", "Python" → "python", "JavaScript" → "javascript", "C++" → "cpp", "Node.js" → "javascript")
-    * Inside snippet markers, use \\n for newlines (NOT <br/>)
-    * Use <br/> for line breaks in question text surrounding code snippets
-    * **VERIFY**: All ${number} questions contain [SNIPPET_START] markers`
-          : mcqMode === "THEORY"
-            ? `  * **MODE OVERRIDE (THEORY)**: Generate 100% theoretical/fundamentals questions.
-    * ALL ${number} questions must be general/conceptual (NO code snippets).
-    * Do NOT ask "what is the output" style questions.
-    * Use <br/> for line breaks in question text
-    * **VERIFY**: ZERO questions contain any [SNIPPET_START] markers`
-            : `  * Apply 50%-50% distribution: exactly ${Math.ceil(
-              number / 2,
-            )} questions WITH code snippets AND exactly ${number - Math.ceil(number / 2)
-            } general/conceptual questions (NO code snippets)
-    * For questions with code snippets, use markers: [SNIPPET_START:languageIdentifier]code content[SNIPPET_END]
-    * Detect the programming language from skillType and use lowercase identifier (e.g., "Java" → "java", "Python" → "python", "JavaScript" → "javascript", "C++" → "cpp", "Node.js" → "javascript")
-    * Inside snippet markers, use \\n for newlines (NOT <br/>)
-    * Use <br/> for line breaks in question text surrounding code snippets
-    * **VERIFY**: Count your questions - exactly ${Math.ceil(
-              number / 2,
-            )} should have [SNIPPET_START] markers, exactly ${number - Math.ceil(number / 2)
-            } should NOT have any code snippets`
-        }
-  - **IF NOT programming-related skill** (e.g., soft skills, domain knowledge, tools without code):
-    * Generate all ${number} questions as general/conceptual (NO code snippets)
-    * Use <br/> for line breaks in question text
+  - **MCQ FLOW MODE (STRICT)**: ${mcqFlowMode}
+  - **ANSWER-TYPE RULES BY FLOW (STRICT)**:
+    * MODE=OUTPUT: ALL questions must be SINGLE correct (0% multi-correct)
+      - Set "isMultipleCorrect": false
+      - "correctAnswer" must contain exactly 1 option key
+    * MODE=THEORY: MIXED single+multi (target ~25% multi-correct)
+      - Exactly ${multiCorrectTarget} questions must have "isMultipleCorrect": true with 2-4 correctAnswer keys
+      - Remaining ${number - multiCorrectTarget} questions must have "isMultipleCorrect": false with exactly 1 correctAnswer key
+    * MODE=DEFAULT (no mcqMode):
+      - Exactly ${withCodeCount} output/code-snippet questions => SINGLE correct
+      - Exactly ${generalCount} theory/general questions => MIXED single+multi
+        * Within the general/theory questions, only ~25% of total should be MULTIPLE correct (target ${multiCorrectTarget})
+  - **CRITICAL**: The correctAnswer key MUST exist in "options" and point to the truly correct option
+  - Do NOT bias toward "A" — distribute correct answers across A/B/C/D across the set
+  - **FLOW-SPECIFIC CONTENT RULES (NO MIXING)**:
+${flowSpecificMcqRules}
+  - Use <br/> for line breaks in question text
   - Options must be key-value pairs: {"A": "Option text", "B": "Option text", "C": "Option text", "D": "Option text"}
+  - **OPTIONS MUST BE UNIQUE (STRICT)**:
+    * All 4 options (A, B, C, D) must be unique. No duplicates, no copy/paste, no “A and D are same”.
+    * Do NOT repeat the correct answer text in any other option.
+    * Before returning JSON, SELF-CHECK: normalize each option (trim, lowercase, collapse spaces/newlines). If any duplicates remain, rewrite distractors until all options are unique.
+  - **OUTPUT-BASED DISTRACTOR RULE (STRICT)**:
+    * For predicted-output questions, exactly ONE option must match the true output.
+    * The other 3 options must be plausible but different (e.g., one wrong numeric value, missing one printed line, wrong line order).
+    * Never make two options identical to the true output.
   - **IMPORTANT**: Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code snippets in QUESTION TEXT. For options, use markdown code formatting.
   - **✅ CORRECT FORMATTING FOR OPTIONS**: 
     * If an option contains code, use markdown code formatting: \`\`\`language\ncode here\n\`\`\` (for multi-line) or \`code here\` (for inline)
@@ -1243,8 +1349,67 @@ const generatePromptForType = (
             ? 0
             : Math.ceil(number / 2);
       const general = number - withCode;
-      const multipleCorrectCount = Math.max(1, Math.round(number * 0.2)); // 20% multiple correct
-      const singleCorrectCount = number - multipleCorrectCount; // Remaining 80% single correct
+      const multipleCorrectCount =
+        mcqAnswerMode === "SINGLE_ONLY"
+          ? 0
+          : mcqAnswerMode === "MULTI_ONLY"
+            ? number
+            : mcqMode === "OUTPUT"
+          ? 0
+          : mcqMode === "THEORY"
+            ? Math.round(number * 0.25)
+            : Math.min(general, Math.round(number * 0.25));
+      const singleCorrectCount = number - multipleCorrectCount;
+      const outputStartIdx = 1;
+      const outputEndIdx = withCode;
+      const theoryStartIdx = withCode + 1;
+      const theoryEndIdx = number;
+      const multiTheoryIdx = Array.from(
+        { length: Math.min(multipleCorrectCount, Math.max(0, general)) },
+        (_, i) => String(theoryStartIdx + i),
+      );
+      const multiTheoryIdxStr =
+        multiTheoryIdx.length > 0 ? multiTheoryIdx.join(", ") : "(none)";
+      const singleTheoryCount = Math.max(
+        0,
+        Math.max(0, general) - Math.min(multipleCorrectCount, Math.max(0, general)),
+      );
+      const singleTheoryIdxStr =
+        singleTheoryCount > 0
+          ? `${theoryStartIdx + Math.min(multipleCorrectCount, Math.max(0, general))}..${theoryEndIdx}`
+          : "(none)";
+      const mcqJsonFlowMode =
+        mcqMode === "OUTPUT"
+          ? "OUTPUT_ONLY"
+          : mcqMode === "THEORY"
+            ? "THEORY_ONLY"
+            : "DEFAULT_MIXED";
+      let mcqJsonModeRules = "";
+      if (mcqJsonFlowMode === "OUTPUT_ONLY") {
+        mcqJsonModeRules = `  * MODE=OUTPUT_ONLY:
+    * ALL ${number} questions are output-prediction with snippet markers.
+    * ALL ${number} questions are SINGLE-correct.
+    * FORBIDDEN: multi-correct answers, theory-only questions, snippet-free questions.`;
+      } else if (mcqJsonFlowMode === "THEORY_ONLY") {
+        mcqJsonModeRules = `  * MODE=THEORY_ONLY:
+    * ALL ${number} questions are theory/fundamentals with NO snippet markers.
+    * Use the distribution above: ${multipleCorrectCount} multi-correct, ${singleCorrectCount} single-correct.
+    * FORBIDDEN: output-prediction questions and snippet markers.
+    * Treat single-correct and multi-correct as separate sub-prompts by index:
+      - SINGLE indices: ${singleTheoryIdxStr}
+      - MULTI indices: ${multiTheoryIdxStr}`;
+      } else {
+        mcqJsonModeRules = `  * MODE=DEFAULT_MIXED:
+    * EXACTLY ${withCode} output-prediction (with snippet markers), EXACTLY ${general} theory/fundamentals (no snippets).
+    * Output questions: SINGLE-correct only.
+    * Theory questions: apply target ${multipleCorrectCount} multi-correct within general questions.
+    * Treat single-correct and multi-correct as separate sub-prompts by index:
+      - OUTPUT SINGLE indices: ${outputStartIdx}..${outputEndIdx}
+      - THEORY SINGLE indices: ${singleTheoryIdxStr}
+      - THEORY MULTI indices: ${multiTheoryIdxStr}
+    * FORBIDDEN: mixed/hybrid question style in one question.
+    * VALIDATION: Count snippet questions = ${withCode}, non-snippet questions = ${general}.`;
+      }
 
       prompt += `{
     "skillName": "${skillName}",
@@ -1254,8 +1419,12 @@ const generatePromptForType = (
       ${Array(number)
           .fill(0)
           .map((_, idx) => {
-            const isMultipleCorrect = idx < multipleCorrectCount;
-            const correctAnswerExample = isMultipleCorrect ? '["A", "B"]' : '["A"]';
+            const isOutputStyle = idx < withCode;
+            const isMultipleCorrect =
+              idx < multipleCorrectCount && !(mcqMode === "OUTPUT") && !isOutputStyle;
+            const correctAnswerExample = isMultipleCorrect
+              ? '["A", "C"]'
+              : '["B"]';
 
             if (idx < withCode) {
               return `{
@@ -1287,19 +1456,16 @@ const generatePromptForType = (
     ]
   }
   **CRITICAL INSTRUCTIONS**:
-  - **MULTIPLE CORRECT ANSWER DISTRIBUTION**: Generate EXACTLY ${multipleCorrectCount} questions with "isMultipleCorrect": true (20% of total) and EXACTLY ${singleCorrectCount} questions with "isMultipleCorrect": false
-  - For questions with "isMultipleCorrect": true, provide correctAnswer with 2-4 options (e.g., ["A", "B"] or ["A", "C", "D"])
-  - For questions with "isMultipleCorrect": false, provide correctAnswer with exactly 1 option (e.g., ["A"])
-  - Analyze skillType "${skillType}" and skillName "${skillName}" to determine if this is programming-related
-  - IF programming-related:
-  ${mcqMode === "OUTPUT"
-          ? `  * MODE=OUTPUT: Generate ALL ${number} questions as predicted-output questions with code snippets in QUESTION TEXT ONLY`
-          : mcqMode === "THEORY"
-            ? `  * MODE=THEORY: Generate ALL ${number} questions as theoretical/fundamentals questions with NO code snippets`
-            : `  * DEFAULT (MUST FOLLOW EXACTLY): Generate exactly ${withCode} questions with [SNIPPET_START:lang]code[SNIPPET_END] markers in QUESTION TEXT ONLY and exactly ${general} general questions (NO code)
-    * VALIDATION (MUST SELF-CHECK): Count the questions that contain [SNIPPET_START]. It MUST be exactly ${withCode}. Count the questions with NO [SNIPPET_START]. It MUST be exactly ${general}. If not, FIX before returning JSON.`
-        }
-  - IF NOT programming-related: Generate all ${number} questions as general (NO code snippets)
+  - **MCQ FLOW MODE (STRICT)**: ${mcqMode === "OUTPUT" ? "OUTPUT_ONLY" : mcqMode === "THEORY" ? "THEORY_ONLY" : "DEFAULT_MIXED"}
+  - **ANSWER-TYPE DISTRIBUTION (STRICT)**:
+    * SINGLE-correct questions: ${singleCorrectCount}
+    * MULTIPLE-correct questions: ${multipleCorrectCount}
+    * For single-correct: "isMultipleCorrect" = false and correctAnswer has exactly 1 option key
+    * For multiple-correct: "isMultipleCorrect" = true and correctAnswer has 2-4 option keys
+  - Do NOT bias correctAnswer toward "A" — distribute across A/B/C/D within the set
+  - The correctAnswer key MUST exist in options and MUST be the truly correct one
+  - **FLOW-SPECIFIC CONTENT RULES (NO MIXING)**:
+${mcqJsonModeRules}
   - Use ONLY [SNIPPET_START:lang] and [SNIPPET_END] markers for code in QUESTION TEXT - NO markdown fences (\`\`\`)
   - **✅ FOR OPTIONS WITH CODE**: Use markdown code formatting - \`\`\`language\ncode\n\`\`\` (for multi-line) or \`code\` (for inline)
   - **🚫 ABSOLUTE RULE**: NEVER use [SNIPPET_START] or [SNIPPET_END] in MCQ options/choices
@@ -1501,33 +1667,8 @@ const createConsumer = async (id) => {
             verificationMeta = verificationResult.verificationMeta;
           }
 
-          if (
-            clientId &&
-            (boilerplateResult.tokenUsage?.promptTokens ||
-              boilerplateResult.tokenUsage?.completionTokens)
-          ) {
-            try {
-              await CreditServiceClient.deductAiUsage({
-                clientId,
-                modelId:
-                  process.env.PROGRAMMING_VERIFICATION_MODEL ||
-                  "gemini-2.5-flash",
-                referenceId: `ai_code_gen_${Date.now()}`,
-                inputTokens: boilerplateResult.tokenUsage.promptTokens || 0,
-                outputTokens:
-                  boilerplateResult.tokenUsage.completionTokens || 0,
-                meta: {
-                  type: "ai_code_generation",
-                  serviceKey: "AI_CODE_GENERATION",
-                },
-                channelId,
-                jobId,
-                tempId,
-              });
-            } catch (creditError) {
-              // Credit deduction failed - continue without logging
-            }
-          }
+          // Credits for Boilerplate requests are deducted centrally in server.js
+          // (idempotent referenceId: ai_code_gen_${requestId}). Do NOT deduct here to avoid double charging.
 
           await producer.send({
             topic: replyTopic,
@@ -1626,7 +1767,7 @@ const createConsumer = async (id) => {
 
       try {
         const model = genAI.getGenerativeModel({
-          model: "gemini-2.0-flash",
+          model: "gemini-2.5-flash",
         });
 
         let aiResponse;
@@ -2198,50 +2339,155 @@ const createConsumer = async (id) => {
           // If no questions were generated, still send empty array - let frontend handle it
         } else {
           // Normal single-call flow for all other types (and Programming <= 2)
-          const prompt = generatePromptForType(
-            questionType,
-            questionConfig,
-            category,
-            experience,
-            jobRole,
-            tailorMade,
-            proposedSeniority,
-            JD,
-            CandidateResumeData,
-            questionsArray,
-          );
+          if (questionType === "MCQ" && questionConfig?.number > 0) {
+            const modeRaw = questionConfig?.mcqMode;
+            const mode =
+              typeof modeRaw === "string" ? modeRaw.trim().toUpperCase() : undefined;
+            const total = Number(questionConfig.number) || 0;
+            const withCode =
+              mode === "OUTPUT"
+                ? total
+                : mode === "THEORY"
+                  ? 0
+                  : Math.ceil(total / 2);
+            const general = total - withCode;
+            const multiTarget =
+              mode === "OUTPUT" ? 0 : mode === "THEORY" ? Math.round(total * 0.25) : Math.min(general, Math.round(total * 0.25));
+            const theorySingleCount = Math.max(0, general - multiTarget);
 
-          let result, response, candidate;
-          try {
-            result = await retryGeminiCall(
-              () => model.generateContent(prompt),
-              3,
-              1000,
-              id,
+            const runMcqSegment = async (segmentConfig, segmentName, expectedMultiple) => {
+              if (!segmentConfig?.number || segmentConfig.number <= 0) return [];
+              const segmentPrompt = generatePromptForType(
+                "MCQ",
+                segmentConfig,
+                category,
+                experience,
+                jobRole,
+                tailorMade,
+                proposedSeniority,
+                JD,
+                CandidateResumeData,
+                questionsArray,
+              );
+              const segResult = await retryGeminiCall(
+                () => model.generateContent(segmentPrompt),
+                3,
+                1000,
+                id,
+              );
+              const segResponse = segResult.response;
+              const segCandidate = segResponse.candidates?.[0]?.content;
+              if (!segCandidate || !segCandidate.parts) {
+                throw new Error(`No valid response for MCQ segment: ${segmentName}`);
+              }
+              const segTokenUsage = extractTokenUsage(segResponse);
+              tokenUsage.promptTokens += segTokenUsage.promptTokens;
+              tokenUsage.completionTokens += segTokenUsage.completionTokens;
+              tokenUsage.totalTokens += segTokenUsage.totalTokens;
+              const segText = segCandidate.parts[0]?.text || "";
+              const segJson = extractJsonFromGeminiText(segText, id);
+              const segMcqs = Array.isArray(segJson?.MCQ) ? segJson.MCQ : [];
+              return segMcqs.slice(0, segmentConfig.number).map((q) => ({
+                ...q,
+                __expectedMultipleCorrect: expectedMultiple,
+                __segment: segmentName,
+              }));
+            };
+
+            let mergedMcq = [];
+            if (mode === "OUTPUT") {
+              mergedMcq = [
+                ...(await runMcqSegment(
+                  { ...questionConfig, number: total, mcqMode: "OUTPUT", mcqAnswerMode: "SINGLE_ONLY" },
+                  "OUTPUT_SINGLE",
+                  false,
+                )),
+              ];
+            } else if (mode === "THEORY") {
+              mergedMcq = [
+                ...(await runMcqSegment(
+                  { ...questionConfig, number: theorySingleCount, mcqMode: "THEORY", mcqAnswerMode: "SINGLE_ONLY" },
+                  "THEORY_SINGLE",
+                  false,
+                )),
+                ...(await runMcqSegment(
+                  { ...questionConfig, number: multiTarget, mcqMode: "THEORY", mcqAnswerMode: "MULTI_ONLY" },
+                  "THEORY_MULTI",
+                  true,
+                )),
+              ];
+            } else {
+              mergedMcq = [
+                ...(await runMcqSegment(
+                  { ...questionConfig, number: withCode, mcqMode: "OUTPUT", mcqAnswerMode: "SINGLE_ONLY" },
+                  "DEFAULT_OUTPUT_SINGLE",
+                  false,
+                )),
+                ...(await runMcqSegment(
+                  { ...questionConfig, number: theorySingleCount, mcqMode: "THEORY", mcqAnswerMode: "SINGLE_ONLY" },
+                  "DEFAULT_THEORY_SINGLE",
+                  false,
+                )),
+                ...(await runMcqSegment(
+                  { ...questionConfig, number: multiTarget, mcqMode: "THEORY", mcqAnswerMode: "MULTI_ONLY" },
+                  "DEFAULT_THEORY_MULTI",
+                  true,
+                )),
+              ];
+            }
+
+            aiResponse = {
+              skillName: category.category,
+              skillType: category.skills || "unknown",
+              type: "MCQ",
+              MCQ: mergedMcq.slice(0, total),
+            };
+          } else {
+            const prompt = generatePromptForType(
+              questionType,
+              questionConfig,
+              category,
+              experience,
+              jobRole,
+              tailorMade,
+              proposedSeniority,
+              JD,
+              CandidateResumeData,
+              questionsArray,
             );
-            response = result.response;
-            candidate = response.candidates?.[0]?.content;
-          } catch (geminiError) {
-            throw new Error(
-              `Gemini API error: ${geminiError.message || "Unknown error"}`,
-            );
+
+            let result, response, candidate;
+            try {
+              result = await retryGeminiCall(
+                () => model.generateContent(prompt),
+                3,
+                1000,
+                id,
+              );
+              response = result.response;
+              candidate = response.candidates?.[0]?.content;
+            } catch (geminiError) {
+              throw new Error(
+                `Gemini API error: ${geminiError.message || "Unknown error"}`,
+              );
+            }
+
+            if (!candidate || !candidate.parts) {
+              throw new Error("No valid response received from Gemini.");
+            }
+
+            // Track token usage for non-Programming questions
+            const responseTokenUsage = extractTokenUsage(response);
+            tokenUsage.promptTokens += responseTokenUsage.promptTokens;
+            tokenUsage.completionTokens += responseTokenUsage.completionTokens;
+            tokenUsage.totalTokens += responseTokenUsage.totalTokens;
+
+            // NOTE: Credit deduction is handled by server.js after all Kafka responses are
+            // aggregated. Do NOT deduct here — doing so causes double deduction.
+
+            const aiResponseText = candidate.parts[0]?.text || "";
+            aiResponse = extractJsonFromGeminiText(aiResponseText, id);
           }
-
-          if (!candidate || !candidate.parts) {
-            throw new Error("No valid response received from Gemini.");
-          }
-
-          // Track token usage for non-Programming questions
-          const responseTokenUsage = extractTokenUsage(response);
-          tokenUsage.promptTokens += responseTokenUsage.promptTokens;
-          tokenUsage.completionTokens += responseTokenUsage.completionTokens;
-          tokenUsage.totalTokens += responseTokenUsage.totalTokens;
-
-          // NOTE: Credit deduction is handled by server.js after all Kafka responses are
-          // aggregated. Do NOT deduct here — doing so causes double deduction.
-
-          const aiResponseText = candidate.parts[0]?.text || "";
-          aiResponse = extractJsonFromGeminiText(aiResponseText, id);
         }
 
         // Process questions based on type
@@ -2249,8 +2495,327 @@ const createConsumer = async (id) => {
           try {
             // Process MCQ questions: ensure code snippets are in correct markdown format
             if (questionType === "MCQ" && aiResponse.MCQ) {
-              aiResponse.MCQ.forEach((question) => {
+              const MCQ_OPTION_KEYS = ["A", "B", "C", "D"];
+              const requestedMcqMode =
+                typeof questionConfig?.mcqMode === "string"
+                  ? questionConfig.mcqMode.trim().toUpperCase()
+                  : undefined;
+              const secureShuffle = (arr) => {
+                const a = [...arr];
+                for (let i = a.length - 1; i > 0; i--) {
+                  const j = crypto.randomInt(0, i + 1);
+                  [a[i], a[j]] = [a[j], a[i]];
+                }
+                return a;
+              };
+              const normalizeOptionsObject = (options) => {
+                if (!options) return null;
+                // Accept either object {"A": "..."} or array ["...","..."] (fallback)
+                if (Array.isArray(options)) {
+                  const out = {};
+                  for (let i = 0; i < Math.min(MCQ_OPTION_KEYS.length, options.length); i++) {
+                    out[MCQ_OPTION_KEYS[i]] =
+                      typeof options[i] === "string" ? options[i] : String(options[i] ?? "");
+                  }
+                  // Pad missing keys to keep shape stable for UI
+                  MCQ_OPTION_KEYS.forEach((k) => {
+                    if (typeof out[k] !== "string" || !out[k].trim()) {
+                      out[k] = `Option ${k}`;
+                    }
+                  });
+                  return out;
+                }
+                if (typeof options === "object") {
+                  const out = {};
+                  MCQ_OPTION_KEYS.forEach((k) => {
+                    if (typeof options[k] === "string") out[k] = options[k];
+                  });
+                  // If keys are not A-D (e.g. "1","2"), map in insertion order
+                  if (Object.keys(out).length === 0) {
+                    const vals = Object.values(options).filter((v) => typeof v === "string");
+                    for (let i = 0; i < Math.min(MCQ_OPTION_KEYS.length, vals.length); i++) {
+                      out[MCQ_OPTION_KEYS[i]] = vals[i];
+                    }
+                  }
+                  // Pad missing keys to keep shape stable for UI
+                  MCQ_OPTION_KEYS.forEach((k) => {
+                    if (typeof out[k] !== "string" || !out[k].trim()) {
+                      out[k] = `Option ${k}`;
+                    }
+                  });
+                  return Object.keys(out).length ? out : null;
+                }
+                return null;
+              };
+              const normalizeOptionForCompare = (text) => {
+                if (typeof text !== "string") return "";
+                return text
+                  .replace(/\r\n/g, "\n")
+                  .replace(/\r/g, "\n")
+                  .replace(/[ \t]+/g, " ")
+                  .replace(/\n{3,}/g, "\n\n")
+                  .trim()
+                  .toLowerCase();
+              };
+              const makeDeterministicDistractor = (baseText, attempt = 1) => {
+                const text = typeof baseText === "string" ? baseText : String(baseText ?? "");
+                // Try to perturb the first integer so it's clearly different.
+                const m = text.match(/-?\d+/);
+                if (m && m.index !== undefined) {
+                  const n = parseInt(m[0], 10);
+                  const bumped = Number.isFinite(n) ? n + (attempt % 3) + 1 : n + 1;
+                  return (
+                    text.slice(0, m.index) +
+                    String(bumped) +
+                    text.slice(m.index + m[0].length)
+                  );
+                }
+                // Fallback: append a deterministic suffix
+                return `${text} (different output variant ${attempt})`;
+              };
+              const dedupeOptionsAndKeepSingleCorrect = (question) => {
+                if (!question || !question.options || typeof question.options !== "object") return;
+
+                // OUTPUT mode must be strictly single-correct
+                if (requestedMcqMode === "OUTPUT") {
+                  question.isMultipleCorrect = false;
+                  if (Array.isArray(question.correctAnswer) && question.correctAnswer.length > 1) {
+                    question.correctAnswer = [question.correctAnswer[0]];
+                  }
+                }
+
+                const options = normalizeOptionsObject(question.options);
+                if (!options) return;
+                question.options = options;
+
+                const correctKey = Array.isArray(question.correctAnswer)
+                  ? String(question.correctAnswer[0] || "").trim().toUpperCase()
+                  : "";
+                const seen = new Map(); // normalizedText -> firstKey
+
+                MCQ_OPTION_KEYS.forEach((k) => {
+                  const raw = question.options?.[k];
+                  const norm = normalizeOptionForCompare(raw);
+                  if (!norm) return;
+
+                  if (!seen.has(norm)) {
+                    seen.set(norm, k);
+                    return;
+                  }
+
+                  // Duplicate found: ensure only one of the duplicates can be correct by moving correctKey if needed
+                  const keepKey = seen.get(norm);
+                  if (correctKey === k && keepKey) {
+                    question.correctAnswer = [keepKey];
+                  }
+
+                  // Replace duplicate text with a deterministic distractor until unique (bounded)
+                  let attempt = 1;
+                  let next = makeDeterministicDistractor(String(raw ?? ""), attempt);
+                  while (
+                    attempt < 6 &&
+                    seen.has(normalizeOptionForCompare(next))
+                  ) {
+                    attempt += 1;
+                    next = makeDeterministicDistractor(String(raw ?? ""), attempt);
+                  }
+                  question.options[k] = next;
+                  seen.set(normalizeOptionForCompare(next), k);
+                });
+              };
+              const coerceCorrectAnswer = (question, expectMultipleCorrect) => {
+                const options = normalizeOptionsObject(question.options);
+                question.options = options || question.options;
+
+                // Ensure correctAnswer is an array of option keys
+                let keys = [];
+                if (Array.isArray(question.correctAnswer)) {
+                  keys = question.correctAnswer.map((k) => String(k).trim().toUpperCase());
+                } else if (typeof question.correctAnswer === "string") {
+                  keys = [question.correctAnswer.trim().toUpperCase()];
+                }
+                keys = keys.filter((k) => MCQ_OPTION_KEYS.includes(k));
+                if (keys.length === 0) {
+                  // fallback: choose a random option key that exists
+                  const existingKeys = options ? Object.keys(options) : MCQ_OPTION_KEYS;
+                  const pickFrom = existingKeys.filter((k) => MCQ_OPTION_KEYS.includes(k));
+                  const fallbackKey =
+                    pickFrom.length > 0
+                      ? pickFrom[crypto.randomInt(0, pickFrom.length)]
+                      : "A";
+                  keys = [fallbackKey];
+                }
+
+                const dedup = [...new Set(keys)];
+                if (expectMultipleCorrect) {
+                  if (dedup.length >= 2) {
+                    question.correctAnswer = dedup.slice(0, 4);
+                    question.isMultipleCorrect = true;
+                  } else {
+                    // Do NOT invent extra "correct" options (would be incorrect). Fall back to single-correct.
+                    question.correctAnswer = [dedup[0]];
+                    question.isMultipleCorrect = false;
+                  }
+                } else {
+                  question.correctAnswer = [dedup[0]];
+                  question.isMultipleCorrect = false;
+                }
+              };
+              const shuffleOptionsAndRemapCorrect = (question) => {
+                const options = normalizeOptionsObject(question.options);
+                if (!options) return;
+
+                const currentCorrectKeys = Array.isArray(question.correctAnswer)
+                  ? question.correctAnswer
+                    .map((k) => String(k || "").trim().toUpperCase())
+                    .filter((k) => MCQ_OPTION_KEYS.includes(k))
+                  : [];
+                const currentCorrectKeySet = new Set(currentCorrectKeys);
+
+                // Shuffle option texts; then remap correctAnswer to whichever key holds the original correct text.
+                const shuffledKeys = secureShuffle(MCQ_OPTION_KEYS);
+                const oldValues = MCQ_OPTION_KEYS.map((k) => options[k]).filter((v) => typeof v === "string");
+                if (oldValues.length < 2) return;
+
+                const newOptions = {};
+                const keyMap = {};
+                for (let i = 0; i < MCQ_OPTION_KEYS.length; i++) {
+                  const newKey = shuffledKeys[i];
+                  const oldKey = MCQ_OPTION_KEYS[i];
+                  if (typeof options[oldKey] === "string") {
+                    newOptions[newKey] = options[oldKey];
+                    keyMap[oldKey] = newKey;
+                  }
+                }
+                // Fill any missing keys with existing values to keep A-D stable
+                MCQ_OPTION_KEYS.forEach((k) => {
+                  if (typeof newOptions[k] !== "string" && typeof options[k] === "string") {
+                    newOptions[k] = options[k];
+                    if (!keyMap[k]) keyMap[k] = k;
+                  }
+                });
+                question.options = newOptions;
+
+                if (currentCorrectKeySet.size > 0) {
+                  const remapped = [];
+                  currentCorrectKeySet.forEach((oldKey) => {
+                    const newKey = keyMap[oldKey];
+                    if (newKey && MCQ_OPTION_KEYS.includes(newKey)) remapped.push(newKey);
+                  });
+                  if (remapped.length > 0) {
+                    question.correctAnswer = [...new Set(remapped)];
+                  }
+                }
+              };
+              const isOutputQuestion = (question) => {
+                const qText = String(question?.question || "");
+                return (
+                  /\[SNIPPET_START:/i.test(qText) ||
+                  /```[\s\S]*?```/g.test(qText)
+                );
+              };
+              const computeMultiCorrectTargets = (mcqs) => {
+                const total = mcqs.length;
+                const mode = requestedMcqMode;
+                if (mode === "OUTPUT") {
+                  return { eligibleIdx: [], targetCount: 0 };
+                }
+                const eligibleIdx = mcqs
+                  .map((q, i) => ({ q, i }))
+                  .filter(({ q }) => (mode === "THEORY" ? true : !isOutputQuestion(q)))
+                  .map(({ i }) => i);
+
+                // Target: ~25% multi-correct out of total, but only among eligible questions.
+                const desired = Math.round(total * 0.25);
+                const targetCount = Math.max(0, Math.min(desired, eligibleIdx.length));
+                return { eligibleIdx, targetCount };
+              };
+
+              const { eligibleIdx, targetCount } = computeMultiCorrectTargets(aiResponse.MCQ);
+              const shuffledEligible = secureShuffle(eligibleIdx);
+              const multiCorrectSet = new Set(shuffledEligible.slice(0, targetCount));
+
+              const repairMultiCorrect = async (question, consumerId) => {
+                // Repair only when we EXPECT multi-correct but received <2 correct keys.
+                // OUTPUT mode never repairs into multi-correct.
+                if (requestedMcqMode === "OUTPUT") return question;
+                if (!question || !question.options || typeof question.options !== "object") {
+                  return question;
+                }
+                const options = normalizeOptionsObject(question.options);
+                if (!options) return question;
+
+                const correctKeys = Array.isArray(question.correctAnswer)
+                  ? question.correctAnswer
+                    .map((k) => String(k || "").trim().toUpperCase())
+                    .filter((k) => MCQ_OPTION_KEYS.includes(k))
+                  : [];
+                if (correctKeys.length >= 2) return question;
+
+                const repairPrompt = `You are fixing an MCQ that should have MULTIPLE correct answers.
+Return ONLY valid JSON (no markdown fences, no extra text).
+
+Rules:
+- "isMultipleCorrect" must be true
+- "correctAnswer" must be an array of 2-4 option keys from ["A","B","C","D"]
+- Options must remain unique (no duplicate texts). If any option texts are duplicates, rewrite the distractors to be unique.
+- Do NOT change the question intent. Do NOT add meta commentary.
+
+Question:
+${String(question.questionTitle || "").trim()}
+${String(question.question || "").trim()}
+
+Options JSON:
+${JSON.stringify(options)}
+
+Return JSON in this exact shape:
+{
+  "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+  "correctAnswer": ["B","C"],
+  "isMultipleCorrect": true
+}`;
+
                 try {
+                  const result = await retryGeminiCall(
+                    () => model.generateContent(repairPrompt),
+                    2,
+                    750,
+                    consumerId,
+                  );
+                  // Track token usage for this follow-up repair call so server.js can deduct credits once.
+                  const repairTokenUsage = extractTokenUsage(result?.response);
+                  tokenUsage.promptTokens += repairTokenUsage.promptTokens;
+                  tokenUsage.completionTokens += repairTokenUsage.completionTokens;
+                  tokenUsage.totalTokens += repairTokenUsage.totalTokens;
+
+                  const text =
+                    result?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                  const fixed = extractJsonFromGeminiText(text, consumerId);
+                  if (
+                    fixed &&
+                    fixed.options &&
+                    typeof fixed.options === "object" &&
+                    Array.isArray(fixed.correctAnswer)
+                  ) {
+                    question.options = normalizeOptionsObject(fixed.options) || options;
+                    question.correctAnswer = fixed.correctAnswer;
+                    question.isMultipleCorrect = fixed.isMultipleCorrect !== false;
+                  }
+                } catch (e) {
+                  // If repair fails, keep original; do not invent extra correct answers.
+                }
+                return question;
+              };
+
+              for (let idx = 0; idx < aiResponse.MCQ.length; idx++) {
+                const question = aiResponse.MCQ[idx];
+                try {
+                  const expectMultipleCorrect =
+                    typeof question?.__expectedMultipleCorrect === "boolean"
+                      ? question.__expectedMultipleCorrect
+                      : multiCorrectSet.has(idx);
+                  coerceCorrectAnswer(question, expectMultipleCorrect);
+
                   if (question.question) {
                     let processedQuestion = question.question;
 
@@ -2410,106 +2975,39 @@ const createConsumer = async (id) => {
                     });
                   }
 
-                  // STEP 4: Ensure isMultipleCorrect field is set correctly
-                  // If not present, determine based on correctAnswer array length
+                  // Shuffle options to avoid predictable "A" answers and remap correctAnswer accordingly
+                  shuffleOptionsAndRemapCorrect(question);
+                  // Re-assert expected single/multiple shape after remapping
+                  coerceCorrectAnswer(question, expectMultipleCorrect);
+
+                  // Final guardrails:
+                  // - Remove duplicate options (esp. duplicate correct outputs)
+                  // - Enforce OUTPUT mode as strictly single-correct
+                  dedupeOptionsAndKeepSingleCorrect(question);
+
+                  // If this question is supposed to be multi-correct but still ended up single,
+                  // try a targeted repair with Gemini (only for non-OUTPUT modes).
                   if (
-                    question.isMultipleCorrect === undefined ||
-                    question.isMultipleCorrect === null
+                    expectMultipleCorrect &&
+                    (!Array.isArray(question.correctAnswer) ||
+                      question.correctAnswer.length < 2)
                   ) {
-                    const correctAnswerCount = Array.isArray(
-                      question.correctAnswer,
-                    )
-                      ? question.correctAnswer.length
-                      : 0;
-                    question.isMultipleCorrect = correctAnswerCount > 1;
+                    await repairMultiCorrect(question, id);
+                    // Validate and normalize again after repair
+                    coerceCorrectAnswer(question, true);
+                    shuffleOptionsAndRemapCorrect(question);
+                    dedupeOptionsAndKeepSingleCorrect(question);
                   }
 
-                  // Validate correctAnswer matches isMultipleCorrect
-                  const correctAnswerCount = Array.isArray(
-                    question.correctAnswer,
-                  )
-                    ? question.correctAnswer.length
-                    : 0;
-                  if (question.isMultipleCorrect && correctAnswerCount < 2) {
-                    // Validation: isMultipleCorrect but < 2 correct answers
-                  } else if (
-                    !question.isMultipleCorrect &&
-                    correctAnswerCount !== 1
-                  ) {
-                    // Auto-fix: take first answer if multiple provided
-                    if (correctAnswerCount > 1) {
-                      question.correctAnswer = [question.correctAnswer[0]];
-                    }
+                  // Remove internal metadata before sending API response.
+                  if (Object.prototype.hasOwnProperty.call(question, "__expectedMultipleCorrect")) {
+                    delete question.__expectedMultipleCorrect;
+                  }
+                  if (Object.prototype.hasOwnProperty.call(question, "__segment")) {
+                    delete question.__segment;
                   }
                 } catch (mcqError) {
                   // MCQ processing error - skip this question
-                }
-              });
-
-              // STEP 5: Ensure 20% distribution of multiple correct questions
-              const totalQuestions = aiResponse.MCQ.length;
-              const expectedMultipleCorrect = Math.max(
-                1,
-                Math.round(totalQuestions * 0.2),
-              );
-              const actualMultipleCorrect = aiResponse.MCQ.filter(
-                (q) => q.isMultipleCorrect === true,
-              ).length;
-
-              if (actualMultipleCorrect !== expectedMultipleCorrect) {
-                // Sort questions by current isMultipleCorrect status
-                const multipleCorrectQuestions = aiResponse.MCQ.filter(
-                  (q) => q.isMultipleCorrect === true,
-                );
-                const singleCorrectQuestions = aiResponse.MCQ.filter(
-                  (q) => !q.isMultipleCorrect,
-                );
-
-                // Adjust to meet 20% requirement
-                if (actualMultipleCorrect < expectedMultipleCorrect) {
-                  // Need more multiple correct - convert some single correct to multiple correct
-                  const needed =
-                    expectedMultipleCorrect - actualMultipleCorrect;
-                  for (
-                    let i = 0;
-                    i < Math.min(needed, singleCorrectQuestions.length);
-                    i++
-                  ) {
-                    const q = singleCorrectQuestions[i];
-                    q.isMultipleCorrect = true;
-                    // If only one correct answer, add another valid option (if available)
-                    if (
-                      q.correctAnswer &&
-                      q.correctAnswer.length === 1 &&
-                      q.options
-                    ) {
-                      const correctKey = q.correctAnswer[0];
-                      const optionKeys = Object.keys(q.options);
-                      const otherOptions = optionKeys.filter(
-                        (key) => key !== correctKey,
-                      );
-                      if (otherOptions.length > 0) {
-                        // Add one more correct answer (randomly or first available)
-                        q.correctAnswer.push(otherOptions[0]);
-                      }
-                    }
-                  }
-                } else if (actualMultipleCorrect > expectedMultipleCorrect) {
-                  // Need fewer multiple correct - convert some to single correct
-                  const excess =
-                    actualMultipleCorrect - expectedMultipleCorrect;
-                  for (
-                    let i = 0;
-                    i < Math.min(excess, multipleCorrectQuestions.length);
-                    i++
-                  ) {
-                    const q = multipleCorrectQuestions[i];
-                    q.isMultipleCorrect = false;
-                    // Keep only first correct answer
-                    if (q.correctAnswer && q.correctAnswer.length > 1) {
-                      q.correctAnswer = [q.correctAnswer[0]];
-                    }
-                  }
                 }
               }
             }
@@ -2540,6 +3038,9 @@ const createConsumer = async (id) => {
               });
 
               // Generate boilerplate AFTER question+testcase generation.
+              // Credit deduction: boilerplate generation is a separate Gemini call for Programming questions.
+              // We deduct per-question boilerplate (idempotent referenceId) to avoid needing to merge tokens into the main request.
+              const deductedBoilerplateRefs = new Set();
               const boilerplatePromises = aiResponse.Programming.map(
                 async (question) => {
                   const supportedLanguages = Array.isArray(
@@ -2551,16 +3052,55 @@ const createConsumer = async (id) => {
                   let bpErr;
                   for (let attempt = 0; attempt < 2; attempt++) {
                     try {
+                      const boilerplateModelName =
+                        process.env.PROGRAMMING_VERIFICATION_MODEL ||
+                        "gemini-2.5-flash";
                       const bp = await generateBoilerplateWithGemini({
                         genAI,
-                        modelName:
-                          process.env.PROGRAMMING_VERIFICATION_MODEL ||
-                          "gemini-2.5-flash",
+                        modelName: boilerplateModelName,
                         questionTitle: question.questionTitle,
                         question: question.question,
                         testCases: question.testCases || [],
                         languages: supportedLanguages,
                       });
+
+                      // --- Credit System Integration (Programming boilerplate) ---
+                      // Deduct once per (requestId + questionTitle) to avoid duplicate charging across retries/processing.
+                      try {
+                        const inputTokens = bp?.tokenUsage?.promptTokens || 0;
+                        const outputTokens = bp?.tokenUsage?.completionTokens || 0;
+                        if (clientId && (inputTokens > 0 || outputTokens > 0)) {
+                          const titleKey = String(question.questionTitle || "untitled");
+                          const refHash = crypto
+                            .createHash("sha1")
+                            .update(`${requestId}|${titleKey}|programming_boilerplate`)
+                            .digest("hex")
+                            .slice(0, 16);
+                          const referenceId = `ai_prog_boilerplate_${refHash}`;
+                          if (!deductedBoilerplateRefs.has(referenceId)) {
+                            await CreditServiceClient.deductAiUsage({
+                              clientId,
+                              modelId: boilerplateModelName,
+                              referenceId,
+                              inputTokens,
+                              outputTokens,
+                              meta: {
+                                type: "ai_code_generation",
+                                serviceKey: "AI_CODE_GENERATION",
+                                subType: "programming_boilerplate",
+                              },
+                              channelId,
+                              jobId,
+                              tempId,
+                            });
+                            deductedBoilerplateRefs.add(referenceId);
+                          }
+                        }
+                      } catch (creditError) {
+                        // Non-blocking: credit deduction failure should not fail question generation
+                      }
+                      // ----------------------------------------------------------
+
                       question.supportedLanguages = supportedLanguages.map(
                         (lang) => ({
                           ...lang,
@@ -2605,6 +3145,9 @@ const createConsumer = async (id) => {
                     requestId,
                     consumerId: id,
                     clientId,
+                    channelId,
+                    jobId,
+                    tempId,
                   });
                   aiResponse.Programming = verificationResult.questions;
 
