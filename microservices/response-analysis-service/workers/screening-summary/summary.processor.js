@@ -21,6 +21,112 @@ let producer;
 let v2_5ConfigGlobal; // Store V2_5_CONFIG for default fallback
 
 /**
+ * Backfill screening journey metadata and append explicit result stage.
+ * This fixes:
+ * 1) missing screening name for Appearing/Appeared cards (screeningAssessmentId absent),
+ * 2) missing final Screening Passed/Failed card in timeline.
+ */
+const updateCandidateJourneyAfterScreeningSummary = async (
+  candidateScreeningDoc,
+  finalStatus
+) => {
+  try {
+    if (!candidateScreeningDoc?.jobApplicationId || !candidateScreeningDoc?._id) {
+      return;
+    }
+
+    const mongoose = require("mongoose");
+    const journeysCollection = mongoose.connection.db.collection("candidatejourneys");
+
+    const jobApplicationId = candidateScreeningDoc.jobApplicationId;
+    const candidateScreeningId = candidateScreeningDoc._id;
+    const screeningAssessmentId =
+      candidateScreeningDoc?.screeningAssessmentId?._id ||
+      candidateScreeningDoc?.screeningAssessmentId ||
+      null;
+
+    const journeyDoc = await journeysCollection.findOne({ jobApplicationId });
+    if (!journeyDoc) return;
+
+    const screeningEntries = Array.isArray(journeyDoc.candidateScreeningAssessmentIds)
+      ? [...journeyDoc.candidateScreeningAssessmentIds]
+      : [];
+
+    const idx = screeningEntries.findIndex(
+      (entry) =>
+        entry?.candidateScreeningAssessmentId?.toString() ===
+        candidateScreeningId.toString()
+    );
+
+    const now = new Date();
+    const normalizedFinal = String(finalStatus || "").toLowerCase().trim();
+
+    if (idx === -1) {
+      // No screening journey entry exists yet; create complete chain for timeline.
+      screeningEntries.push({
+        candidateScreeningAssessmentId: candidateScreeningId,
+        journey: [
+          {
+            stage: "Appeared",
+            timestamp: now,
+            ...(screeningAssessmentId ? { screeningAssessmentId } : {}),
+          },
+          {
+            stage: finalStatus,
+            timestamp: now,
+            ...(screeningAssessmentId ? { screeningAssessmentId } : {}),
+          },
+        ],
+      });
+    } else {
+      const target = { ...screeningEntries[idx] };
+      const journey = Array.isArray(target.journey) ? [...target.journey] : [];
+
+      // Backfill screeningAssessmentId in old stages so UI can resolve screening name.
+      if (screeningAssessmentId) {
+        for (let i = 0; i < journey.length; i++) {
+          if (!journey[i]?.screeningAssessmentId) {
+            journey[i] = { ...journey[i], screeningAssessmentId };
+          }
+        }
+      }
+
+      // Add explicit final stage only if not duplicate of last stage.
+      const lastStage = journey.length
+        ? String(journey[journey.length - 1]?.stage || "")
+            .toLowerCase()
+            .trim()
+        : "";
+      if (!lastStage || lastStage !== normalizedFinal) {
+        journey.push({
+          stage: finalStatus,
+          timestamp: now,
+          ...(screeningAssessmentId ? { screeningAssessmentId } : {}),
+        });
+      }
+
+      target.journey = journey;
+      screeningEntries[idx] = target;
+    }
+
+    await journeysCollection.updateOne(
+      { _id: journeyDoc._id },
+      {
+        $set: {
+          candidateScreeningAssessmentIds: screeningEntries,
+          updatedAt: now,
+        },
+      }
+    );
+  } catch (error) {
+    logger.warn("V2.5: Failed to update candidate journey after screening summary", {
+      candidateScreeningId: candidateScreeningDoc?._id?.toString?.(),
+      error: error.message,
+    });
+  }
+};
+
+/**
  * Initialize the summary processor with dependencies
  * @param {Object} dependencies - Required dependencies
  */
@@ -1035,6 +1141,11 @@ const processScreeningSummary = async ({
         modifiedCount: statusUpdateResult.modifiedCount,
       });
     }
+
+    // Keep Candidate Journey in sync for timeline cards:
+    // - ensures screeningAssessmentId exists on screening journey stages
+    // - appends explicit Passed/Failed stage after completion.
+    await updateCandidateJourneyAfterScreeningSummary(candidateScreening, status);
 
     // Fetch AI responses
     const aiResponses = await CandidateAnswerAiResponse.find({
