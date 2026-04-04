@@ -759,13 +759,11 @@ const generatePromptForType = (
     - Question must have exactly ONE objectively correct option.
     - Set "isMultipleCorrect": false.
     - Set "correctAnswer" to exactly 1 option key.
-    - Do NOT use wording like "Select all that apply".
     - Distractors must be plausible but clearly incorrect.`;
       const multiCorrectPrompt = `**MULTI-CORRECT PROMPT (STRICT)**:
     - Question must have 2-4 objectively correct options.
     - Set "isMultipleCorrect": true.
     - Set "correctAnswer" to 2-4 option keys.
-    - Use wording like "Select all that apply" only for these questions.
     - Ensure each selected option is independently true; each unselected option is false.`;
 
       let flowSpecificMcqRules = "";
@@ -780,7 +778,6 @@ const generatePromptForType = (
     - Every question MUST include code in QUESTION TEXT using [SNIPPET_START:lang]...[SNIPPET_END].
     - Every question MUST ask for output/final value/error prediction.
     - Exactly ONE option must match the true output; other 3 must be plausible but different.
-    - FORBIDDEN: theory/concept-only questions, “Select all that apply”, multiple-correct answers.
     - REQUIRED CHECK: all ${number} questions contain [SNIPPET_START] markers.
 
   ${singleCorrectPrompt}`;
@@ -796,8 +793,8 @@ const generatePromptForType = (
     - REQUIRED CHECK: zero questions contain [SNIPPET_START] markers.
 
   **ANSWER-TYPE SPLIT (THEORY_ONLY)**:
-    - MULTI-correct question indices: ${multiTheoryIdxStr} (these must have 2-4 correctAnswer keys, and question text may say "Select all that apply")
-    - SINGLE-correct question indices: ${singleTheoryIdxStr} (exactly 1 correctAnswer key; do NOT say "Select all that apply")
+    - MULTI-correct question indices: ${multiTheoryIdxStr} (these must have 2-4 correctAnswer keys)
+    - SINGLE-correct question indices: ${singleTheoryIdxStr} (exactly 1 correctAnswer key)
 
   Apply this prompt only for SINGLE indices (${singleTheoryIdxStr}):
   ${singleCorrectPrompt}
@@ -814,11 +811,10 @@ const generatePromptForType = (
     - OUTPUT-BASED (SINGLE-correct) indices: ${outputStartIdx}..${outputEndIdx}
       * Must include snippet markers and ask output prediction only.
       * Exactly ONE option matches the true output.
-      * FORBIDDEN: “Select all that apply”, multi-correct answers.
     - THEORY/FUNDAMENTALS indices: ${theoryStartIdx}..${theoryEndIdx}
       * NO snippets, NO output-prediction wording.
-      * MULTI-correct theory indices: ${multiTheoryIdxStr} (2-4 correctAnswer keys; do not say "Select all that apply")
-      * SINGLE-correct theory indices: ${singleTheoryIdxStr} (exactly 1 correctAnswer key; do NOT say "Select all that apply")
+      * MULTI-correct theory indices: ${multiTheoryIdxStr} (2-4 correctAnswer keys)
+      * SINGLE-correct theory indices: ${singleTheoryIdxStr} (exactly 1 correctAnswer key)
 
   **VALIDATION (MUST SELF-CHECK BEFORE OUTPUT)**:
     - Exactly ${withCodeCount} questions contain [SNIPPET_START]
