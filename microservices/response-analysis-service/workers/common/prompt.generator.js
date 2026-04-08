@@ -11,6 +11,23 @@ const generateBaseInstructions = () => {
 };
 
 /**
+ * When screening includes an internal reference / ideal answer, prefer semantic coverage over generic score bands.
+ */
+const generateIdealAnswerBlock = (responseData) => {
+  const ideal = responseData.idealAnswer || responseData.baseAnswer;
+  if (!ideal || String(ideal).trim().length < 5) {
+    return "";
+  }
+  return `
+
+**REFERENCE ANSWER (INTERNAL CALIBRATION — CANDIDATE DID NOT SEE THIS)**
+Evaluate the candidate by **meaningful coverage** of the ideas below. Paraphrasing and alternative valid explanations count. Do **not** penalize for different wording.
+
+${String(ideal).slice(0, 15000)}
+`;
+};
+
+/**
  * Generate relevance checking instructions
  */
 const generateRelevanceInstructions = (responseData) => {
@@ -565,6 +582,7 @@ You are evaluating how well the candidate answered the specific question asked. 
       ? stage1Results.communication.summary
       : stage1Results.communication
   }
+${generateIdealAnswerBlock(responseData)}
 
 ${generateRelevanceInstructions(responseData)}
 
@@ -675,13 +693,15 @@ This information is provided for context but should NOT influence your technical
 `;
   }
 
+  const subjectiveReference =
+    responseData.baseAnswer || responseData.idealAnswer;
   let baseAnswerSection = "";
-  if (responseData.baseAnswer) {
+  if (subjectiveReference) {
     baseAnswerSection = `
 
 **🎯 BASE ANSWER COMPARISON ANALYSIS**
 
-**Expected Answer Provided:** "${responseData.baseAnswer}"
+**Expected Answer Provided:** "${subjectiveReference}"
 
 **CRITICAL: You MUST include a complete baseAnswerComparison object in your response:**
 

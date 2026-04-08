@@ -3,6 +3,7 @@ const { Kafka } = require("kafkajs");
 const cors = require("cors");
 const questionRoutes = require("./routes/questionsRoutes");
 const jobDescriptionRoutes = require("./routes/jobDescriptionRoutes");
+const idealAnswerRoutes = require("./routes/idealAnswerRoutes");
 const CreditServiceClient = require("./utils/creditServiceClient");
 
 require("dotenv").config();
@@ -502,5 +503,6 @@ app.use((req, res, next) => {
 
 app.use("/api/questions", questionRoutes);
 app.use("/api/jobDescription", jobDescriptionRoutes);
+app.use("/api/ideal-answers", idealAnswerRoutes);
 
 module.exports = app;
