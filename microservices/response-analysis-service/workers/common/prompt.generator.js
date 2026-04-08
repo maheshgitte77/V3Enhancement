@@ -15,16 +15,42 @@ const generateBaseInstructions = () => {
  */
 const generateIdealAnswerBlock = (responseData) => {
   const ideal = responseData.idealAnswer || responseData.baseAnswer;
+  const rubricPoints = Array.isArray(responseData.rubricPoints)
+    ? responseData.rubricPoints.filter(Boolean)
+    : [];
   if (!ideal || String(ideal).trim().length < 5) {
     return "";
   }
+  const rubricSection = rubricPoints.length
+    ? `\n**RUBRIC POINTS FOR CALIBRATION (semantic coverage, not wording match):**\n${rubricPoints
+      .map((point, index) => `${index + 1}. ${point}`)
+      .join("\n")}\n`
+    : "";
   return `
 
 **REFERENCE ANSWER (INTERNAL CALIBRATION — CANDIDATE DID NOT SEE THIS)**
 Evaluate the candidate by **meaningful coverage** of the ideas below. Paraphrasing and alternative valid explanations count. Do **not** penalize for different wording.
+${rubricSection}
+If rubric points are present:
+- Use them as the primary calibration checklist for scoring.
+- Reward coverage of each concept (including valid alternatives).
+- Penalize only missing/incorrect/very shallow concepts.
 
 ${String(ideal).slice(0, 15000)}
 `;
+};
+
+const hasIdealRubricCalibration = (responseData) => {
+  const hasIdeal =
+    !!responseData?.idealAnswer && String(responseData.idealAnswer).trim().length > 10;
+  const hasRubric =
+    Array.isArray(responseData?.rubricPoints) &&
+    responseData.rubricPoints.filter(Boolean).length > 0;
+  return hasIdeal && hasRubric;
+};
+
+const buildRubricCoverageJsonHint = () => {
+  return "";
 };
 
 /**
@@ -230,21 +256,18 @@ const generateVideoBehavioralPrompt = (responseData) => {
     ? `
 **⚠️ FRONTEND PROCTORING ALERTS - APPLY STRICT SCRUTINY ⚠️**
 The following suspicious activities were detected by browser monitoring:
-${
-  tabSwitches > 0
-    ? `- Tab switches detected: ${tabSwitches} (candidate left the interview tab)`
-    : ""
-}
-${
-  fullScreenExits > 0
-    ? `- Full screen exits: ${fullScreenExits} (candidate exited full screen mode)`
-    : ""
-}
-${
-  hasQuestionCopying
-    ? `- Question copying detected: Candidate copied the question text (likely searching for answers)`
-    : ""
-}
+${tabSwitches > 0
+      ? `- Tab switches detected: ${tabSwitches} (candidate left the interview tab)`
+      : ""
+    }
+${fullScreenExits > 0
+      ? `- Full screen exits: ${fullScreenExits} (candidate exited full screen mode)`
+      : ""
+    }
+${hasQuestionCopying
+      ? `- Question copying detected: Candidate copied the question text (likely searching for answers)`
+      : ""
+    }
 
 **CRITICAL**: Since frontend monitoring detected suspicious activity, you MUST apply STRICT scrutiny to:
 1. Eye movements - Look for reading patterns that explain the tab switching
@@ -397,21 +420,18 @@ const generateAudioBehavioralPrompt = (responseData) => {
     ? `
 **⚠️ FRONTEND PROCTORING ALERTS - APPLY STRICT SCRUTINY ⚠️**
 The following suspicious activities were detected by browser monitoring:
-${
-  tabSwitches > 0
-    ? `- Tab switches detected: ${tabSwitches} (candidate left the interview tab)`
-    : ""
-}
-${
-  fullScreenExits > 0
-    ? `- Full screen exits: ${fullScreenExits} (candidate exited full screen mode)`
-    : ""
-}
-${
-  hasQuestionCopying
-    ? `- Question copying detected: Candidate copied the question text (likely searching for answers)`
-    : ""
-}
+${tabSwitches > 0
+      ? `- Tab switches detected: ${tabSwitches} (candidate left the interview tab)`
+      : ""
+    }
+${fullScreenExits > 0
+      ? `- Full screen exits: ${fullScreenExits} (candidate exited full screen mode)`
+      : ""
+    }
+${hasQuestionCopying
+      ? `- Question copying detected: Candidate copied the question text (likely searching for answers)`
+      : ""
+    }
 
 **CRITICAL**: Since frontend monitoring detected suspicious activity, you MUST apply STRICT scrutiny to:
 1. Speech delivery - Check if answers sound read or scripted after returning to tab
@@ -561,6 +581,95 @@ If behavioralAnalysis shows 3+ of these, MUST add READING_DELIVERY or SCRIPTED_D
  * Generate Media (Video/Audio) Stage 2 Scoring Prompt
  */
 const generateMediaScoringPrompt = (responseData, stage1Results) => {
+  if (hasIdealRubricCalibration(responseData)) {
+    const rubricPoints = responseData.rubricPoints
+      .filter(Boolean)
+      .map((point, index) => `${index + 1}. ${point}`)
+      .join("\n");
+
+    return `
+${generateBaseInstructions()}
+
+**CALIBRATION MODE (RUBRIC-FIRST, COMPACT)**
+You MUST score by semantic coverage of rubric points against candidate answer (not wording match).
+
+**QUESTION ASKED:** "${responseData.question}"
+**CANDIDATE'S ANSWER (transcribed ${responseData.type}):** "${stage1Results.transcription}"
+**EXPERIENCE:** ${responseData.experience} years
+**JOB ROLE:** ${responseData.jobRole}
+**Communication Style Observed:** ${typeof stage1Results.communication === "object"
+      ? stage1Results.communication.summary
+      : stage1Results.communication
+    }
+
+**REFERENCE IDEAL ANSWER (internal):**
+${String(responseData.idealAnswer).slice(0, 12000)}
+
+**RUBRIC POINTS (PRIMARY SCORING CHECKLIST):**
+${rubricPoints}
+
+**SCORING RULES (MANDATORY):**
+1) Relevance gate first:
+   - relevanceAssessment.score <= 0.2 -> correctPercentage = 0
+   - relevanceAssessment.score < 0.5 -> correctPercentage <= 40
+2) If relevant (>= 0.5), compute rubric coverage:
+   - full = 1.0, partial = 0.5, missing = 0
+   - rubricCoverageScore = (sum / total rubric points) * 100
+3) Final score calibration:
+   - correctPercentage should primarily follow rubricCoverageScore
+   - apply small adjustment for factual correctness/coherence (+/-10 max)
+4) overallRating MUST equal correctPercentage/20 (rounded to one decimal)
+5) answerRating.rating MUST be aligned with overallRating
+6) reasonForDeduction MUST list only missing/incorrect rubric points
+7) answerImprovementSuggestions MUST include only missing/weak rubric points (actionable)
+
+**OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
+- technicalDepth.rating: technical depth quality (independent but aligned with final score band)
+- technicalDepth.asPerExplanation: technical-only explanation with concrete evidence from candidate response
+- technicalDepthAsPerExperience: evaluate depth for ${responseData.experience} years (no integrity comments)
+- responseCoherence: structure, sequencing, clarity of explanation
+- responseQuality:
+  - high: relevant + mostly correct + coherent
+  - medium: relevant but partial depth/accuracy
+  - low: poor relevance or major errors
+- answerSummary: 3 concise technical points candidate actually covered
+- detailedSummary: balanced technical recap (what was good, what missing) vs expected level
+- answerEffectiveness.rating: overall effectiveness of answering the asked question (must align with score)
+- NEVER mention integrity/cheating in technical scoring fields above
+- Maintain the exact existing JSON field names/types (no extra fields)
+
+**Return JSON only:**
+{
+  "correctPercentage": "<0-100 number-like string>",
+  "overallRating": "<0.0-5.0>",
+  "technicalDepth": {
+    "rating": "<0.0-5.0>",
+    "asPerExplanation": "<technical-only explanation>",
+    "experienceAdjusted": true
+  },
+  "technicalDepthAsPerExperience": {
+    "rating": "<0.0-5.0>",
+    "asPerExperience": "<assessment for ${responseData.experience} years>"
+  },
+  "answerRating": {
+    "rating": "<0.0-5.0>",
+    "reasonForDeduction": ["<missing/incorrect rubric point>", "<...>"]
+  },
+  "responseCoherence": "<0.0-5.0>",
+  "relevanceAssessment": {
+    "score": "<0.0-1.0>",
+    "explanation": "<relevance vs question>"
+  },
+  "responseQuality": "high|medium|low",
+  "answerSummary": ["<key point>", "<key point>", "<key point>"],
+  "answerImprovementSuggestions": ["<missing rubric point action>", "<missing rubric point action>"],
+  "detailedSummary": "<short technical summary vs ideal/rubric>",
+  "answerEffectiveness": {
+    "rating": "<0.0-5.0>"
+  }
+}`;
+  }
+
   return `
 ${generateBaseInstructions()}
 
@@ -577,11 +686,10 @@ You are evaluating how well the candidate answered the specific question asked. 
 **CANDIDATE CONTEXT:**
 - Experience Level: ${responseData.experience} years
 - Job Role: ${responseData.jobRole}
-- Communication Style Observed: ${
-    typeof stage1Results.communication === "object"
+- Communication Style Observed: ${typeof stage1Results.communication === "object"
       ? stage1Results.communication.summary
       : stage1Results.communication
-  }
+    }
 ${generateIdealAnswerBlock(responseData)}
 
 ${generateRelevanceInstructions(responseData)}
@@ -591,9 +699,8 @@ ${generateScoringInstructions()}
 **EVALUATION INSTRUCTIONS:**
 1. **First (MANDATORY)**: Check relevance - Does the answer address the question asked? Set relevanceAssessment.score FIRST
 2. **Second (CONDITIONAL)**: Only if relevanceAssessment.score >= 0.5, assess technical correctness and depth
-3. **Third (CONDITIONAL)**: Only if relevant (relevanceAssessment.score >= 0.6), consider their experience level (${
-    responseData.experience
-  } years) when evaluating depth
+3. **Third (CONDITIONAL)**: Only if relevant (relevanceAssessment.score >= 0.6), consider their experience level (${responseData.experience
+    } years) when evaluating depth
 4. **Fourth (CONDITIONAL)**: Only if relevant, evaluate communication quality and answer effectiveness
 5. **CRITICAL**: Apply relevance rules to correctPercentage BEFORE any other scoring
 
@@ -610,9 +717,8 @@ If candidate has 3-5 years experience AND answer is relevant:
 
 **IMPORTANT NOTES:**
 - Focus PURELY on the technical content of their answer vs. the question
-- **For relevant answers**: Consider whether the answer demonstrates appropriate knowledge for ${
-    responseData.experience
-  } years experience
+- **For relevant answers**: Consider whether the answer demonstrates appropriate knowledge for ${responseData.experience
+    } years experience
 - **Balance assessment**: Identify what was covered well FIRST, then note what was missing or incorrect
 - Provide constructive improvement suggestions, but recognize good answers appropriately
 - **CRITICAL**: Mid-level scoring guidance ONLY applies if answer is relevant (relevanceAssessment.score >= 0.6). Irrelevant answers = 0% regardless of experience
@@ -628,8 +734,7 @@ If candidate has 3-5 years experience AND answer is relevant:
   },
   "technicalDepthAsPerExperience": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExperience": "[PURELY TECHNICAL assessment relative to ${
-      responseData.experience
+    "asPerExperience": "[PURELY TECHNICAL assessment relative to ${responseData.experience
     } years experience. NEVER mention integrity or cheating]" 
   },
   "answerRating": {
@@ -644,9 +749,8 @@ If candidate has 3-5 years experience AND answer is relevant:
   "responseQuality": "[high/medium/low - based on coherence, relevance, technical accuracy]",
   "answerSummary": ["[Key technical point 1 from candidate's answer]", "[Key technical point 2 from candidate's answer]", "[Key technical point 3 from candidate's answer]"],
   "answerImprovementSuggestions": ["[Specific improvement based on what was missing or incorrect in their answer]", "[Another actionable improvement]"],
-  "detailedSummary": "[Comprehensive HR-friendly summary: What did the candidate demonstrate well? What was missing? How does their answer compare to expected knowledge for ${
-    responseData.experience
-  } years experience? Focus on technical competency. DO NOT mention integrity or cheating concerns]",
+  "detailedSummary": "[Comprehensive HR-friendly summary: What did the candidate demonstrate well? What was missing? How does their answer compare to expected knowledge for ${responseData.experience
+    } years experience? Focus on technical competency. DO NOT mention integrity or cheating concerns]",
   "answerEffectiveness": {
     "rating": "<String, 0.0–5.0> - Overall effectiveness of the answer in addressing the question"
   }
@@ -671,7 +775,119 @@ const generateSubjectiveScoringPrompt = (
   responseData,
   typingAnalysis = null,
 ) => {
+  if (hasIdealRubricCalibration(responseData)) {
+    const rubricPoints = responseData.rubricPoints
+      .filter(Boolean)
+      .map((point, index) => `${index + 1}. ${point}`)
+      .join("\n");
+
+    return `
+${generateBaseInstructions()}
+${generateTextLanguageDetectionInstructions()}
+
+**CALIBRATION MODE (RUBRIC-FIRST, COMPACT)**
+Score this subjective answer using ideal answer + rubric point coverage.
+
+**QUESTION ASKED:** "${responseData.question}"
+**CANDIDATE ANSWER:** "${responseData.textAnswer || ""}"
+**EXPERIENCE:** ${responseData.experience} years
+**JOB ROLE:** ${responseData.jobRole}
+
+
+**REFERENCE IDEAL ANSWER (internal):**
+${String(responseData.idealAnswer).slice(0, 12000)}
+
+**RUBRIC POINTS (PRIMARY CHECKLIST):**
+${rubricPoints}
+
+**MANDATORY RULES:**
+1) Relevance gate:
+   - score <= 0.2 -> correctPercentage = 0
+   - score < 0.5 -> correctPercentage <= 40
+2) If relevant, evaluate rubric coverage semantically:
+   - full=1, partial=0.5, missing=0
+   - rubricCoverageScore drives final correctPercentage (primary factor)
+3) overallRating = correctPercentage/20 (one decimal)
+4) answerRating.reasonForDeduction = only missing/incorrect rubric points
+5) answerImprovementSuggestions = only missing/weak rubric points
+
+**OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
+- technicalDepth.rating: depth/accuracy of technical explanation
+- technicalDepth.asPerExplanation: technical-only evidence summary (no integrity commentary)
+- technicalDepthAsPerExperience: assess depth expectation for ${responseData.experience} years
+- communicationRating/confidenceLevel/responseCoherence: evaluate writing clarity, confidence signals, logical flow
+- responseQuality:
+  - high: relevant + technically sound + coherent
+  - medium: relevant but partial/limited depth
+  - low: poor relevance or major technical issues
+- answerSummary: 3 factual technical points from candidate text
+- detailedSummary: concise technical recap vs ideal/rubric expectations
+- answerEffectiveness.rating: how effectively candidate answered the asked question
+- languageDetection: detect actual language usage from text; keep legacy structure
+- Maintain exact existing JSON field names/types (no extra fields)
+
+**Return JSON only:**
+{
+  "correctPercentage": "<0-100>",
+  "overallRating": "<0.0-5.0>",
+  "technicalDepth": {
+    "rating": "<0.0-5.0>",
+    "asPerExplanation": "<technical-only>",
+    "experienceAdjusted": true
+  },
+  "technicalDepthAsPerExperience": {
+    "rating": "<0.0-5.0>",
+    "asPerExperience": "<for ${responseData.experience} years>"
+  },
+  "answerRating": {
+    "rating": "<0.0-5.0>",
+    "reasonForDeduction": ["<missing/incorrect rubric point>", "<...>"]
+  },
+  "communicationRating": "<0.0-5.0>",
+  "confidenceLevel": "<0.0-5.0>",
+  "responseCoherence": "<0.0-5.0>",
+  "relevanceAssessment": {
+    "score": "<0.0-1.0>",
+    "explanation": "<relevance explanation>"
+  },
+  "responseQuality": "high|medium|low",
+  "answerSummary": ["<key point>", "<key point>", "<key point>"],
+  "answerImprovementSuggestions": ["<missing rubric point action>", "<missing rubric point action>"],
+  "detailedSummary": "<short technical summary vs ideal/rubric>",
+  "answerEffectiveness": {
+    "rating": "<0.0-5.0>",
+    "relevanceBreakdown": {
+      "relevantTimeSeconds": 0,
+      "irrelevantTimeSeconds": 0,
+      "relevanceExplanation": "<text relevance>"
+    }
+  },
+  "languageDetection": {
+    "languages": ["English"],
+    "percentageWise": ["100.00%"],
+    "languageSwitching": false,
+    "primaryLanguage": "English",
+    "languageProficiency": {
+      "English": "Fluent"
+    },
+    "codeSwitching": false,
+    "languageConsistency": "Consistent"
+  }
+}`;
+  }
+
   let typingContext = "";
+  const rubricContext = Array.isArray(responseData.rubricPoints) &&
+    responseData.rubricPoints.length
+    ? `
+
+**RUBRIC POINTS FOR CALIBRATION (semantic coverage, not wording match):**
+${responseData.rubricPoints
+      .filter(Boolean)
+      .map((point, index) => `${index + 1}. ${point}`)
+      .join("\n")}
+`
+    : "";
 
   if (typingAnalysis && typingAnalysis.hasTypingData) {
     const analysis = typingAnalysis.analysis?.details || {};
@@ -755,6 +971,7 @@ ${generateTextLanguageDetectionInstructions()}
 **Text Answer to Evaluate**: "${responseData.textAnswer || ""}"
 ${typingContext}
 ${baseAnswerSection}
+${rubricContext}
 
 **MID-LEVEL (3-5 YEARS) SCORING GUIDANCE (ONLY if relevanceAssessment.score >= 0.6):**
 If candidate has 3-5 years experience AND answer is relevant:
@@ -779,8 +996,7 @@ If candidate has 3-5 years experience AND answer is relevant:
   },
   "technicalDepthAsPerExperience": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExperience": "[PURELY TECHNICAL assessment for ${
-      responseData.experience
+    "asPerExperience": "[PURELY TECHNICAL assessment for ${responseData.experience
     } years experience]" 
   },
   "answerRating": {
@@ -816,8 +1032,7 @@ If candidate has 3-5 years experience AND answer is relevant:
     },
     "codeSwitching": true/false,
     "languageConsistency": "Consistent | Mixed | Frequent switching"
-  }${
-    baseAnswerSection
+  }${baseAnswerSection
       ? `,
   "baseAnswerComparison": {
     "hasExpectedAnswer": true,
@@ -830,7 +1045,7 @@ If candidate has 3-5 years experience AND answer is relevant:
     "detailedAnalysis": "..."
   }`
       : ""
-  }
+    }
 }
 
 **CRITICAL REMINDERS:**
@@ -921,9 +1136,8 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
       prompt += `
 
 **📝 INTEGRITY CONTEXT - MINOR OBSERVATION (LOW EVIDENCE):**
-- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${
-        evidenceStrength.totalQuestions
-      } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
+- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${evidenceStrength.totalQuestions
+        } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
 - Evidence Level: WEAK (isolated behavioral observation)
 - Definitive Cheating Flags: ${evidenceStrength.definitiveFlags} (none detected)
 - High Confidence Flags: ${evidenceStrength.highConfidenceFlags}
@@ -933,8 +1147,8 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - This could be due to candidate thinking deeply, looking at notes, or AI analysis error
 - DO NOT treat this as a red flag or integrity concern in the summary
 - If mentioning at all, phrase as: "Minor observation in Q${evidenceStrength.flaggedQuestionIndices.join(
-        ", Q",
-      )} may warrant brief clarification during interview"
+          ", Q",
+        )} may warrant brief clarification during interview"
 - Focus the summary on the candidate's STRENGTHS and technical performance
 - The recommendation "${recommendation}" should NOT be negatively impacted by this minor observation
 `;
@@ -943,9 +1157,8 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
       prompt += `
 
 **⚠️ INTEGRITY CONTEXT - MODERATE OBSERVATION:**
-- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${
-        evidenceStrength.totalQuestions
-      } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
+- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${evidenceStrength.totalQuestions
+        } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
 - Evidence Level: MODERATE (pattern detected but not definitive)
 - Definitive Cheating Flags: ${evidenceStrength.definitiveFlags}
 - High Confidence Flags: ${evidenceStrength.highConfidenceFlags}
@@ -961,21 +1174,19 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
       // Strong concern - AI should clearly highlight integrity issues
       const correlationInfo = evidenceStrength.hasCorrelatedCheatingPattern
         ? `\n- Correlated Cheating Patterns: ${evidenceStrength.matchedCorrelations.join(
-            ", ",
-          )} (Strong indicator of deliberate cheating)`
+          ", ",
+        )} (Strong indicator of deliberate cheating)`
         : "";
 
       prompt += `
 
 **🚨 INTEGRITY CONTEXT - SIGNIFICANT CONCERN (STRONG EVIDENCE):**
-- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${
-        evidenceStrength.totalQuestions
-      } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
+- Flagged Questions: ${evidenceStrength.flaggedQuestions} out of ${evidenceStrength.totalQuestions
+        } (${evidenceStrength.flaggedPercentage.toFixed(1)}%)
 - Evidence Level: STRONG (definitive indicators detected)
 - Definitive Cheating Flags: ${evidenceStrength.definitiveFlags}
-- High Confidence Flags: ${
-        evidenceStrength.highConfidenceFlags
-      }${correlationInfo}
+- High Confidence Flags: ${evidenceStrength.highConfidenceFlags
+        }${correlationInfo}
 
 **AI INSTRUCTION FOR SUMMARY:**
 - Clear integrity concerns were detected with strong evidence
@@ -1261,11 +1472,10 @@ Based on candidate's overall fit score (0-100), categorize and provide exactly 3
 - **Code Quality Score**: ${scores.codeQualityScore}%
 - **Reasoning Score**: ${scores.reasoningScore}%
 - **MCQ Score**: ${scores.mcqScore !== null ? scores.mcqScore + "%" : "N/A"}
-- **Programming Test Case Score**: ${
-    scores.programmingTestCaseScore !== null
+- **Programming Test Case Score**: ${scores.programmingTestCaseScore !== null
       ? scores.programmingTestCaseScore + "%"
       : "N/A"
-  }
+    }
 - **SQL Score**: ${scores.sqlScore !== null ? scores.sqlScore + "%" : "N/A"}
 - **Final Recommendation (Preliminary)**: ${recommendation}
 
