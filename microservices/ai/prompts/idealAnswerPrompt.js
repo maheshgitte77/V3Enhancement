@@ -46,14 +46,19 @@ RULES
 5. Include practical, real-world examples ONLY to illustrate concepts (optional). Examples must be generic and interchangeable.
    - Do NOT depend on one specific example to justify the rubric.
    - In scoring, candidates must get credit if they explain the concept correctly with DIFFERENT examples.
-6. Provide rubricPoints as evaluation coverage:
+6. Formatting constraints (MANDATORY):
+   - Do NOT output markdown code fences (no triple backticks).
+   - Avoid markdown inline-code backticks too.
+   - If you must reference identifiers (props, variables, components), write them as plain quoted strings.
+   - Avoid long code blocks. If you must mention code, use short inline snippets only (as plain text, without backticks).
+7. Provide rubricPoints as evaluation coverage:
    - Use a flexible number of points (typically 4–7).
    - Each point must be a meaningful concept/expectation that can be checked from a transcript (answer-only evidence).
    - Avoid redundant, overlapping, or filler points. Points must be mutually distinct.
    - Prefer concept-level points over tool-name lists (only mention tools if the question explicitly asks).
    - Add a tiny evidence cue inside each point so scoring is easier, e.g. "(evidence: mentions X and why)".
    - These points are used for semantic coverage scoring — NOT literal wording match and NOT exact example match.
-7. Return ONLY valid JSON (no markdown fences) with this shape:
+8. Return ONLY valid JSON (no markdown fences) with this shape:
 {
   "idealAnswerText": "string",
   "rubricPoints": ["string"]

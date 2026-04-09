@@ -49,6 +49,33 @@ const hasIdealRubricCalibration = (responseData) => {
   return hasIdeal && hasRubric;
 };
 
+/**
+ * Sanitize large free-form text before embedding into prompts.
+ * Prevents markdown code fences / long code blocks from polluting JSON-only scoring instructions.
+ */
+const sanitizeForPromptEmbedding = (value, maxLen = 12000) => {
+  if (value == null) return "";
+  let text = String(value);
+  // Remove markdown code fences and their content (best-effort).
+  // This avoids the model switching to "code mode" and breaking JSON-only outputs.
+  text = text.replace(/```[\s\S]*?```/g, (match) => {
+    // keep a tiny placeholder so context isn't lost completely
+    const snippet = match
+      .replace(/```/g, "")
+      .trim()
+      .slice(0, 200);
+    return snippet ? `[code omitted: ${snippet}]` : "[code omitted]";
+  });
+  // Remove any remaining fence markers
+  text = text.replace(/```/g, "");
+  // Neutralize inline markdown code markers (single backticks).
+  // They don't break JS concatenation, but they can cause the LLM to over-focus on formatting.
+  text = text.replace(/`/g, "'");
+  // Hard cap
+  if (maxLen && text.length > maxLen) text = text.slice(0, maxLen);
+  return text;
+};
+
 const buildRubricCoverageJsonHint = () => {
   return "";
 };
@@ -604,7 +631,7 @@ Paraphrases and different valid examples MUST receive full credit if the underly
     }
 
 **REFERENCE IDEAL ANSWER (internal):**
-${String(responseData.idealAnswer).slice(0, 12000)}
+${sanitizeForPromptEmbedding(responseData.idealAnswer, 12000)}
 
 **RUBRIC POINTS (PRIMARY SCORING CHECKLIST):**
 ${rubricPoints}
@@ -631,7 +658,12 @@ ${rubricPoints}
 4) overallRating MUST equal correctPercentage/20 (rounded to one decimal)
 5) answerRating.rating MUST be aligned with overallRating
 6) reasonForDeduction MUST list only missing/incorrect rubric points
-7) answerImprovementSuggestions MUST include only missing/weak rubric points (actionable, aligned to rubric)
+7) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
+   - NO generic advice (e.g., "be more confident", "improve communication") unless it is explicitly a rubric point
+   - NO extra topics not present in rubricPoints
+   - Each suggestion must be a short "missing confirmation" line (few words / one short sentence)
+   - Preferred format: "<rubric point #>. <what is missing in one short phrase>"
+   - Example: "3. Did not explain why/when to use X"
 
 **EVIDENCE REQUIREMENT (SHORT):**
 - In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
@@ -812,7 +844,7 @@ Paraphrases and different valid examples MUST receive full credit if the concept
 
 
 **REFERENCE IDEAL ANSWER (internal):**
-${String(responseData.idealAnswer).slice(0, 12000)}
+${sanitizeForPromptEmbedding(responseData.idealAnswer, 12000)}
 
 **RUBRIC POINTS (PRIMARY CHECKLIST):**
 ${rubricPoints}
@@ -835,7 +867,12 @@ ${rubricPoints}
    - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless rubric is ambiguous/overlapping
 3) overallRating = correctPercentage/20 (one decimal)
 4) answerRating.reasonForDeduction = only missing/incorrect rubric points
-5) answerImprovementSuggestions = only missing/weak rubric points (actionable, aligned to rubric)
+5) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
+   - NO generic advice unless it is explicitly a rubric point
+   - NO extra topics not present in rubricPoints
+   - Each suggestion must be a short "missing confirmation" line (few words / one short sentence)
+   - Preferred format (no required keyword): "<rubric point #>. <what is missing in one short phrase>"
+   - Example: "2. Did not mention Y"
 
 **EVIDENCE REQUIREMENT (SHORT):**
 - In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
