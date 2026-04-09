@@ -644,6 +644,18 @@ ${rubricPoints}
 - If rubric points include parenthetical "evidence:" hints, treat them as illustrative semantics, NOT literal keyword requirements.
 
 **SCORING RULES (MANDATORY):**
+0) TOTAL IRRELEVANCE OVERRIDE (HARD RULE):
+   - If the candidate answer is totally irrelevant to the question (different topic/tech, random text, "I don't know", gibberish),
+     then set:
+     - relevanceAssessment.score = 0.0–0.2 with a short explanation
+     - correctPercentage = "0"
+     - overallRating = "0.0"
+     - technicalDepth.rating = "0.0"
+     - technicalDepthAsPerExperience.rating = "0.0"
+     - answerRating.rating = "0.0"
+     - answerRating.reasonForDeduction = ["Answer is irrelevant to the question"]
+     - answerImprovementSuggestions = ["Answer did not address the question/topic"]
+     Then STOP; do not apply rubric coverage.
 1) Compute rubric coverage against the transcription (primary scoring method):
    - full = 1.0 (clearly covers the concept correctly + brief explanation)
    - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
@@ -855,6 +867,18 @@ ${rubricPoints}
 - If rubric points include parenthetical "evidence:" hints, treat them as illustrative semantics, NOT literal keyword requirements.
 
 **MANDATORY RULES:**
+0) TOTAL IRRELEVANCE OVERRIDE (HARD RULE):
+   - If the candidate answer is totally irrelevant to the question (different topic/tech, random text, "I don't know", gibberish),
+     then set:
+     - relevanceAssessment.score = 0.0–0.2 with a short explanation
+     - correctPercentage = "0"
+     - overallRating = "0.0"
+     - technicalDepth.rating = "0.0"
+     - technicalDepthAsPerExperience.rating = "0.0"
+     - answerRating.rating = "0.0"
+     - answerRating.reasonForDeduction = ["Answer is irrelevant to the question"]
+     - answerImprovementSuggestions = ["Answer did not address the question/topic"]
+     Then STOP; do not apply rubric coverage.
 1) Evaluate rubric coverage semantically against the candidate answer (primary scoring method):
    - full = 1.0 (clearly covers the concept correctly + brief explanation)
    - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
