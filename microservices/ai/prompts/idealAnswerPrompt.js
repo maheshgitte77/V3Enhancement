@@ -53,10 +53,10 @@ RULES
    - Avoid long code blocks. If you must mention code, use short inline snippets only (as plain text, without backticks).
 7. Provide rubricPoints as evaluation coverage:
    - Use a flexible number of points (typically 4–7).
-   - Each point must be a meaningful concept/expectation that can be checked from a transcript (answer-only evidence).
-   - Avoid redundant, overlapping, or filler points. Points must be mutually distinct.
+   - Each point must be a meaningful concept/expectation that can be checked from a candidate's answer transcript.
+   - STRICT: Each rubric point must be UNIQUE and NON-OVERLAPPING (one concept per point). Do not split one concept into multiple points.
    - Prefer concept-level points over tool-name lists (only mention tools if the question explicitly asks).
-   - Add a tiny evidence cue inside each point so scoring is easier, e.g. "(evidence: mentions X and why)".
+   - If the question asks for "at least two techniques", include rubric points that cover multiple common techniques (up to 4–7 total), plus when-to-prefer guidance.
    - These points are used for semantic coverage scoring — NOT literal wording match and NOT exact example match.
 8. Return ONLY valid JSON (no markdown fences) with this shape:
 {

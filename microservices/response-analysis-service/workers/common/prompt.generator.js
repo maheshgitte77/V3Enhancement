@@ -641,29 +641,27 @@ ${rubricPoints}
 - Do NOT require candidates to match the ideal answer wording or the same example(s).
 - If the transcription is empty/too short/unintelligible, set relevanceAssessment.score low and score accordingly.
 - If there are likely ASR/transcription errors, score based on the most reasonable recoverable meaning (do not over-penalize grammar).
+- If rubric points include parenthetical "evidence:" hints, treat them as illustrative semantics, NOT literal keyword requirements.
 
 **SCORING RULES (MANDATORY):**
-1) Relevance gate first:
-   - relevanceAssessment.score <= 0.2 -> correctPercentage = 0
-   - relevanceAssessment.score < 0.5 -> correctPercentage <= 40
-2) If relevant (>= 0.5), compute rubric coverage:
+1) Compute rubric coverage against the transcription (primary scoring method):
    - full = 1.0 (clearly covers the concept correctly + brief explanation)
    - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
    - missing = 0 (not present)
    - rubricCoverageScore = (sum / total rubric points) * 100
-3) Final score calibration:
+2) Final score calibration:
    - correctPercentage should primarily follow rubricCoverageScore
    - apply small adjustment for factual correctness/coherence (+/-10 max)
    - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless the rubric itself is ambiguous/overlapping
-4) overallRating MUST equal correctPercentage/20 (rounded to one decimal)
-5) answerRating.rating MUST be aligned with overallRating
-6) reasonForDeduction MUST list only missing/incorrect rubric points
-7) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
+3) overallRating MUST equal correctPercentage/20 (rounded to one decimal)
+4) answerRating.rating MUST be aligned with overallRating
+5) reasonForDeduction MUST list only missing/incorrect rubric points
+6) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
    - NO generic advice (e.g., "be more confident", "improve communication") unless it is explicitly a rubric point
    - NO extra topics not present in rubricPoints
    - Each suggestion must be a short "missing confirmation" line (few words / one short sentence)
-   - Preferred format: "<rubric point #>. <what is missing in one short phrase>"
-   - Example: "3. Did not explain why/when to use X"
+   - Do NOT include rubric point numbers.
+   - Each suggestion must include tiny evidence of absence from the transcription (e.g., "Not mentioned: ...", "Did not explain ...").
 
 **EVIDENCE REQUIREMENT (SHORT):**
 - In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
@@ -854,25 +852,23 @@ ${rubricPoints}
 - Do NOT require matching the ideal answer wording or the same example(s).
 - If the answer is empty/too short, set relevanceAssessment.score low and score accordingly.
 - If there are likely typos/ASR-like errors, score based on recoverable meaning (do not over-penalize grammar).
+- If rubric points include parenthetical "evidence:" hints, treat them as illustrative semantics, NOT literal keyword requirements.
 
 **MANDATORY RULES:**
-1) Relevance gate:
-   - score <= 0.2 -> correctPercentage = 0
-   - score < 0.5 -> correctPercentage <= 40
-2) If relevant, evaluate rubric coverage semantically:
+1) Evaluate rubric coverage semantically against the candidate answer (primary scoring method):
    - full = 1.0 (clearly covers the concept correctly + brief explanation)
    - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
    - missing = 0 (not present)
    - rubricCoverageScore drives final correctPercentage (primary factor)
    - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless rubric is ambiguous/overlapping
-3) overallRating = correctPercentage/20 (one decimal)
-4) answerRating.reasonForDeduction = only missing/incorrect rubric points
-5) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
+2) overallRating = correctPercentage/20 (one decimal)
+3) answerRating.reasonForDeduction = only missing/incorrect rubric points
+4) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
    - NO generic advice unless it is explicitly a rubric point
    - NO extra topics not present in rubricPoints
    - Each suggestion must be a short "missing confirmation" line (few words / one short sentence)
-   - Preferred format (no required keyword): "<rubric point #>. <what is missing in one short phrase>"
-   - Example: "2. Did not mention Y"
+   - Do NOT include rubric point numbers.
+   - Each suggestion must include tiny evidence of absence from the candidate answer (e.g., "Not mentioned: ...", "Did not explain ...").
 
 **EVIDENCE REQUIREMENT (SHORT):**
 - In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
