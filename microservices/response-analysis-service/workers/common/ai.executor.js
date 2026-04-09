@@ -460,6 +460,27 @@ const executeScoring = async (stage1Results, responseData, type) => {
 
   // Generate scoring prompt
   const prompt = generateMediaScoringPrompt(responseData, stage1Results);
+  // Debug (safe): confirm calibration mode + sizes without logging full prompt/answers
+  try {
+    const rubricCount = Array.isArray(responseData?.rubricPoints)
+      ? responseData.rubricPoints.filter(Boolean).length
+      : 0;
+    const idealLen = responseData?.idealAnswer
+      ? String(responseData.idealAnswer).length
+      : 0;
+    logger.info("Stage 2: Scoring prompt calibration check", {
+      questionId: responseData?.questionId,
+      type,
+      hasIdealAnswer: idealLen > 10,
+      idealAnswerLength: idealLen,
+      rubricPointsCount: rubricCount,
+      isRubricFirstCalibrationPrompt: String(prompt).includes(
+        "CALIBRATION MODE (RUBRIC-FIRST, COMPACT)",
+      ),
+    });
+  } catch (e) {
+    // non-blocking
+  }
 
   // Execute AI call with retry logic (no file input for scoring, just text)
   const { parsedAnalysis, tokenUsage } = await executeAICall(
@@ -514,6 +535,26 @@ const executeSubjectiveScoring = async (
 
   // Generate subjective scoring prompt
   const prompt = generateSubjectiveScoringPrompt(responseData, typingAnalysis);
+  // Debug (safe): confirm calibration mode + sizes without logging full prompt/answers
+  try {
+    const rubricCount = Array.isArray(responseData?.rubricPoints)
+      ? responseData.rubricPoints.filter(Boolean).length
+      : 0;
+    const idealLen = responseData?.idealAnswer
+      ? String(responseData.idealAnswer).length
+      : 0;
+    logger.info("Stage 1: Subjective prompt calibration check", {
+      questionId: responseData?.questionId,
+      hasIdealAnswer: idealLen > 10,
+      idealAnswerLength: idealLen,
+      rubricPointsCount: rubricCount,
+      isRubricFirstCalibrationPrompt: String(prompt).includes(
+        "CALIBRATION MODE (RUBRIC-FIRST, COMPACT)",
+      ),
+    });
+  } catch (e) {
+    // non-blocking
+  }
 
   // Execute AI call with retry logic
   const { parsedAnalysis, tokenUsage } = await executeAICall(

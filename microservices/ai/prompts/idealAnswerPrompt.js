@@ -36,15 +36,27 @@ QUESTION (${type})
 ${lengthHint}
 
 RULES
-1. Write the ideal answer as if a strong candidate at the stated experience level is answering in their own words.
+1. Write the ideal answer as a confident candidate with the given experience speaking in an interview:
+   - Use natural, conversational explanation (not textbook style)
+   - Be clear, structured, and to the point
+   - Avoid unnecessary theory unless relevant
 2. For video/audio: write a spoken-style script (clear sentences, paragraphs OK).
 3. For subjective: write structured prose; optional short bullets if helpful.
 4. IMPORTANT: The answer must be clear, compact, and \"good candidate\" quality. Do NOT write long essays.
-5. Provide exactly 5 rubric bullet points (each ~1 line) that enumerate what a complete answer should cover. These are used for semantic coverage scoring — not literal wording match.
-6. Return ONLY valid JSON (no markdown fences) with this shape:
+5. Include practical, real-world examples ONLY to illustrate concepts (optional). Examples must be generic and interchangeable.
+   - Do NOT depend on one specific example to justify the rubric.
+   - In scoring, candidates must get credit if they explain the concept correctly with DIFFERENT examples.
+6. Provide rubricPoints as evaluation coverage:
+   - Use a flexible number of points (typically 4–7).
+   - Each point must be a meaningful concept/expectation that can be checked from a transcript (answer-only evidence).
+   - Avoid redundant, overlapping, or filler points. Points must be mutually distinct.
+   - Prefer concept-level points over tool-name lists (only mention tools if the question explicitly asks).
+   - Add a tiny evidence cue inside each point so scoring is easier, e.g. "(evidence: mentions X and why)".
+   - These points are used for semantic coverage scoring — NOT literal wording match and NOT exact example match.
+7. Return ONLY valid JSON (no markdown fences) with this shape:
 {
   "idealAnswerText": "string",
-  "rubricPoints": ["string", "string", "string", "string", "string"]
+  "rubricPoints": ["string"]
 }`;
 }
 

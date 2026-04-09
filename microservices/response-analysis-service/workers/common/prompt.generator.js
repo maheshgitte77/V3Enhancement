@@ -591,7 +591,8 @@ const generateMediaScoringPrompt = (responseData, stage1Results) => {
 ${generateBaseInstructions()}
 
 **CALIBRATION MODE (RUBRIC-FIRST, COMPACT)**
-You MUST score by semantic coverage of rubric points against candidate answer (not wording match).
+You MUST score by semantic coverage of rubric points against the candidate answer-of-record (the transcription) — NOT wording match.
+Paraphrases and different valid examples MUST receive full credit if the underlying concept is correctly explained.
 
 **QUESTION ASKED:** "${responseData.question}"
 **CANDIDATE'S ANSWER (transcribed ${responseData.type}):** "${stage1Results.transcription}"
@@ -608,20 +609,35 @@ ${String(responseData.idealAnswer).slice(0, 12000)}
 **RUBRIC POINTS (PRIMARY SCORING CHECKLIST):**
 ${rubricPoints}
 
+**HOW TO USE THE TRANSCRIPTION (MANDATORY):**
+- Treat the transcription text as the candidate's answer-of-record for scoring.
+- Do NOT require candidates to match the ideal answer wording or the same example(s).
+- If the transcription is empty/too short/unintelligible, set relevanceAssessment.score low and score accordingly.
+- If there are likely ASR/transcription errors, score based on the most reasonable recoverable meaning (do not over-penalize grammar).
+
 **SCORING RULES (MANDATORY):**
 1) Relevance gate first:
    - relevanceAssessment.score <= 0.2 -> correctPercentage = 0
    - relevanceAssessment.score < 0.5 -> correctPercentage <= 40
 2) If relevant (>= 0.5), compute rubric coverage:
-   - full = 1.0, partial = 0.5, missing = 0
+   - full = 1.0 (clearly covers the concept correctly + brief explanation)
+   - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
+   - missing = 0 (not present)
    - rubricCoverageScore = (sum / total rubric points) * 100
 3) Final score calibration:
    - correctPercentage should primarily follow rubricCoverageScore
    - apply small adjustment for factual correctness/coherence (+/-10 max)
+   - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless the rubric itself is ambiguous/overlapping
 4) overallRating MUST equal correctPercentage/20 (rounded to one decimal)
 5) answerRating.rating MUST be aligned with overallRating
 6) reasonForDeduction MUST list only missing/incorrect rubric points
-7) answerImprovementSuggestions MUST include only missing/weak rubric points (actionable)
+7) answerImprovementSuggestions MUST include only missing/weak rubric points (actionable, aligned to rubric)
+
+**EVIDENCE REQUIREMENT (SHORT):**
+- In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
+  - "Covered: #1, #3" with a few words of evidence from the candidate's transcription (paraphrase OK)
+  - "Partial: #2" with a few words why partial
+- Keep it compact (1-3 lines). Do NOT add new JSON fields.
 
 **OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
 - technicalDepth.rating: technical depth quality (independent but aligned with final score band)
@@ -786,7 +802,8 @@ ${generateBaseInstructions()}
 ${generateTextLanguageDetectionInstructions()}
 
 **CALIBRATION MODE (RUBRIC-FIRST, COMPACT)**
-Score this subjective answer using ideal answer + rubric point coverage.
+Score this subjective answer using semantic rubric point coverage (NOT wording match, NOT example match).
+Paraphrases and different valid examples MUST receive full credit if the concept is correctly explained.
 
 **QUESTION ASKED:** "${responseData.question}"
 **CANDIDATE ANSWER:** "${responseData.textAnswer || ""}"
@@ -800,16 +817,31 @@ ${String(responseData.idealAnswer).slice(0, 12000)}
 **RUBRIC POINTS (PRIMARY CHECKLIST):**
 ${rubricPoints}
 
+**HOW TO USE THE CANDIDATE ANSWER (MANDATORY):**
+- Treat the candidateAnswer/textAnswer as the answer-of-record for scoring.
+- Do NOT require matching the ideal answer wording or the same example(s).
+- If the answer is empty/too short, set relevanceAssessment.score low and score accordingly.
+- If there are likely typos/ASR-like errors, score based on recoverable meaning (do not over-penalize grammar).
+
 **MANDATORY RULES:**
 1) Relevance gate:
    - score <= 0.2 -> correctPercentage = 0
    - score < 0.5 -> correctPercentage <= 40
 2) If relevant, evaluate rubric coverage semantically:
-   - full=1, partial=0.5, missing=0
+   - full = 1.0 (clearly covers the concept correctly + brief explanation)
+   - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
+   - missing = 0 (not present)
    - rubricCoverageScore drives final correctPercentage (primary factor)
+   - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless rubric is ambiguous/overlapping
 3) overallRating = correctPercentage/20 (one decimal)
 4) answerRating.reasonForDeduction = only missing/incorrect rubric points
-5) answerImprovementSuggestions = only missing/weak rubric points
+5) answerImprovementSuggestions = only missing/weak rubric points (actionable, aligned to rubric)
+
+**EVIDENCE REQUIREMENT (SHORT):**
+- In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
+  - "Covered: #1, #4" with a few words of evidence from candidate text (paraphrase OK)
+  - "Partial: #2" with a few words why partial
+- Keep it compact (1-3 lines). Do NOT add new JSON fields.
 
 **OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
 - technicalDepth.rating: depth/accuracy of technical explanation
