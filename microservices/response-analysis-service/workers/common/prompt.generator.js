@@ -682,7 +682,7 @@ ${rubricPoints}
 - Keep it compact (1-3 lines). Do NOT add new JSON fields.
 
 **OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
-- technicalDepth.rating: technical depth quality (independent but aligned with final score band)
+- technicalDepth.rating: technical depth quality based on how candidate explained the technical, logical, analytical asked concepts.
 - technicalDepth.asPerExplanation: technical-only explanation.
 - technicalDepthAsPerExperience: evaluate depth for ${responseData.experience} years (no integrity comments)
 - responseCoherence: structure, sequencing, clarity of explanation, how well the candidate communicated their answer and ability to explain.
@@ -690,7 +690,7 @@ ${rubricPoints}
   - high: relevant + mostly correct + coherent
   - medium: relevant but partial depth/accuracy
   - low: poor relevance or major errors
-- answerSummary: 3 concise technical points candidate actually covered
+- answerSummary: 3 to 4 concise technical points candidate actually covered
 - detailedSummary: balanced technical recap (what was good, what missing) vs expected level
 - answerEffectiveness.rating: overall effectiveness of answering the asked question (must align with score)
 - NEVER mention integrity/cheating in technical scoring fields above
@@ -902,7 +902,7 @@ ${rubricPoints}
 - Keep it compact (1-3 lines). Do NOT add new JSON fields.
 
 **OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
-- technicalDepth.rating: depth/accuracy of technical explanation
+- technicalDepth.rating: depth/accuracy of technical explanation based on how candidate explained the technical, logical, analytical asked concepts and written clarity.
 - technicalDepth.asPerExplanation: technical-only evidence summary.
 - technicalDepthAsPerExperience: assess depth expectation for ${responseData.experience} years
 - communicationRating/confidenceLevel/responseCoherence: evaluate writing clarity, confidence signals, how well the candidate communicated their answer and ability to explain.
