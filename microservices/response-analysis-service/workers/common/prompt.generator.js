@@ -641,7 +641,6 @@ ${rubricPoints}
 - Do NOT require candidates to match the ideal answer wording or the same example(s).
 - If the transcription is empty/too short/unintelligible, set relevanceAssessment.score low and score accordingly.
 - If there are likely ASR/transcription errors, score based on the most reasonable recoverable meaning (do not over-penalize grammar).
-- If rubric points include parenthetical "evidence:" hints, treat them as illustrative semantics, NOT literal keyword requirements.
 
 **SCORING RULES (MANDATORY):**
 0) TOTAL IRRELEVANCE OVERRIDE (HARD RULE):
@@ -676,16 +675,17 @@ ${rubricPoints}
    - Each suggestion must include tiny evidence of absence from the transcription (e.g., "Not mentioned: ...", "Did not explain ...").
 
 **EVIDENCE REQUIREMENT (SHORT):**
-- In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
-  - "Covered: #1, #3" with a few words of evidence from the candidate's transcription (paraphrase OK)
-  - "Partial: #2" with a few words why partial
+- Put rubric coverage evidence ONLY inside detailedSummary.
+- Include a very short "Rubric evidence" mapping:
+  - "Covered: <few words of evidence from the candidate's transcription (paraphrase OK)>
+  - "Partial: <few words why partial>"
 - Keep it compact (1-3 lines). Do NOT add new JSON fields.
 
 **OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
 - technicalDepth.rating: technical depth quality (independent but aligned with final score band)
-- technicalDepth.asPerExplanation: technical-only explanation with concrete evidence from candidate response
+- technicalDepth.asPerExplanation: technical-only explanation.
 - technicalDepthAsPerExperience: evaluate depth for ${responseData.experience} years (no integrity comments)
-- responseCoherence: structure, sequencing, clarity of explanation
+- responseCoherence: structure, sequencing, clarity of explanation, how well the candidate communicated their answer and ability to explain.
 - responseQuality:
   - high: relevant + mostly correct + coherent
   - medium: relevant but partial depth/accuracy
@@ -695,6 +695,7 @@ ${rubricPoints}
 - answerEffectiveness.rating: overall effectiveness of answering the asked question (must align with score)
 - NEVER mention integrity/cheating in technical scoring fields above
 - Maintain the exact existing JSON field names/types (no extra fields)
+- Avoid "rating cloning": these fields may differ (within reason). Do NOT default everything to overallRating.
 
 **Return JSON only:**
 {
@@ -864,7 +865,6 @@ ${rubricPoints}
 - Do NOT require matching the ideal answer wording or the same example(s).
 - If the answer is empty/too short, set relevanceAssessment.score low and score accordingly.
 - If there are likely typos/ASR-like errors, score based on recoverable meaning (do not over-penalize grammar).
-- If rubric points include parenthetical "evidence:" hints, treat them as illustrative semantics, NOT literal keyword requirements.
 
 **MANDATORY RULES:**
 0) TOTAL IRRELEVANCE OVERRIDE (HARD RULE):
@@ -895,25 +895,27 @@ ${rubricPoints}
    - Each suggestion must include tiny evidence of absence from the candidate answer (e.g., "Not mentioned: ...", "Did not explain ...").
 
 **EVIDENCE REQUIREMENT (SHORT):**
-- In technicalDepth.asPerExplanation OR detailedSummary, include a very short "Rubric evidence" mapping:
-  - "Covered: #1, #4" with a few words of evidence from candidate text (paraphrase OK)
-  - "Partial: #2" with a few words why partial
+- Put rubric coverage evidence ONLY inside detailedSummary (NOT in technicalDepth.asPerExplanation).
+- Include a very short "Rubric evidence" mapping:
+  - "Covered: <few words of evidence from candidate text (paraphrase OK)>
+  - "Partial: <few words why partial>"
 - Keep it compact (1-3 lines). Do NOT add new JSON fields.
 
 **OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
 - technicalDepth.rating: depth/accuracy of technical explanation
-- technicalDepth.asPerExplanation: technical-only evidence summary (no integrity commentary)
+- technicalDepth.asPerExplanation: technical-only evidence summary.
 - technicalDepthAsPerExperience: assess depth expectation for ${responseData.experience} years
-- communicationRating/confidenceLevel/responseCoherence: evaluate writing clarity, confidence signals, logical flow
+- communicationRating/confidenceLevel/responseCoherence: evaluate writing clarity, confidence signals, how well the candidate communicated their answer and ability to explain.
 - responseQuality:
   - high: relevant + technically sound + coherent
   - medium: relevant but partial/limited depth
   - low: poor relevance or major technical issues
-- answerSummary: 3 factual technical points from candidate text
+- answerSummary: 3 to 4 factual technical points from candidate text, avoid redundant points, keep it concise.
 - detailedSummary: concise technical recap vs ideal/rubric expectations
 - answerEffectiveness.rating: how effectively candidate answered the asked question
 - languageDetection: detect actual language usage from text; keep legacy structure
 - Maintain exact existing JSON field names/types (no extra fields)
+- Avoid "rating cloning": these fields may differ (within reason). Do NOT default everything to overallRating.
 
 **Return JSON only:**
 {
