@@ -140,6 +140,17 @@ const mergeAnalysisResults = (stage1Results, stage2Results, stage3Results) => {
     if (stage2Results.rubricPointResults) {
       mergedAnalysis.rubricPointResults = stage2Results.rubricPointResults;
     }
+    if (stage2Results.extraValidQuestionPoints !== undefined) {
+      mergedAnalysis.extraValidQuestionPoints =
+        stage2Results.extraValidQuestionPoints;
+    }
+    if (stage2Results.extraInvalidQuestionPoints !== undefined) {
+      mergedAnalysis.extraInvalidQuestionPoints =
+        stage2Results.extraInvalidQuestionPoints;
+    }
+    if (stage2Results.extraPointResults) {
+      mergedAnalysis.extraPointResults = stage2Results.extraPointResults;
+    }
 
     // Base answer comparison (if present)
     if (stage2Results.baseAnswerComparison) {

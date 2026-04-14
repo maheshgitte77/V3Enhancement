@@ -79,10 +79,17 @@ const buildRubricPointResultsJsonTemplate = (n) => {
   const rows = [];
   for (let i = 1; i <= count; i++) {
     rows.push(
-      `    { "rubricIndex": ${i}, "status": "<full|partial|missing>", "evidence": "<brief phrase from answer-of-record or not stated>" }`,
+      `    { "rubricIndex": ${i}, "status": "<full|partial|missing|invalid>", "evidence": "<brief phrase from answer-of-record or not stated>" }`,
     );
   }
   return `[\n${rows.join(",\n")}\n  ]`;
+};
+
+/** Valid JSON array template for extra (non-rubric) on-topic concepts. */
+const buildExtraPointResultsJsonTemplate = () => {
+  return `[
+    { "extra": 1, "status": "<correct-valid|wrong-invalid>", "evidence": "<brief phrase from answer-of-record>" }
+  ]`;
 };
 
 /**
@@ -620,6 +627,7 @@ const generateMediaScoringPrompt = (responseData, stage1Results) => {
       .map((point, index) => `${index + 1}. ${point}`)
       .join("\n");
     const rubricPointResultsJson = buildRubricPointResultsJsonTemplate(rubricCount);
+    const extraPointResultsJson = buildExtraPointResultsJsonTemplate();
 
     return `
 ${generateBaseInstructions()}
@@ -650,11 +658,23 @@ ${rubricPoints}
 1) Set **relevanceAssessment** vs the **question** (not vs the rubric wording alone).
 2) **Irrelevance (rule 0)** applies ONLY when the answer is the **wrong topic/domain**, refusal with no substance, or gibberish — NOT when the answer is on-topic but shallow. If on-topic but weak, use rubric rows (partial/missing), not rule 0.
 3) Fill **rubricPointResults** (see JSON) for all ${rubricCount} rubric lines **in order** before setting correctPercentage.
-4) Per row: **full** = 1.0 weight (concept correct + brief explanation in the answer-of-record), **partial** = 0.5 (mentioned but shallow/unclear/minor misconception), **missing** = 0 (not supported by the answer-of-record).
-5) Let R = round((sum of weights / ${rubricCount}) * 100). Set correctPercentage to the string for R (0–100), **without arbitrary deviation** from R.
-6) **Relevance caps (same as legacy):** if relevanceAssessment.score <= 0.2 then correctPercentage must be **"0"** and use rule-0 style zeros for headline ratings; if 0.2 < score < 0.5 then correctPercentage must be at most **"40"** (use min(R, 40)); if score >= 0.5 use R as correctPercentage.
-7) **HARD:** If every rubricPointResults[].status is **full**, correctPercentage must be **"100"** (when relevance allows).
-8) overallRating = (numeric correctPercentage / 20) to one decimal; answerRating.rating must match overallRating.
+4) Let X = 100 / ${rubricCount}. Per rubric row scoring:
+   - **full** => +X
+   - **partial** => +X/2
+   - **missing** => -5
+   - **invalid** (conceptually wrong) => -5
+5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
+   - status = **correct-valid** for extra correct concept
+   - status = **wrong-invalid** for extra concept that is conceptually wrong
+   - Include short evidence for each row.
+   - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
+6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
+   - bonus = EV * (X/2)
+   - deduction = EI * 5
+7) Raw score R = round(sum(row scores) + bonus - deduction). Clamp R to 0..100 (never negative, never above 100). Set correctPercentage = string(R), without arbitrary deviation.
+8) **Relevance caps (same as legacy):** if relevanceAssessment.score <= 0.2 then correctPercentage must be **"0"** and use rule-0 style zeros for headline ratings; if 0.2 < score < 0.5 then correctPercentage must be at most **"40"** (use min(R, 40)); if score >= 0.5 use R as correctPercentage.
+9) **HARD:** If every rubricPointResults[].status is **full** and extraPointResults is empty, correctPercentage must be **"100"** (when relevance allows).
+10) overallRating = (numeric correctPercentage / 20) to one decimal; answerRating.rating must match overallRating.
 
 **DEDUCTIONS & SUGGESTIONS:**
 - answerRating.reasonForDeduction: list **missing** rubric concepts, **incorrect** rubric concepts, and **partial** rubric concepts using a clear prefix, e.g. "Partial: …", "Missing: …", "Incorrect: …" (no rubric index numbers).
@@ -675,6 +695,9 @@ ${rubricPoints}
 **Return JSON only (include rubricPointResults exactly as specified):**
 {
   "rubricPointResults": ${rubricPointResultsJson},
+  "extraPointResults": ${extraPointResultsJson},
+  "extraValidQuestionPoints": 0,
+  "extraInvalidQuestionPoints": 0,
   "relevanceAssessment": {
     "score": "<0.0-1.0>",
     "explanation": "<relevance vs question>"
@@ -817,6 +840,7 @@ const generateSubjectiveScoringPrompt = (
       .map((point, index) => `${index + 1}. ${point}`)
       .join("\n");
     const rubricPointResultsJson = buildRubricPointResultsJsonTemplate(rubricCount);
+    const extraPointResultsJson = buildExtraPointResultsJsonTemplate();
 
     return `
 ${generateBaseInstructions()}
@@ -844,11 +868,23 @@ ${rubricPoints}
 1) Set **relevanceAssessment** vs the **question**.
 2) **Irrelevance (rule 0)** applies ONLY for wrong topic/domain, substance-free refusal, or gibberish — NOT for on-topic but shallow answers (use partial/missing rubric rows instead).
 3) Fill **rubricPointResults** for all ${rubricCount} rubric lines **in order** before correctPercentage.
-4) Per row weights: **full** = 1.0, **partial** = 0.5, **missing** = 0.
-5) R = round((sum of weights / ${rubricCount}) * 100). Set correctPercentage to the string for R (0–100) **without arbitrary deviation** from R.
-6) **Relevance caps:** if relevanceAssessment.score <= 0.2 then correctPercentage **"0"** and headline zeros like the media rubric path; if 0.2 < score < 0.5 then correctPercentage at most **"40"** (min(R,40)); if score >= 0.5 use R.
-7) If every status is **full**, correctPercentage must be **"100"** (when relevance allows).
-8) overallRating and answerRating.rating = (numeric correctPercentage / 20) one decimal.
+4) Let X = 100 / ${rubricCount}. Per rubric row scoring:
+   - **full** => +X
+   - **partial** => +X/2
+   - **missing** => -5
+   - **invalid** (conceptually wrong) => -5
+5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
+   - status = **correct-valid** for extra correct concept
+   - status = **wrong-invalid** for extra concept that is conceptually wrong
+   - Include short evidence for each row.
+   - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
+6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
+   - bonus = EV * (X/2)
+   - deduction = EI * 5
+7) R = round(sum(row scores) + bonus - deduction), then clamp to 0..100. Set correctPercentage to string(R) **without arbitrary deviation** from R.
+8) **Relevance caps:** if relevanceAssessment.score <= 0.2 then correctPercentage **"0"** and headline zeros like the media rubric path; if 0.2 < score < 0.5 then correctPercentage at most **"40"** (min(R,40)); if score >= 0.5 use R.
+9) If every status is **full** and extraPointResults is empty, correctPercentage must be **"100"** (when relevance allows).
+10) overallRating and answerRating.rating = (numeric correctPercentage / 20) one decimal.
 
 **DEDUCTIONS & SUGGESTIONS:**
 - answerRating.reasonForDeduction: include **missing**, **partial** (prefix "Partial: …"), and **incorrect** rubric concepts; no rubric index numbers.
@@ -864,6 +900,9 @@ ${rubricPoints}
 **Return JSON only:**
 {
   "rubricPointResults": ${rubricPointResultsJson},
+  "extraPointResults": ${extraPointResultsJson},
+  "extraValidQuestionPoints": 0,
+  "extraInvalidQuestionPoints": 0,
   "relevanceAssessment": {
     "score": "<0.0-1.0>",
     "explanation": "<relevance explanation>"

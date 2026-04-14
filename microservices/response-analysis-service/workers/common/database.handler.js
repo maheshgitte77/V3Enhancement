@@ -167,6 +167,9 @@ const createTypeSpecificRecord = (
     answerSummary: analysis.answerSummary,
     answerImprovementSuggestions: analysis.answerImprovementSuggestions,
     rubricPointResults: analysis.rubricPointResults,
+    extraPointResults: analysis.extraPointResults,
+    extraValidQuestionPoints: analysis.extraValidQuestionPoints,
+    extraInvalidQuestionPoints: analysis.extraInvalidQuestionPoints,
 
     // Time and effectiveness (normalized)
     answerTime: normalizeAnswerTime(analysis.answerTime),

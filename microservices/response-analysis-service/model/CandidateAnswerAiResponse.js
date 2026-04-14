@@ -167,6 +167,22 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     rubricPointResults: {
       type: mongoose.Schema.Types.Mixed,
     },
+    /** Per-extra row marks for non-rubric on-topic concepts (optional). */
+    extraPointResults: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    /** Number of additional on-topic valid points beyond rubric rows (optional). */
+    extraValidQuestionPoints: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    /** Number of additional on-topic invalid points beyond rubric rows (optional). */
+    extraInvalidQuestionPoints: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
 
     // ===== TIME & EFFECTIVENESS (All Types) =====
     answerTime: {
