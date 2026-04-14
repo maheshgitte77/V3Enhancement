@@ -163,6 +163,10 @@ const CandidateAnswerAiResponseSchema = new mongoose.Schema(
     answerImprovementSuggestions: {
       type: [String],
     },
+    /** Per-rubric row marks when using rubric calibration scoring (optional). */
+    rubricPointResults: {
+      type: mongoose.Schema.Types.Mixed,
+    },
 
     // ===== TIME & EFFECTIVENESS (All Types) =====
     answerTime: {

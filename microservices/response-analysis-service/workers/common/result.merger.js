@@ -137,6 +137,9 @@ const mergeAnalysisResults = (stage1Results, stage2Results, stage3Results) => {
       stage2Results.answerImprovementSuggestions;
     mergedAnalysis.detailedSummary = stage2Results.detailedSummary;
     mergedAnalysis.answerEffectiveness = stage2Results.answerEffectiveness;
+    if (stage2Results.rubricPointResults) {
+      mergedAnalysis.rubricPointResults = stage2Results.rubricPointResults;
+    }
 
     // Base answer comparison (if present)
     if (stage2Results.baseAnswerComparison) {

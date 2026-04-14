@@ -40,14 +40,10 @@ ${String(ideal).slice(0, 15000)}
 `;
 };
 
-const hasIdealRubricCalibration = (responseData) => {
-  const hasIdeal =
-    !!responseData?.idealAnswer && String(responseData.idealAnswer).trim().length > 10;
-  const hasRubric =
-    Array.isArray(responseData?.rubricPoints) &&
-    responseData.rubricPoints.filter(Boolean).length > 0;
-  return hasIdeal && hasRubric;
-};
+/** Rubric-first calibration path (no ideal answer required in the prompt). */
+const hasRubricCalibration = (responseData) =>
+  Array.isArray(responseData?.rubricPoints) &&
+  responseData.rubricPoints.filter(Boolean).length > 0;
 
 /**
  * Sanitize large free-form text before embedding into prompts.
@@ -76,8 +72,17 @@ const sanitizeForPromptEmbedding = (value, maxLen = 12000) => {
   return text;
 };
 
-const buildRubricCoverageJsonHint = () => {
-  return "";
+/** Valid JSON array template: one object per rubric line, same order as checklist. */
+const buildRubricPointResultsJsonTemplate = (n) => {
+  const count = Math.max(0, Math.min(Number(n) || 0, 40));
+  if (count === 0) return "[]";
+  const rows = [];
+  for (let i = 1; i <= count; i++) {
+    rows.push(
+      `    { "rubricIndex": ${i}, "status": "<full|partial|missing>", "evidence": "<brief phrase from answer-of-record or not stated>" }`,
+    );
+  }
+  return `[\n${rows.join(",\n")}\n  ]`;
 };
 
 /**
@@ -608,11 +613,13 @@ If behavioralAnalysis shows 3+ of these, MUST add READING_DELIVERY or SCRIPTED_D
  * Generate Media (Video/Audio) Stage 2 Scoring Prompt
  */
 const generateMediaScoringPrompt = (responseData, stage1Results) => {
-  if (hasIdealRubricCalibration(responseData)) {
-    const rubricPoints = responseData.rubricPoints
-      .filter(Boolean)
+  if (hasRubricCalibration(responseData)) {
+    const rubricList = responseData.rubricPoints.filter(Boolean);
+    const rubricCount = rubricList.length;
+    const rubricPoints = rubricList
       .map((point, index) => `${index + 1}. ${point}`)
       .join("\n");
+    const rubricPointResultsJson = buildRubricPointResultsJsonTemplate(rubricCount);
 
     return `
 ${generateBaseInstructions()}
@@ -630,75 +637,48 @@ Paraphrases and different valid examples MUST receive full credit if the underly
       : stage1Results.communication
     }
 
-**REFERENCE IDEAL ANSWER (internal):**
-${sanitizeForPromptEmbedding(responseData.idealAnswer, 12000)}
-
 **RUBRIC POINTS (PRIMARY SCORING CHECKLIST):**
 ${rubricPoints}
 
 **HOW TO USE THE TRANSCRIPTION (MANDATORY):**
 - Treat the transcription text as the candidate's answer-of-record for scoring.
-- Do NOT require candidates to match the ideal answer wording or the same example(s).
-- If the transcription is empty/too short/unintelligible, set relevanceAssessment.score low and score accordingly.
+- Score only against the question and the rubric checklist; do not invent extra requirements beyond the rubric.
+- If the transcription is empty, only filler (e.g. "um", "I don't know" without substance), or unintelligible: set relevanceAssessment.score <= 0.3, set **every** rubricPointResults[].status to **missing**, correctPercentage **"0"** (or **"0"–"20"** only if a tiny on-topic fragment exists), and do not infer content that is not in the text.
 - If there are likely ASR/transcription errors, score based on the most reasonable recoverable meaning (do not over-penalize grammar).
 
-**SCORING RULES (MANDATORY):**
-0) TOTAL IRRELEVANCE OVERRIDE (HARD RULE):
-   - If the candidate answer is totally irrelevant to the question (different topic/tech, random text, "I don't know", gibberish),
-     then set:
-     - relevanceAssessment.score = 0.0–0.2 with a short explanation
-     - correctPercentage = "0"
-     - overallRating = "0.0"
-     - technicalDepth.rating = "0.0"
-     - technicalDepthAsPerExperience.rating = "0.0"
-     - answerRating.rating = "0.0"
-     - answerRating.reasonForDeduction = ["Answer is irrelevant to the question"]
-     - answerImprovementSuggestions = ["Answer did not address the question/topic"]
-     Then STOP; do not apply rubric coverage.
-1) Compute rubric coverage against the transcription (primary scoring method):
-   - full = 1.0 (clearly covers the concept correctly + brief explanation)
-   - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
-   - missing = 0 (not present)
-   - rubricCoverageScore = (sum / total rubric points) * 100
-2) Final score calibration:
-   - correctPercentage should primarily follow rubricCoverageScore
-   - apply small adjustment for factual correctness/coherence (+/-10 max)
-   - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless the rubric itself is ambiguous/overlapping
-3) overallRating MUST equal correctPercentage/20 (rounded to one decimal)
-4) answerRating.rating MUST be aligned with overallRating
-5) reasonForDeduction MUST list only missing/incorrect rubric points
-6) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
-   - NO generic advice (e.g., "be more confident", "improve communication") unless it is explicitly a rubric point
-   - NO extra topics not present in rubricPoints
-   - Each suggestion must be a short "missing confirmation" line (few words / one short sentence)
-   - Do NOT include rubric point numbers.
-   - Each suggestion must include tiny evidence of absence from the transcription (e.g., "Not mentioned: ...", "Did not explain ...").
+**WORKFLOW (MANDATORY ORDER):**
+1) Set **relevanceAssessment** vs the **question** (not vs the rubric wording alone).
+2) **Irrelevance (rule 0)** applies ONLY when the answer is the **wrong topic/domain**, refusal with no substance, or gibberish — NOT when the answer is on-topic but shallow. If on-topic but weak, use rubric rows (partial/missing), not rule 0.
+3) Fill **rubricPointResults** (see JSON) for all ${rubricCount} rubric lines **in order** before setting correctPercentage.
+4) Per row: **full** = 1.0 weight (concept correct + brief explanation in the answer-of-record), **partial** = 0.5 (mentioned but shallow/unclear/minor misconception), **missing** = 0 (not supported by the answer-of-record).
+5) Let R = round((sum of weights / ${rubricCount}) * 100). Set correctPercentage to the string for R (0–100), **without arbitrary deviation** from R.
+6) **Relevance caps (same as legacy):** if relevanceAssessment.score <= 0.2 then correctPercentage must be **"0"** and use rule-0 style zeros for headline ratings; if 0.2 < score < 0.5 then correctPercentage must be at most **"40"** (use min(R, 40)); if score >= 0.5 use R as correctPercentage.
+7) **HARD:** If every rubricPointResults[].status is **full**, correctPercentage must be **"100"** (when relevance allows).
+8) overallRating = (numeric correctPercentage / 20) to one decimal; answerRating.rating must match overallRating.
 
-**EVIDENCE REQUIREMENT (SHORT):**
-- Put rubric coverage evidence ONLY inside detailedSummary.
-- Include a very short "Rubric evidence" mapping:
-  - "Covered: <few words of evidence from the candidate's transcription (paraphrase OK)>
-  - "Partial: <few words why partial>"
-- Keep it compact (1-3 lines). Do NOT add new JSON fields.
+**DEDUCTIONS & SUGGESTIONS:**
+- answerRating.reasonForDeduction: list **missing** rubric concepts, **incorrect** rubric concepts, and **partial** rubric concepts using a clear prefix, e.g. "Partial: …", "Missing: …", "Incorrect: …" (no rubric index numbers).
+- answerImprovementSuggestions: only rubric gaps (one per partial or missing row as before).
 
-**OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
-- technicalDepth.rating: technical depth quality based on how candidate explained the technical, logical, analytical asked concepts.
-- technicalDepth.asPerExplanation: technical-only explanation.
-- technicalDepthAsPerExperience: evaluate depth for ${responseData.experience} years (no integrity comments)
-- responseCoherence: structure, sequencing, clarity of explanation, how well the candidate communicated their answer and ability to explain.
-- responseQuality:
-  - high: relevant + mostly correct + coherent
-  - medium: relevant but partial depth/accuracy
-  - low: poor relevance or major errors
-- answerSummary: 3 to 4 concise technical points candidate actually covered
-- detailedSummary: balanced technical recap (what was good, what missing) vs expected level
-- answerEffectiveness.rating: overall effectiveness of answering the asked question (must align with score)
-- NEVER mention integrity/cheating in technical scoring fields above
-- Maintain the exact existing JSON field names/types (no extra fields)
-- Avoid "rating cloning": these fields may differ (within reason). Do NOT default everything to overallRating.
+**EVIDENCE (SHORT):**
+- Put extra narrative rubric evidence in **detailedSummary** only (1–3 lines optional "Rubric evidence" recap). Per-row evidence belongs in **rubricPointResults[].evidence**.
 
-**Return JSON only:**
+**NUMERIC FIELD CONSISTENCY:**
+- overallRating and answerRating.rating track correctPercentage / 20.
+- technicalDepth.rating and technicalDepthAsPerExperience.rating may differ by **at most 1.0** from overallRating only if technicalDepth.asPerExplanation states why in one short sentence; otherwise keep within **0.5** of overallRating.
+- answerEffectiveness.rating: within **0.5** of overallRating when relevanceAssessment.score >= 0.5.
+- responseCoherence / responseQuality: must not contradict the headline (e.g. responseQuality **high** with correctPercentage < 60 is invalid).
+
+**OTHER:**
+- NEVER mention integrity/cheating in these scoring fields.
+
+**Return JSON only (include rubricPointResults exactly as specified):**
 {
+  "rubricPointResults": ${rubricPointResultsJson},
+  "relevanceAssessment": {
+    "score": "<0.0-1.0>",
+    "explanation": "<relevance vs question>"
+  },
   "correctPercentage": "<0-100 number-like string>",
   "overallRating": "<0.0-5.0>",
   "technicalDepth": {
@@ -712,17 +692,13 @@ ${rubricPoints}
   },
   "answerRating": {
     "rating": "<0.0-5.0>",
-    "reasonForDeduction": ["<missing/incorrect rubric point>", "<...>"]
+    "reasonForDeduction": ["<missing / partial / incorrect rubric concepts>", "<...>"]
   },
   "responseCoherence": "<0.0-5.0>",
-  "relevanceAssessment": {
-    "score": "<0.0-1.0>",
-    "explanation": "<relevance vs question>"
-  },
   "responseQuality": "high|medium|low",
   "answerSummary": ["<key point>", "<key point>", "<key point>"],
   "answerImprovementSuggestions": ["<missing rubric point action>", "<missing rubric point action>"],
-  "detailedSummary": "<short technical summary vs ideal/rubric>",
+  "detailedSummary": "<short technical summary vs rubric and question>",
   "answerEffectiveness": {
     "rating": "<0.0-5.0>"
   }
@@ -834,11 +810,13 @@ const generateSubjectiveScoringPrompt = (
   responseData,
   typingAnalysis = null,
 ) => {
-  if (hasIdealRubricCalibration(responseData)) {
-    const rubricPoints = responseData.rubricPoints
-      .filter(Boolean)
+  if (hasRubricCalibration(responseData)) {
+    const rubricList = responseData.rubricPoints.filter(Boolean);
+    const rubricCount = rubricList.length;
+    const rubricPoints = rubricList
       .map((point, index) => `${index + 1}. ${point}`)
       .join("\n");
+    const rubricPointResultsJson = buildRubricPointResultsJsonTemplate(rubricCount);
 
     return `
 ${generateBaseInstructions()}
@@ -853,72 +831,43 @@ Paraphrases and different valid examples MUST receive full credit if the concept
 **EXPERIENCE:** ${responseData.experience} years
 **JOB ROLE:** ${responseData.jobRole}
 
-
-**REFERENCE IDEAL ANSWER (internal):**
-${sanitizeForPromptEmbedding(responseData.idealAnswer, 12000)}
-
 **RUBRIC POINTS (PRIMARY CHECKLIST):**
 ${rubricPoints}
 
 **HOW TO USE THE CANDIDATE ANSWER (MANDATORY):**
 - Treat the candidateAnswer/textAnswer as the answer-of-record for scoring.
-- Do NOT require matching the ideal answer wording or the same example(s).
-- If the answer is empty/too short, set relevanceAssessment.score low and score accordingly.
-- If there are likely typos/ASR-like errors, score based on recoverable meaning (do not over-penalize grammar).
+- Score only against the question and the rubric checklist; do not invent extra requirements beyond the rubric.
+- If the answer is empty, only filler, or too short to support any rubric row: set relevanceAssessment.score <= 0.3, set **every** rubricPointResults[].status to **missing**, correctPercentage **"0"** (or **"0"–"20"** only if a tiny on-topic fragment exists).
+- If there are likely typos, score based on recoverable meaning (do not over-penalize grammar).
 
-**MANDATORY RULES:**
-0) TOTAL IRRELEVANCE OVERRIDE (HARD RULE):
-   - If the candidate answer is totally irrelevant to the question (different topic/tech, random text, "I don't know", gibberish),
-     then set:
-     - relevanceAssessment.score = 0.0–0.2 with a short explanation
-     - correctPercentage = "0"
-     - overallRating = "0.0"
-     - technicalDepth.rating = "0.0"
-     - technicalDepthAsPerExperience.rating = "0.0"
-     - answerRating.rating = "0.0"
-     - answerRating.reasonForDeduction = ["Answer is irrelevant to the question"]
-     - answerImprovementSuggestions = ["Answer did not address the question/topic"]
-     Then STOP; do not apply rubric coverage.
-1) Evaluate rubric coverage semantically against the candidate answer (primary scoring method):
-   - full = 1.0 (clearly covers the concept correctly + brief explanation)
-   - partial = 0.5 (mentions concept but incomplete/shallow/unclear OR minor misconception)
-   - missing = 0 (not present)
-   - rubricCoverageScore drives final correctPercentage (primary factor)
-   - guardrail: do NOT deviate from rubricCoverageScore by more than 10 unless rubric is ambiguous/overlapping
-2) overallRating = correctPercentage/20 (one decimal)
-3) answerRating.reasonForDeduction = only missing/incorrect rubric points
-4) answerImprovementSuggestions MUST include ONLY missing/weak rubric points from the rubric checklist:
-   - NO generic advice unless it is explicitly a rubric point
-   - NO extra topics not present in rubricPoints
-   - Each suggestion must be a short "missing confirmation" line (few words / one short sentence)
-   - Do NOT include rubric point numbers.
-   - Each suggestion must include tiny evidence of absence from the candidate answer (e.g., "Not mentioned: ...", "Did not explain ...").
+**WORKFLOW (MANDATORY ORDER):**
+1) Set **relevanceAssessment** vs the **question**.
+2) **Irrelevance (rule 0)** applies ONLY for wrong topic/domain, substance-free refusal, or gibberish — NOT for on-topic but shallow answers (use partial/missing rubric rows instead).
+3) Fill **rubricPointResults** for all ${rubricCount} rubric lines **in order** before correctPercentage.
+4) Per row weights: **full** = 1.0, **partial** = 0.5, **missing** = 0.
+5) R = round((sum of weights / ${rubricCount}) * 100). Set correctPercentage to the string for R (0–100) **without arbitrary deviation** from R.
+6) **Relevance caps:** if relevanceAssessment.score <= 0.2 then correctPercentage **"0"** and headline zeros like the media rubric path; if 0.2 < score < 0.5 then correctPercentage at most **"40"** (min(R,40)); if score >= 0.5 use R.
+7) If every status is **full**, correctPercentage must be **"100"** (when relevance allows).
+8) overallRating and answerRating.rating = (numeric correctPercentage / 20) one decimal.
 
-**EVIDENCE REQUIREMENT (SHORT):**
-- Put rubric coverage evidence ONLY inside detailedSummary (NOT in technicalDepth.asPerExplanation).
-- Include a very short "Rubric evidence" mapping:
-  - "Covered: <few words of evidence from candidate text (paraphrase OK)>
-  - "Partial: <few words why partial>"
-- Keep it compact (1-3 lines). Do NOT add new JSON fields.
+**DEDUCTIONS & SUGGESTIONS:**
+- answerRating.reasonForDeduction: include **missing**, **partial** (prefix "Partial: …"), and **incorrect** rubric concepts; no rubric index numbers.
+- answerImprovementSuggestions: only rubric gaps; one per partial/missing; not empty when correctPercentage < 100; [] when 100%.
 
-**OTHER FIELD INSTRUCTIONS (KEEP LEGACY BEHAVIOR):**
-- technicalDepth.rating: depth/accuracy of technical explanation based on how candidate explained the technical, logical, analytical asked concepts and written clarity.
-- technicalDepth.asPerExplanation: technical-only evidence summary.
-- technicalDepthAsPerExperience: assess depth expectation for ${responseData.experience} years
-- communicationRating/confidenceLevel/responseCoherence: evaluate writing clarity, confidence signals, how well the candidate communicated their answer and ability to explain.
-- responseQuality:
-  - high: relevant + technically sound + coherent
-  - medium: relevant but partial/limited depth
-  - low: poor relevance or major technical issues
-- answerSummary: 3 to 4 factual technical points from candidate text, avoid redundant points, keep it concise.
-- detailedSummary: concise technical recap vs ideal/rubric expectations
-- answerEffectiveness.rating: how effectively candidate answered the asked question
-- languageDetection: detect actual language usage from text; keep legacy structure
-- Maintain exact existing JSON field names/types (no extra fields)
-- Avoid "rating cloning": these fields may differ (within reason). Do NOT default everything to overallRating.
+**EVIDENCE:** Per-row evidence in rubricPointResults[].evidence; optional 1–3 line recap in detailedSummary (not in technicalDepth.asPerExplanation).
+
+**NUMERIC CONSISTENCY:**
+- technicalDepth / technicalDepthAsPerExperience: may differ from overallRating by at most **1.0** only if technicalDepth.asPerExplanation states why in one short sentence; else within **0.5** of overallRating.
+- answerEffectiveness.rating: within **0.5** of overallRating when relevance >= 0.5.
+- responseQuality **high** with correctPercentage < 60 is invalid.
 
 **Return JSON only:**
 {
+  "rubricPointResults": ${rubricPointResultsJson},
+  "relevanceAssessment": {
+    "score": "<0.0-1.0>",
+    "explanation": "<relevance explanation>"
+  },
   "correctPercentage": "<0-100>",
   "overallRating": "<0.0-5.0>",
   "technicalDepth": {
@@ -932,19 +881,15 @@ ${rubricPoints}
   },
   "answerRating": {
     "rating": "<0.0-5.0>",
-    "reasonForDeduction": ["<missing/incorrect rubric point>", "<...>"]
+    "reasonForDeduction": ["<missing / partial / incorrect rubric concepts>", "<...>"]
   },
   "communicationRating": "<0.0-5.0>",
   "confidenceLevel": "<0.0-5.0>",
   "responseCoherence": "<0.0-5.0>",
-  "relevanceAssessment": {
-    "score": "<0.0-1.0>",
-    "explanation": "<relevance explanation>"
-  },
   "responseQuality": "high|medium|low",
   "answerSummary": ["<key point>", "<key point>", "<key point>"],
   "answerImprovementSuggestions": ["<missing rubric point action>", "<missing rubric point action>"],
-  "detailedSummary": "<short technical summary vs ideal/rubric>",
+  "detailedSummary": "<short technical summary vs rubric and question>",
   "answerEffectiveness": {
     "rating": "<0.0-5.0>",
     "relevanceBreakdown": {

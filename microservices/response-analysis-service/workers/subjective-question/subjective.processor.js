@@ -4,6 +4,10 @@
  * Optimized with enhanced error handling and structured integrity analysis
  */
 
+const {
+  applyRubricCalibrationNormalization,
+} = require("../common/rubricCalibration.normalizer");
+
 // Dependencies will be injected
 let logger = console;
 let aiExecutor = null;
@@ -228,9 +232,13 @@ const processSubjectiveResponse = async (responseData) => {
 
     // ====== STAGE 1: Scoring (AI call) ======
     logger.info("V3: Stage 1 - Starting subjective scoring");
-    const scoringResults = await aiExecutor.executeSubjectiveScoring(
+    const rawScoring = await aiExecutor.executeSubjectiveScoring(
       responseData,
       typingAnalysisResult
+    );
+    const scoringResults = applyRubricCalibrationNormalization(
+      rawScoring,
+      responseData.rubricPoints,
     );
 
     logger.info("V3: Stage 1 - Scoring completed", {
