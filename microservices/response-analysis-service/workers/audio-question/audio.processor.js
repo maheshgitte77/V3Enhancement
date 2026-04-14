@@ -8,6 +8,9 @@
 const path = require("path");
 const fs = require("fs").promises;
 const axios = require("axios");
+const {
+  applyRubricCalibrationNormalization,
+} = require("../common/rubricCalibration.normalizer");
 
 // Dependencies will be injected
 let logger = console;
@@ -432,11 +435,15 @@ const processAudioResponse = async (responseData) => {
           responseData,
           "audio",
         );
+        const calibrated = applyRubricCalibrationNormalization(
+          results,
+          responseData.rubricPoints,
+        );
         logger.info("V3: Stage 2 - Scoring completed", {
-          correctPercentage: results.correctPercentage,
-          overallRating: results.overallRating,
+          correctPercentage: calibrated.correctPercentage,
+          overallRating: calibrated.overallRating,
         });
-        return results;
+        return calibrated;
       })(),
 
       // Stage 3: Initial Cheating Detection (algorithmic, using Stage 1 data)
