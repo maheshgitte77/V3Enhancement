@@ -27,10 +27,10 @@ const statusContribution = (status, pointValue) => {
   const s = normalizeStatus(status);
   if (s === "full") return pointValue;
   if (s === "partial") return pointValue / 2;
-  if (s === "missing") return -5;
-  if (s === "invalid") return -5;
-  // Fail-safe: unknown non-empty statuses are treated as invalid.
-  return -5;
+  if (s === "missing") return 0;
+  if (s === "invalid") return 0;
+  // Fail-safe: unknown statuses get no credit and no deduction.
+  return 0;
 };
 
 const parseRelevanceScore = (rel) => {
@@ -61,6 +61,15 @@ const normalizeExtraStatus = (raw) => {
   if (s === "wrong-invalid" || s === "wrong" || s === "invalid") {
     return "wrong-invalid";
   }
+  if (
+    s === "irrelevant-neutral" ||
+    s === "irrelevant" ||
+    s === "off-topic" ||
+    s === "offtopic" ||
+    s === "neutral"
+  ) {
+    return "irrelevant-neutral";
+  }
   return null;
 };
 
@@ -78,10 +87,11 @@ const parseExtraPointResults = (value) => {
 /**
  * When rubricPointResults is present and valid, recompute correctPercentage,
  * overallRating, and answerRating.rating from deterministic rubric math:
- * - full => +X, partial => +(X/2), missing => -5, invalid => -5
- * - extraPointResults[] with status correct-valid/wrong-invalid (preferred source)
+ * - full => +X, partial => +(X/2), missing => +0, invalid => +0
+ * - extraPointResults[] with status correct-valid/wrong-invalid/irrelevant-neutral (preferred source)
  * - extraValidQuestionPoints => +(X/2) each (fallback/compat bonus count)
  * - extraInvalidQuestionPoints => -5 each (fallback/compat deduction count)
+ * Deduction for wrong-invalid extras applies only when provisional score is > 90.
  * where X = 100 / total rubric points.
  * Final score is clamped to [0, 100]. Legacy relevance caps are still applied.
  *
@@ -154,7 +164,10 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
     score += statusContribution(rows[i]?.status, pointValue);
   }
   score += extraValidQuestionPoints * halfPointValue;
-  score -= extraInvalidQuestionPoints * 5;
+  const provisionalScore = score;
+  if (provisionalScore > 90) {
+    score -= extraInvalidQuestionPoints * 5;
+  }
 
   let pct = Math.round(score);
   pct = Math.max(0, Math.min(100, pct));
