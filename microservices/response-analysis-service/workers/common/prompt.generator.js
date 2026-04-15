@@ -88,7 +88,7 @@ const buildRubricPointResultsJsonTemplate = (n) => {
 /** Valid JSON array template for extra (non-rubric) on-topic concepts. */
 const buildExtraPointResultsJsonTemplate = () => {
   return `[
-    { "extra": 1, "status": "<correct-valid|wrong-invalid>", "evidence": "<brief phrase from answer-of-record>" }
+    { "extra": 1, "status": "<correct-valid|wrong-invalid|irrelevant-neutral>", "evidence": "<brief phrase from answer-of-record>" }
   ]`;
 };
 
@@ -661,19 +661,20 @@ ${rubricPoints}
 4) Let X = 100 / ${rubricCount}. Per rubric row scoring:
    - **full** => +X
    - **partial** => +X/2
-   - **missing** => -5
-   - **invalid** (conceptually wrong) => -5
+   - **missing** => +0 (no deduction, just no credit)
+   - **invalid** (conceptually wrong) => +0 (no deduction, just no credit)
 5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
    - status = **correct-valid** for extra correct concept
-   - status = **wrong-invalid** for extra concept that is conceptually wrong
+   - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
+   - status = **irrelevant-neutral** for extra off-topic/side points that are not part of the asked answer; these must NOT be penalized
    - Include short evidence for each row.
    - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
 6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
    - bonus = EV * (X/2)
-   - deduction = EI * 5
-7) Raw score R = round(sum(row scores) + bonus - deduction). Clamp R to 0..100 (never negative, never above 100). Set correctPercentage = string(R), without arbitrary deviation.
+   - deduction = EI * 5, but APPLY this deduction ONLY if provisional score (sum(row scores) + bonus) > 90
+7) Raw score R = round(sum(row scores) + bonus - conditionalDeduction). Clamp R to 0..100 (never negative, never above 100). Set correctPercentage = string(R), without arbitrary deviation.
 8) **Relevance caps (same as legacy):** if relevanceAssessment.score <= 0.2 then correctPercentage must be **"0"** and use rule-0 style zeros for headline ratings; if 0.2 < score < 0.5 then correctPercentage must be at most **"40"** (use min(R, 40)); if score >= 0.5 use R as correctPercentage.
-9) **HARD:** If every rubricPointResults[].status is **full** and extraPointResults is empty, correctPercentage must be **"100"** (when relevance allows).
+9) **HARD:** If every rubricPointResults[].status is **full** and extraPointResults has no wrong-invalid rows (empty or only irrelevant-neutral), correctPercentage must be **"100"** (when relevance allows).
 10) overallRating = (numeric correctPercentage / 20) to one decimal; answerRating.rating must match overallRating.
 
 **DEDUCTIONS & SUGGESTIONS:**
@@ -871,19 +872,20 @@ ${rubricPoints}
 4) Let X = 100 / ${rubricCount}. Per rubric row scoring:
    - **full** => +X
    - **partial** => +X/2
-   - **missing** => -5
-   - **invalid** (conceptually wrong) => -5
+   - **missing** => +0 (no deduction, just no credit)
+   - **invalid** (conceptually wrong) => +0 (no deduction, just no credit)
 5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
    - status = **correct-valid** for extra correct concept
-   - status = **wrong-invalid** for extra concept that is conceptually wrong
+   - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
+   - status = **irrelevant-neutral** for extra off-topic/side points that are not part of the asked answer; these must NOT be penalized
    - Include short evidence for each row.
    - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
 6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
    - bonus = EV * (X/2)
-   - deduction = EI * 5
-7) R = round(sum(row scores) + bonus - deduction), then clamp to 0..100. Set correctPercentage to string(R) **without arbitrary deviation** from R.
+   - deduction = EI * 5, but APPLY this deduction ONLY if provisional score (sum(row scores) + bonus) > 90
+7) R = round(sum(row scores) + bonus - conditionalDeduction), then clamp to 0..100. Set correctPercentage to string(R) **without arbitrary deviation** from R.
 8) **Relevance caps:** if relevanceAssessment.score <= 0.2 then correctPercentage **"0"** and headline zeros like the media rubric path; if 0.2 < score < 0.5 then correctPercentage at most **"40"** (min(R,40)); if score >= 0.5 use R.
-9) If every status is **full** and extraPointResults is empty, correctPercentage must be **"100"** (when relevance allows).
+9) If every status is **full** and extraPointResults has no wrong-invalid rows (empty or only irrelevant-neutral), correctPercentage must be **"100"** (when relevance allows).
 10) overallRating and answerRating.rating = (numeric correctPercentage / 20) one decimal.
 
 **DEDUCTIONS & SUGGESTIONS:**
