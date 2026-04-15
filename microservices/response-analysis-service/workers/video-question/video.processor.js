@@ -16,6 +16,13 @@ let aiExecutor = null;
 let cheatingDetector = null;
 let resultMerger = null;
 let databaseHandler = null;
+const ENABLE_PROCTOR_MODEL_SIGNALS = true;
+// String(process.env.ENABLE_PROCTOR_MODEL_SIGNALS || "false").toLowerCase() ===
+// "true";
+const PROCTOR_MODEL_API_URL = process.env.PROCTOR_MODEL_API_URL || "http://localhost:8000";
+const PROCTOR_MODEL_API_TIMEOUT_MS = Number(
+  process.env.PROCTOR_MODEL_API_TIMEOUT_MS || 300000
+);
 
 /**
  * Initialize video processor with dependencies
@@ -209,8 +216,7 @@ const pollFileStatus = async (fileName) => {
       await yieldToEventLoop();
 
       logger.info(
-        `V2.5: Polling file status - attempt ${attempt + 1}/${
-          POLL_CONFIG.maxAttempts
+        `V2.5: Polling file status - attempt ${attempt + 1}/${POLL_CONFIG.maxAttempts
         }`,
         {
           fileName,
@@ -280,6 +286,155 @@ const pollFileStatus = async (fileName) => {
   throw new Error(
     `File polling timed out after ${POLL_CONFIG.maxAttempts} attempts`,
   );
+};
+
+const callProctorModelSignals = async (videoUrl, responseData) => {
+  if (!ENABLE_PROCTOR_MODEL_SIGNALS || !PROCTOR_MODEL_API_URL || !videoUrl) {
+    return null;
+  }
+
+  try {
+    const endpoint = `${PROCTOR_MODEL_API_URL.replace(/\/$/, "")}/analyze/proctor-signals`;
+    const payload = {
+      videoUrl,
+      questionId: responseData?.questionId,
+      candidateId: responseData?.candidateScreeningId,
+    };
+
+    const { data } = await axios.post(endpoint, payload, {
+      timeout: PROCTOR_MODEL_API_TIMEOUT_MS,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    logger.info("V2.5: Proctor model signals completed", {
+      questionId: responseData?.questionId,
+      hasIntegrityAnalysis: !!data?.integrityAnalysis,
+      suspicious: data?.summary?.suspicious || false,
+    });
+    return data;
+  } catch (error) {
+    logger.warn("V2.5: Proctor model signals call failed - continuing fallback", {
+      questionId: responseData?.questionId,
+      error: error.message,
+    });
+    return null;
+  }
+};
+
+const mergeProctorSignalsIntoStage1 = (stage1Results, modelSignals) => {
+  if (!modelSignals) return;
+
+  const lipPassed = modelSignals?.lipSync?.passed;
+  if (typeof lipPassed === "boolean") {
+    stage1Results.isLipSync = lipPassed;
+  }
+  stage1Results.visualIntegrity = {
+    ...(stage1Results.visualIntegrity || {}),
+    isLipSyncValid:
+      typeof lipPassed === "boolean"
+        ? lipPassed
+        : stage1Results.visualIntegrity?.isLipSyncValid,
+  };
+
+  if (!stage1Results.integrityAnalysis) {
+    stage1Results.integrityAnalysis = {
+      verdict: "INCONCLUSIVE",
+      confidenceScore: 0.5,
+      flags: [],
+    };
+  }
+
+  const existingFlags = Array.isArray(stage1Results.integrityAnalysis.flags)
+    ? stage1Results.integrityAnalysis.flags
+    : [];
+  const modelFlags = Array.isArray(modelSignals?.integrityAnalysis?.flags)
+    ? modelSignals.integrityAnalysis.flags
+    : [];
+
+  const flagKey = (f) =>
+    `${f?.type || ""}:${f?.evidence || ""}:${(f?.keyTimestamps || []).join(",")}`;
+  const existingSet = new Set(existingFlags.map(flagKey));
+  const mergedFlags = [...existingFlags];
+
+  modelFlags.forEach((flag) => {
+    const key = flagKey(flag);
+    if (!existingSet.has(key)) {
+      mergedFlags.push(flag);
+      existingSet.add(key);
+    }
+  });
+
+  stage1Results.integrityAnalysis.flags = mergedFlags;
+
+  const modelVerdict = modelSignals?.integrityAnalysis?.verdict;
+  const modelConfidence = modelSignals?.integrityAnalysis?.confidenceScore;
+  if (
+    modelVerdict &&
+    (stage1Results.integrityAnalysis.verdict === "CLEAR" ||
+      !stage1Results.integrityAnalysis.verdict)
+  ) {
+    stage1Results.integrityAnalysis.verdict = modelVerdict;
+  }
+  if (
+    typeof modelConfidence === "number" &&
+    modelConfidence > (stage1Results.integrityAnalysis.confidenceScore || 0)
+  ) {
+    stage1Results.integrityAnalysis.confidenceScore = modelConfidence;
+  }
+};
+
+const applyProctorFlagsToFlagResults = (flagResults, modelSignals) => {
+  if (!Array.isArray(flagResults) || !modelSignals) return flagResults;
+
+  const modelFlags = Array.isArray(modelSignals?.integrityAnalysis?.flags)
+    ? modelSignals.integrityAnalysis.flags
+    : [];
+  const detectedTypes = new Set(
+    modelFlags
+      .map((f) => String(f?.type || "").trim())
+      .filter(Boolean),
+  );
+
+  const mapTypeToFlag = {
+    EYE_MOVEMENT: "EyesMovement",
+    LIP_SYNC_MISMATCH: "LipSyncMismatch",
+    READING_FROM_EXTERNAL: "ReadingFromExternal",
+    IMPROPER_HEAD_POSE: "SuspiciousPatterns",
+  };
+
+  const positiveMessageByFlag = {
+    EyesMovement: "Eye Movement Analysis Completed - Suspicious eye movement detected",
+    LipSyncMismatch: "Audio-Video Synchronization Checked - Sync mismatch detected",
+    ReadingFromExternal: "Reading Behavior Analysis Completed - External reading detected",
+    SuspiciousPatterns: "Suspicious Behavioral Patterns",
+  };
+
+  const negativeMessageByFlag = {
+    EyesMovement: "Eye Movement Analysis Completed - Natural eye contact maintained",
+    LipSyncMismatch: "Audio-Video Synchronization Checked - No sync issues found",
+    ReadingFromExternal: "Reading Behavior Analysis Completed - No external reading detected",
+    SuspiciousPatterns: "Suspicious Pattern Analysis Completed - No suspicious patterns detected",
+  };
+
+  const targetFlags = new Set(Object.values(mapTypeToFlag));
+  const detectedTargetFlags = new Set(
+    Array.from(detectedTypes)
+      .map((type) => mapTypeToFlag[type])
+      .filter(Boolean),
+  );
+
+  return flagResults.map((f) => {
+    if (!targetFlags.has(f?.flag)) return f;
+    const detected = detectedTargetFlags.has(f.flag);
+    return {
+      ...f,
+      detected,
+      message: detected
+        ? positiveMessageByFlag[f.flag] || f.message
+        : negativeMessageByFlag[f.flag] || f.message,
+      lastUpdated: new Date().toISOString(),
+    };
+  });
 };
 
 /**
@@ -413,11 +568,20 @@ const processVideoResponse = async (responseData) => {
       "video",
     );
 
+    // Optional deterministic model signals (lip-sync + eye + head pose)
+    const sourceVideoUrl = responseData.azureUrl || responseData.fileUri || null;
+    const proctorModelSignals = await callProctorModelSignals(
+      sourceVideoUrl,
+      responseData
+    );
+    mergeProctorSignalsIntoStage1(stage1Results, proctorModelSignals);
+
     logger.info("V2.5: Stage 1 - Behavioral analysis completed", {
       hasTranscription: !!stage1Results.transcription,
       suspiciousIndicators:
         stage1Results.behavioralAnalysis?.suspiciousIndicators?.length || 0,
       isLipSync: stage1Results.isLipSync,
+      usedModelSignals: !!proctorModelSignals,
     });
 
     // ====== STAGES 2 & 3: Concurrent Execution ======
@@ -482,7 +646,12 @@ const processVideoResponse = async (responseData) => {
     );
 
     // Use validated flags (auto-corrected if needed)
-    const validatedFlagResults = syncValidation.flagResults;
+    let validatedFlagResults = syncValidation.flagResults;
+    // Override mapped flags from deterministic proctor API without changing the rest.
+    validatedFlagResults = applyProctorFlagsToFlagResults(
+      validatedFlagResults,
+      proctorModelSignals,
+    );
     finalCheatingResults.flagResults = validatedFlagResults;
 
     // Update flag stats based on validated flags
