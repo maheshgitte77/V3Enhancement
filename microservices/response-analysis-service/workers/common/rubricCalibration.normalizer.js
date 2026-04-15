@@ -152,7 +152,10 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
   const extraInvalidFromRows = extraPointResults.filter(
     (row) => row.status === "wrong-invalid",
   ).length;
-  const hasStructuredExtras = extraPointResults.length > 0;
+  // Treat explicit extraPointResults (including []) as the source of truth.
+  // This avoids accidentally taking stale/hallucinated fallback counters when
+  // model output intentionally provides no extras.
+  const hasStructuredExtras = Array.isArray(stage2Results.extraPointResults);
   const extraValidQuestionPoints = hasStructuredExtras
     ? extraValidFromRows
     : parseExtraValidQuestionPoints(stage2Results.extraValidQuestionPoints);
