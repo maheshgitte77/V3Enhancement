@@ -667,6 +667,8 @@ ${rubricPoints}
    - status = **correct-valid** for extra correct concept
    - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
    - status = **irrelevant-neutral** for extra off-topic/side points that are not part of the asked answer; these must NOT be penalized
+   - For OPEN-LIST questions (e.g., "important String methods used"), treat valid items not explicitly named in rubric rows as **correct-valid** extras (do NOT penalize for not matching exact names from rubric).
+   - For explicit COUNT questions (e.g., "tell 4 types/methods/examples"), enforce requested breadth via rubric rows: missing required items must remain **missing**/**partial** even if one provided item is deeply explained.
    - Include short evidence for each row.
    - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
 6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
@@ -878,6 +880,8 @@ ${rubricPoints}
    - status = **correct-valid** for extra correct concept
    - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
    - status = **irrelevant-neutral** for extra off-topic/side points that are not part of the asked answer; these must NOT be penalized
+   - For OPEN-LIST questions (e.g., "important String methods used"), treat valid items not explicitly named in rubric rows as **correct-valid** extras (do NOT penalize for exact-name mismatch).
+   - For explicit COUNT questions (e.g., "tell 4 types/methods/examples"), keep breadth strict via rubric rows: insufficient distinct items should remain **missing**/**partial**.
    - Include short evidence for each row.
    - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
 6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).

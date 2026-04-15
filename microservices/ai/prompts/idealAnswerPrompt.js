@@ -68,6 +68,15 @@ RULES
    - STRICT: Each rubric point must be UNIQUE and NON-OVERLAPPING (one concept per point). Do not split one concept into multiple points.
    - Prefer concept-level points over tool-name lists (only mention tools if the question explicitly asks).
    - These points are used for semantic coverage scoring — NOT literal wording match and NOT exact example match.
+   - If the question explicitly asks for a count (e.g., "tell 2", "explain 4 types", "give 5 methods"), rubricPoints MUST encode that count requirement:
+     - include a clear breadth requirement (at least N distinct valid items),
+     - include correctness/quality checks for the requested items,
+     - do NOT allow one deeply explained item to substitute for missing required item count.
+   - If the question is OPEN-LIST style with large valid answer space (e.g., "important String methods you have used"):
+     - do NOT create an exhaustive rubric listing every possible method,
+     - build dimension-based rubric points (breadth of relevant items, technical correctness, practical usage context, no major factual errors),
+     - ensure candidates can still earn full credit with different but valid item choices.
+   - Rubric points should be robust to valid alternatives and evolving ecosystems; avoid brittle name-matching-only points.
 8. Return ONLY valid JSON (no markdown fences) with this shape:
 9. Length reminder (STRICT):
    - Subjective: keep idealAnswerText between ${subjectiveWordsMin} and ${subjectiveWordsMax} words.
