@@ -425,9 +425,30 @@ const mergeProctorSignalsIntoStage1 = (stage1Results, modelSignals) => {
   const existingFlags = Array.isArray(stage1Results.integrityAnalysis.flags)
     ? stage1Results.integrityAnalysis.flags
     : [];
-  const modelFlags = Array.isArray(modelSignals?.integrityAnalysis?.flags)
+  const modelFlagsRaw = Array.isArray(modelSignals?.integrityAnalysis?.flags)
     ? modelSignals.integrityAnalysis.flags
     : [];
+
+  // IMPORTANT: CandidateAnswerAiResponse integrityAnalysis.flags.type is a strict enum in Mongo.
+  // Map proctor API flag types to the closest supported enum values to avoid DB validation failures.
+  const mapProctorIntegrityFlagTypeToSchemaEnum = (t) => {
+    const type = String(t || "").trim().toUpperCase();
+    const map = {
+      EYE_MOVEMENT: "OFF_SCREEN_GAZE",
+      IMPROPER_HEAD_POSE: "EXTERNAL_PROMPTS",
+      // These already exist in the schema enum:
+      LIP_SYNC_MISMATCH: "LIP_SYNC_MISMATCH",
+      READING_FROM_EXTERNAL: "READING_FROM_EXTERNAL",
+    };
+    return map[type] || type;
+  };
+
+  const modelFlags = modelFlagsRaw
+    .map((f) => ({
+      ...f,
+      type: mapProctorIntegrityFlagTypeToSchemaEnum(f?.type),
+    }))
+    .filter((f) => Boolean(f?.type));
 
   const flagKey = (f) =>
     `${f?.type || ""}:${f?.evidence || ""}:${(f?.keyTimestamps || []).join(",")}`;
