@@ -8,6 +8,9 @@ const path = require("path");
 const fs = require("fs").promises;
 const axios = require("axios");
 const { Readable } = require("stream");
+const {
+  applyRubricCalibrationNormalization,
+} = require("../common/rubricCalibration.normalizer");
 
 // Dependencies will be injected
 let logger = console;
@@ -33,6 +36,12 @@ const PROCTOR_MODEL_ASYNC_TIMEOUT_MS = Number(
     process.env.PROCTOR_MODEL_API_TIMEOUT_MS ||
     300000
 );
+//   // String(process.env.ENABLE_PROCTOR_MODEL_SIGNALS || "false").toLowerCase() ===
+//   // "true";
+// const PROCTOR_MODEL_API_URL =  process.env.PROCTOR_MODEL_API_URL || "http://localhost:8000";
+// const PROCTOR_MODEL_API_TIMEOUT_MS = Number(
+//   process.env.PROCTOR_MODEL_API_TIMEOUT_MS || 300000
+// );
 
 /**
  * Initialize video processor with dependencies
@@ -313,8 +322,7 @@ const callProctorModelSignals = async (videoUrl, responseData) => {
   }
 
   try {
-    const baseUrl = PROCTOR_MODEL_API_URL.replace(/\/$/, "");
-    const endpoint = `${baseUrl}/analyze/proctor-signals`;
+    const endpoint = `${PROCTOR_MODEL_API_URL.replace(/\/$/, "")}/analyze/proctor-signals`;
     const payload = {
       videoUrl,
       questionId: responseData?.questionId,
@@ -666,11 +674,15 @@ const processVideoResponse = async (responseData) => {
           responseData,
           "video",
         );
+        const calibrated = applyRubricCalibrationNormalization(
+          results,
+          responseData.rubricPoints,
+        );
         logger.info("V2.5: Stage 2 - Scoring completed", {
-          correctPercentage: results.correctPercentage,
-          overallRating: results.overallRating,
+          correctPercentage: calibrated.correctPercentage,
+          overallRating: calibrated.overallRating,
         });
-        return results;
+        return calibrated;
       })(),
 
       // Stage 3: Initial Cheating Detection (algorithmic, using Stage 1 data)
