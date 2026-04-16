@@ -19,9 +19,19 @@ let databaseHandler = null;
 const ENABLE_PROCTOR_MODEL_SIGNALS = true;
 // String(process.env.ENABLE_PROCTOR_MODEL_SIGNALS || "false").toLowerCase() ===
 // "true";
-const PROCTOR_MODEL_API_URL = process.env.PROCTOR_MODEL_API_URL || "http://localhost:8000";
+const PROCTOR_MODEL_API_URL = process.env.PROCTOR_MODEL_API_URL || "http://13.234.90.206:8000" || "http://localhost:8000";
 const PROCTOR_MODEL_API_TIMEOUT_MS = Number(
   process.env.PROCTOR_MODEL_API_TIMEOUT_MS || 300000
+);
+const PROCTOR_MODEL_ASYNC_ENABLED =
+  String(process.env.PROCTOR_MODEL_ASYNC_ENABLED || "false").toLowerCase() === "true";
+const PROCTOR_MODEL_ASYNC_POLL_INTERVAL_MS = Number(
+  process.env.PROCTOR_MODEL_ASYNC_POLL_INTERVAL_MS || 4000
+);
+const PROCTOR_MODEL_ASYNC_TIMEOUT_MS = Number(
+  process.env.PROCTOR_MODEL_ASYNC_TIMEOUT_MS ||
+    process.env.PROCTOR_MODEL_API_TIMEOUT_MS ||
+    300000
 );
 
 /**
@@ -39,6 +49,15 @@ const initializeVideoProcessor = (dependencies) => {
   if (dependencies.pollConfig) {
     POLL_CONFIG = { ...POLL_CONFIG, ...dependencies.pollConfig };
   }
+
+  logger.info("V2.5: Proctor model integration config", {
+    enabled: ENABLE_PROCTOR_MODEL_SIGNALS,
+    apiUrl: PROCTOR_MODEL_API_URL,
+    apiTimeoutMs: PROCTOR_MODEL_API_TIMEOUT_MS,
+    asyncEnabled: PROCTOR_MODEL_ASYNC_ENABLED,
+    asyncPollIntervalMs: PROCTOR_MODEL_ASYNC_POLL_INTERVAL_MS,
+    asyncTimeoutMs: PROCTOR_MODEL_ASYNC_TIMEOUT_MS,
+  });
 };
 
 /**
@@ -294,12 +313,63 @@ const callProctorModelSignals = async (videoUrl, responseData) => {
   }
 
   try {
-    const endpoint = `${PROCTOR_MODEL_API_URL.replace(/\/$/, "")}/analyze/proctor-signals`;
+    const baseUrl = PROCTOR_MODEL_API_URL.replace(/\/$/, "");
+    const endpoint = `${baseUrl}/analyze/proctor-signals`;
     const payload = {
       videoUrl,
       questionId: responseData?.questionId,
       candidateId: responseData?.candidateScreeningId,
     };
+
+    if (PROCTOR_MODEL_ASYNC_ENABLED) {
+      try {
+        const submitEndpoint = `${baseUrl}/analyze/proctor-signals/submit`;
+        const submitResp = await axios.post(submitEndpoint, payload, {
+          timeout: PROCTOR_MODEL_API_TIMEOUT_MS,
+          headers: { "Content-Type": "application/json" },
+        });
+        const jobId = submitResp?.data?.jobId;
+        if (!jobId) {
+          throw new Error("Missing jobId from async proctor submit response");
+        }
+
+        const statusEndpoint = `${baseUrl}/analyze/proctor-signals/jobs/${jobId}`;
+        const pollInterval = Math.max(1000, PROCTOR_MODEL_ASYNC_POLL_INTERVAL_MS);
+        const asyncDeadline = Date.now() + Math.max(10000, PROCTOR_MODEL_ASYNC_TIMEOUT_MS);
+
+        while (Date.now() < asyncDeadline) {
+          const statusResp = await axios.get(statusEndpoint, {
+            timeout: Math.min(30000, PROCTOR_MODEL_API_TIMEOUT_MS),
+          });
+          const state = statusResp?.data || {};
+          const status = String(state?.status || "").toUpperCase();
+          if (status === "DONE") {
+            const result = state?.result || null;
+            logger.info("V2.5: Proctor model async signals completed", {
+              questionId: responseData?.questionId,
+              jobId,
+              hasIntegrityAnalysis: !!result?.integrityAnalysis,
+              suspicious: result?.summary?.suspicious || false,
+            });
+            return result;
+          }
+          if (status === "FAILED") {
+            throw new Error(
+              state?.error
+                ? `Async proctor job failed: ${state.error}`
+                : "Async proctor job failed"
+            );
+          }
+          await new Promise((res) => setTimeout(res, pollInterval));
+        }
+        throw new Error("Async proctor polling timed out");
+      } catch (asyncError) {
+        logger.warn("V2.5: Async proctor mode failed, falling back to sync endpoint", {
+          questionId: responseData?.questionId,
+          error: asyncError.message,
+        });
+      }
+    }
 
     const { data } = await axios.post(endpoint, payload, {
       timeout: PROCTOR_MODEL_API_TIMEOUT_MS,
