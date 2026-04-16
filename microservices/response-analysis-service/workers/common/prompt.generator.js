@@ -45,32 +45,32 @@ const hasRubricCalibration = (responseData) =>
   Array.isArray(responseData?.rubricPoints) &&
   responseData.rubricPoints.filter(Boolean).length > 0;
 
-/**
- * Sanitize large free-form text before embedding into prompts.
- * Prevents markdown code fences / long code blocks from polluting JSON-only scoring instructions.
- */
-const sanitizeForPromptEmbedding = (value, maxLen = 12000) => {
-  if (value == null) return "";
-  let text = String(value);
-  // Remove markdown code fences and their content (best-effort).
-  // This avoids the model switching to "code mode" and breaking JSON-only outputs.
-  text = text.replace(/```[\s\S]*?```/g, (match) => {
-    // keep a tiny placeholder so context isn't lost completely
-    const snippet = match
-      .replace(/```/g, "")
-      .trim()
-      .slice(0, 200);
-    return snippet ? `[code omitted: ${snippet}]` : "[code omitted]";
-  });
-  // Remove any remaining fence markers
-  text = text.replace(/```/g, "");
-  // Neutralize inline markdown code markers (single backticks).
-  // They don't break JS concatenation, but they can cause the LLM to over-focus on formatting.
-  text = text.replace(/`/g, "'");
-  // Hard cap
-  if (maxLen && text.length > maxLen) text = text.slice(0, maxLen);
-  return text;
-};
+// /**
+//  * Sanitize large free-form text before embedding into prompts.
+//  * Prevents markdown code fences / long code blocks from polluting JSON-only scoring instructions.
+//  */
+// const sanitizeForPromptEmbedding = (value, maxLen = 12000) => {
+//   if (value == null) return "";
+//   let text = String(value);
+//   // Remove markdown code fences and their content (best-effort).
+//   // This avoids the model switching to "code mode" and breaking JSON-only outputs.
+//   text = text.replace(/```[\s\S]*?```/g, (match) => {
+//     // keep a tiny placeholder so context isn't lost completely
+//     const snippet = match
+//       .replace(/```/g, "")
+//       .trim()
+//       .slice(0, 200);
+//     return snippet ? `[code omitted: ${snippet}]` : "[code omitted]";
+//   });
+//   // Remove any remaining fence markers
+//   text = text.replace(/```/g, "");
+//   // Neutralize inline markdown code markers (single backticks).
+//   // They don't break JS concatenation, but they can cause the LLM to over-focus on formatting.
+//   text = text.replace(/`/g, "'");
+//   // Hard cap
+//   if (maxLen && text.length > maxLen) text = text.slice(0, maxLen);
+//   return text;
+// };
 
 /** Valid JSON array template: one object per rubric line, same order as checklist. */
 const buildRubricPointResultsJsonTemplate = (n) => {
@@ -88,7 +88,8 @@ const buildRubricPointResultsJsonTemplate = (n) => {
 /** Valid JSON array template for extra (non-rubric) on-topic concepts. */
 const buildExtraPointResultsJsonTemplate = () => {
   return `[
-    { "extra": 1, "status": "<correct-valid|wrong-invalid|irrelevant-neutral>", "evidence": "<brief phrase from answer-of-record>" }
+    { "extra": 1, "status": "<correct-valid|wrong-invalid|irrelevant-neutral>", "evidence": "<brief phrase from answer-of-record>" },
+    { "extra": 2, "status": "<correct-valid|wrong-invalid|irrelevant-neutral>", "evidence": "<brief phrase from answer-of-record>" }
   ]`;
 };
 
@@ -661,8 +662,9 @@ ${rubricPoints}
 4) Let X = 100 / ${rubricCount}. Per rubric row scoring:
    - **full** => +X
    - **partial** => +X/2
-   - **missing** => +0 (no deduction, just no credit)
-   - **invalid** (conceptually wrong) => +0 (no deduction, just no credit)
+   - **missing** => +0 (no deduction; just no credit for this rubric row)
+   - **invalid** (conceptually wrong) => +0 (no deduction; just no credit for this rubric row)
+   - NOTE: DEDUCTIONS apply ONLY to **wrong-invalid extras** in step 6 (and only when provisional score > 90). This "no deduction" rule applies ONLY to rubric rows.
 5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
    - status = **correct-valid** for extra correct concept
    - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
@@ -671,11 +673,21 @@ ${rubricPoints}
    - For explicit COUNT questions (e.g., "tell 4 types/methods/examples"), enforce requested breadth via rubric rows: missing required items must remain **missing**/**partial** even if one provided item is deeply explained.
    - Include short evidence for each row.
    - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
+   - **EXTRA-POINT CAPTURE CHECKLIST (MANDATORY):**
+     a) Re-scan the entire answer-of-record AFTER filling rubric rows.
+     b) Identify any additional ON-TOPIC items/facts/examples/methods that are correct but were NOT required by any rubric row.
+     c) If you find at least 1 such item, you MUST add it to extraPointResults (do not leave extraPointResults empty).
+     d) Avoid duplicates: do NOT add an extra if it is the same concept already credited in a rubric row.
+     e) Keep it concise: include up to 6 extra rows max; prefer the highest-signal extras.
+     f) If you are unsure whether an extra is correct, do NOT mark correct-valid; either omit it or mark wrong-invalid only if clearly wrong.
 6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
    - bonus = EV * (X/2)
    - deduction = EI * 5, but APPLY this deduction ONLY if provisional score (sum(row scores) + bonus) > 90
 7) Raw score R = round(sum(row scores) + bonus - conditionalDeduction). Clamp R to 0..100 (never negative, never above 100). Set correctPercentage = string(R), without arbitrary deviation.
-8) **Relevance caps (same as legacy):** if relevanceAssessment.score <= 0.2 then correctPercentage must be **"0"** and use rule-0 style zeros for headline ratings; if 0.2 < score < 0.5 then correctPercentage must be at most **"40"** (use min(R, 40)); if score >= 0.5 use R as correctPercentage.
+8) **Relevance tiers (single source of truth):**
+   - If relevanceAssessment.score <= 0.2 → correctPercentage = **"0"** and headline ratings must be **"0.0"**
+   - If 0.2 < relevanceAssessment.score < 0.5 → correctPercentage = string(min(R, 40))
+   - If relevanceAssessment.score >= 0.5 → correctPercentage = string(R)
 9) **HARD:** If every rubricPointResults[].status is **full** and extraPointResults has no wrong-invalid rows (empty or only irrelevant-neutral), correctPercentage must be **"100"** (when relevance allows).
 10) overallRating = (numeric correctPercentage / 20) to one decimal; answerRating.rating must match overallRating.
 
@@ -688,7 +700,7 @@ ${rubricPoints}
 
 **NUMERIC FIELD CONSISTENCY:**
 - overallRating and answerRating.rating track correctPercentage / 20.
-- technicalDepth.rating and technicalDepthAsPerExperience.rating may differ by **at most 1.0** from overallRating only if technicalDepth.asPerExplanation states why in one short sentence; otherwise keep within **0.5** of overallRating.
+- technicalDepth.rating and technicalDepthAsPerExperience.rating MUST be within **0.5** of overallRating (no exceptions).
 - answerEffectiveness.rating: within **0.5** of overallRating when relevanceAssessment.score >= 0.5.
 - responseCoherence / responseQuality: must not contradict the headline (e.g. responseQuality **high** with correctPercentage < 60 is invalid).
 
@@ -874,8 +886,9 @@ ${rubricPoints}
 4) Let X = 100 / ${rubricCount}. Per rubric row scoring:
    - **full** => +X
    - **partial** => +X/2
-   - **missing** => +0 (no deduction, just no credit)
-   - **invalid** (conceptually wrong) => +0 (no deduction, just no credit)
+   - **missing** => +0 (no deduction; just no credit for this rubric row)
+   - **invalid** (conceptually wrong) => +0 (no deduction; just no credit for this rubric row)
+   - NOTE: DEDUCTIONS apply ONLY to **wrong-invalid extras** in step 6 (and only when provisional score > 90). This "no deduction" rule applies ONLY to rubric rows.
 5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
    - status = **correct-valid** for extra correct concept
    - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
@@ -884,11 +897,21 @@ ${rubricPoints}
    - For explicit COUNT questions (e.g., "tell 4 types/methods/examples"), keep breadth strict via rubric rows: insufficient distinct items should remain **missing**/**partial**.
    - Include short evidence for each row.
    - REQUIRED: extraPointResults must always be present in output JSON (use [] when none).
+   - **EXTRA-POINT CAPTURE CHECKLIST (MANDATORY):**
+     a) Re-scan the full candidate answer AFTER filling rubric rows.
+     b) Pull out any additional ON-TOPIC correct facts/items/examples not already credited by a rubric row.
+     c) If at least 1 exists, you MUST add it to extraPointResults (do not return [] just because rubric coverage was enough).
+     d) Avoid duplicates with rubric coverage (no double-counting).
+     e) Cap extras to 6 rows; choose the most meaningful.
+     f) Only mark wrong-invalid when clearly incorrect (not merely incomplete).
 6) Let EV = count(extraPointResults where status = correct-valid), EI = count(extraPointResults where status = wrong-invalid).
    - bonus = EV * (X/2)
    - deduction = EI * 5, but APPLY this deduction ONLY if provisional score (sum(row scores) + bonus) > 90
 7) R = round(sum(row scores) + bonus - conditionalDeduction), then clamp to 0..100. Set correctPercentage to string(R) **without arbitrary deviation** from R.
-8) **Relevance caps:** if relevanceAssessment.score <= 0.2 then correctPercentage **"0"** and headline zeros like the media rubric path; if 0.2 < score < 0.5 then correctPercentage at most **"40"** (min(R,40)); if score >= 0.5 use R.
+8) **Relevance tiers (single source of truth):**
+   - If relevanceAssessment.score <= 0.2 → correctPercentage = **"0"** and headline ratings must be **"0.0"**
+   - If 0.2 < relevanceAssessment.score < 0.5 → correctPercentage = string(min(R, 40))
+   - If relevanceAssessment.score >= 0.5 → correctPercentage = string(R)
 9) If every status is **full** and extraPointResults has no wrong-invalid rows (empty or only irrelevant-neutral), correctPercentage must be **"100"** (when relevance allows).
 10) overallRating and answerRating.rating = (numeric correctPercentage / 20) one decimal.
 
@@ -899,7 +922,7 @@ ${rubricPoints}
 **EVIDENCE:** Per-row evidence in rubricPointResults[].evidence; optional 1–3 line recap in detailedSummary (not in technicalDepth.asPerExplanation).
 
 **NUMERIC CONSISTENCY:**
-- technicalDepth / technicalDepthAsPerExperience: may differ from overallRating by at most **1.0** only if technicalDepth.asPerExplanation states why in one short sentence; else within **0.5** of overallRating.
+- technicalDepth / technicalDepthAsPerExperience: MUST be within **0.5** of overallRating (no exceptions).
 - answerEffectiveness.rating: within **0.5** of overallRating when relevance >= 0.5.
 - responseQuality **high** with correctPercentage < 60 is invalid.
 

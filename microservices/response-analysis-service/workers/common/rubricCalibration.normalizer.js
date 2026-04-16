@@ -180,6 +180,34 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
   }
 
   const overall = (pct / 20).toFixed(1);
+
+  const clampRatingToOverallWindow = (rawRating, rawOverall, window = 0.5) => {
+    const r = Number(rawRating);
+    const o = Number(rawOverall);
+    if (!Number.isFinite(r) || !Number.isFinite(o)) return null;
+    const min = Math.max(0, o - window);
+    const max = Math.min(5, o + window);
+    const clamped = Math.max(min, Math.min(max, r));
+    return clamped.toFixed(1);
+  };
+
+  const technicalDepthRating =
+    stage2Results?.technicalDepth?.rating != null
+      ? clampRatingToOverallWindow(stage2Results.technicalDepth.rating, overall, 0.5)
+      : null;
+  const technicalDepthAsPerExperienceRating =
+    stage2Results?.technicalDepthAsPerExperience?.rating != null
+      ? clampRatingToOverallWindow(
+        stage2Results.technicalDepthAsPerExperience.rating,
+        overall,
+        0.5,
+      )
+      : null;
+  const answerEffectivenessRating =
+    stage2Results?.answerEffectiveness?.rating != null
+      ? clampRatingToOverallWindow(stage2Results.answerEffectiveness.rating, overall, 0.5)
+      : null;
+
   const out = {
     ...stage2Results,
     extraPointResults,
@@ -190,6 +218,20 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
     answerRating: {
       ...(stage2Results.answerRating || {}),
       rating: overall,
+    },
+    technicalDepth: {
+      ...(stage2Results.technicalDepth || {}),
+      rating: technicalDepthRating ?? stage2Results?.technicalDepth?.rating,
+    },
+    technicalDepthAsPerExperience: {
+      ...(stage2Results.technicalDepthAsPerExperience || {}),
+      rating:
+        technicalDepthAsPerExperienceRating ??
+        stage2Results?.technicalDepthAsPerExperience?.rating,
+    },
+    answerEffectiveness: {
+      ...(stage2Results.answerEffectiveness || {}),
+      rating: answerEffectivenessRating ?? stage2Results?.answerEffectiveness?.rating,
     },
   };
   return out;
