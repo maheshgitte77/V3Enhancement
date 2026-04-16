@@ -331,7 +331,7 @@ const callProctorModelSignals = async (videoUrl, responseData) => {
 
     if (PROCTOR_MODEL_ASYNC_ENABLED) {
       try {
-        const submitEndpoint = `${baseUrl}/analyze/proctor-signals/submit`;
+        const submitEndpoint = `${PROCTOR_MODEL_API_URL}/analyze/proctor-signals/submit`;
         const submitResp = await axios.post(submitEndpoint, payload, {
           timeout: PROCTOR_MODEL_API_TIMEOUT_MS,
           headers: { "Content-Type": "application/json" },
@@ -341,7 +341,7 @@ const callProctorModelSignals = async (videoUrl, responseData) => {
           throw new Error("Missing jobId from async proctor submit response");
         }
 
-        const statusEndpoint = `${baseUrl}/analyze/proctor-signals/jobs/${jobId}`;
+        const statusEndpoint = `${PROCTOR_MODEL_API_URL}/analyze/proctor-signals/jobs/${jobId}`;
         const pollInterval = Math.max(1000, PROCTOR_MODEL_ASYNC_POLL_INTERVAL_MS);
         const asyncDeadline = Date.now() + Math.max(10000, PROCTOR_MODEL_ASYNC_TIMEOUT_MS);
 
