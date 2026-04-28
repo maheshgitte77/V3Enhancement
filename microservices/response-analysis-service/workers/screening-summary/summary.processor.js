@@ -94,8 +94,8 @@ const updateCandidateJourneyAfterScreeningSummary = async (
       // Add explicit final stage only if not duplicate of last stage.
       const lastStage = journey.length
         ? String(journey[journey.length - 1]?.stage || "")
-            .toLowerCase()
-            .trim()
+          .toLowerCase()
+          .trim()
         : "";
       if (!lastStage || lastStage !== normalizedFinal) {
         journey.push({
@@ -209,11 +209,11 @@ const calculateCandidateFitScore = (screeningResult) => {
 
   const candidateFitScore = correctPercentages.length
     ? parseFloat(
-        (
-          correctPercentages.reduce((sum, val) => sum + val, 0) /
-          correctPercentages.length
-        ).toFixed(2)
-      )
+      (
+        correctPercentages.reduce((sum, val) => sum + val, 0) /
+        correctPercentages.length
+      ).toFixed(2)
+    )
     : 0;
 
   return candidateFitScore;
@@ -405,8 +405,8 @@ const analyzeEvidenceStrength = (aiResponses, totalQuestions) => {
     definitiveFlags >= 1 ||
     highConfidenceFlags >= 3 ||
     hasCorrelatedCheatingPattern ||
-    flaggedPercentage >= 50 || // CRITICAL: 50%+ questions flagged = STRONG
-    flaggedQuestions >= 3 // CRITICAL: 3+ flagged questions = STRONG
+    flaggedPercentage >= 25 || // CRITICAL: 50%+ questions flagged = STRONG
+    flaggedQuestions >= 4 // CRITICAL: 3+ flagged questions = STRONG
   ) {
     evidenceLevel = "STRONG";
   } else if (highConfidenceFlags >= 1 && mediumConfidenceFlags >= 2) {
@@ -579,10 +579,10 @@ const calculateResponseQualityScore = (aiResponses) => {
       response.responseQuality === "high"
         ? 100
         : response.responseQuality === "medium"
-        ? 70
-        : response.responseQuality === "low"
-        ? 30
-        : 50;
+          ? 70
+          : response.responseQuality === "low"
+            ? 30
+            : 50;
     questionQuality += responseQualityScore * 0.25;
 
     qualityScores.push(questionQuality);
@@ -591,9 +591,9 @@ const calculateResponseQualityScore = (aiResponses) => {
   const avgQuality =
     qualityScores.length > 0
       ? Math.round(
-          qualityScores.reduce((sum, score) => sum + score, 0) /
-            qualityScores.length
-        )
+        qualityScores.reduce((sum, score) => sum + score, 0) /
+        qualityScores.length
+      )
       : 0;
 
   return isNaN(avgQuality) ? 0 : avgQuality;
@@ -627,7 +627,7 @@ const calculateTimeEfficiencyScore = (screeningResult) => {
   const avgQuestionEfficiency =
     questionTimeEfficiency.length > 0
       ? questionTimeEfficiency.reduce((sum, eff) => sum + eff, 0) /
-        questionTimeEfficiency.length
+      questionTimeEfficiency.length
       : 100;
 
   const overallEfficiency =
@@ -788,13 +788,13 @@ const calculateEnhancedRankingScores = async (screeningResult) => {
   const submissionTimingScore =
     screeningResult.submittedOn && screeningResult.startedOn
       ? Math.max(
-          0,
-          100 -
-            Math.floor(
-              (screeningResult.submittedOn - screeningResult.startedOn) /
-                (1000 * 60)
-            )
+        0,
+        100 -
+        Math.floor(
+          (screeningResult.submittedOn - screeningResult.startedOn) /
+          (1000 * 60)
         )
+      )
       : 50;
 
   const attemptRateScore = screeningResult.totalAttempts
@@ -1383,9 +1383,8 @@ Question ${questionIndex++}:
 - Question Title: ${programming.questionTitle}
 - Candidate Answer: ${programming.candidateAnswer}
 - Language Used: ${programming.languageId}
-- Test Results: ${programming.testResults?.passed || 0}/${
-              programming.testResults?.total || 0
-            } passed
+- Test Results: ${programming.testResults?.passed || 0}/${programming.testResults?.total || 0
+              } passed
 - Earned Score: ${programming.testResults?.earnedScore || 0}%
 - Max Score: ${programming.testResults?.maxScore || 0}%
 - Time Spent: ${programming.timeSpent} seconds
@@ -1485,9 +1484,8 @@ const findQuestionDetails = (response, screeningResult) => {
         extraFields = `
 - Time Spent: ${programming.timeSpent} seconds
 - Max Time: ${programming.maxTime} minutes
-- Test Results: ${programming.testResults?.passed || 0}/${
-          programming.testResults?.total || 0
-        } passed
+- Test Results: ${programming.testResults?.passed || 0}/${programming.testResults?.total || 0
+          } passed
 - Earned Score: ${programming.testResults?.earnedScore || 0}%
 - Retakes Used: ${programming.retakes}/${programming.maxAttempts}`;
         break;
@@ -1515,15 +1513,14 @@ const getProgrammingAnalysisInfo = async (questionDetails) => {
 
     if (programmingAnalysis) {
       return `
-- Programming Analysis: ${
-        programmingAnalysis.logicalCorrectness.score
-      }% logical correctness
+- Programming Analysis: ${programmingAnalysis.logicalCorrectness.score
+        }% logical correctness
 - Code Quality: ${programmingAnalysis.codeQuality.score}%
 - Overall Grade: ${programmingAnalysis.overallAssessment.grade}
 - Key Issues: ${programmingAnalysis.logicalCorrectness.weaknesses.join(", ")}
 - Recommendations: ${programmingAnalysis.overallAssessment.recommendations.join(
-        ", "
-      )}`;
+          ", "
+        )}`;
     }
   } catch (error) {
     logger.warn("V2.5: Failed to fetch programming analysis", {
@@ -1569,9 +1566,8 @@ const formatQuestionResponse = (
   if (questionDetails.questionDetails?.cheatingAnalysis) {
     const analysis = questionDetails.questionDetails.cheatingAnalysis;
     cheatingAnalysisInfo = `
-- Cheating Analysis: ${analysis.flaggedChecks || 0}/${
-      analysis.totalChecks || 0
-    } flags detected
+- Cheating Analysis: ${analysis.flaggedChecks || 0}/${analysis.totalChecks || 0
+      } flags detected
 - Processing Version: ${analysis.flagSystemVersion || "unknown"}`;
   }
 
@@ -1586,22 +1582,19 @@ Question ${questionIndex}:
   )}
 - Communication: ${response.communication}
 - Correct Percentage: ${response.correctPercentage}
-- Technical Depth: ${response.technicalDepth.rating} (${
-    response.technicalDepth.asPerExplanation
-  })
-- Answer Effectiveness: ${response.answerEffectiveness.rating} (${
-    response.answerEffectiveness.relevanceBreakdown?.relevanceExplanation ||
+- Technical Depth: ${response.technicalDepth.rating} (${response.technicalDepth.asPerExplanation
+    })
+- Answer Effectiveness: ${response.answerEffectiveness.rating} (${response.answerEffectiveness.relevanceBreakdown?.relevanceExplanation ||
     "N/A"
-  })
+    })
 - Overall Rating: ${response.overallRating}
 - Confidence Level: ${response.confidenceLevel}
 - Response Coherence: ${response.responseCoherence}
 - Cheating Confidence: ${cheatingConfidence}%
 - Response Quality: ${responseQuality}
 - Contextual Factors: ${contextualFactors}
-- Behavioral Insights: ${behavioralInsights}${cheatingAnalysisInfo}${programmingAnalysisInfo}${
-    questionDetails.extraFields
-  }
+- Behavioral Insights: ${behavioralInsights}${cheatingAnalysisInfo}${programmingAnalysisInfo}${questionDetails.extraFields
+    }
 `;
 };
 
@@ -1816,9 +1809,9 @@ const calculateAndUpdateRankings = async (
     const betterThanOfCandidates =
       sortedScreenings.length > 1
         ? Math.round(
-            ((sortedScreenings.length - rank) / (sortedScreenings.length - 1)) *
-              100
-          )
+          ((sortedScreenings.length - rank) / (sortedScreenings.length - 1)) *
+          100
+        )
         : 100;
 
     await CandidateScreeningResult.updateOne(
@@ -1845,10 +1838,10 @@ const calculateAndUpdateRankings = async (
 
   const candidateRank = candidateScreeningId
     ? sortedScreenings.findIndex(
-        (s) =>
-          s.candidateScreeningId?.toString() ===
-          candidateScreeningId?.toString()
-      ) + 1
+      (s) =>
+        s.candidateScreeningId?.toString() ===
+        candidateScreeningId?.toString()
+    ) + 1
     : null;
 
   return {

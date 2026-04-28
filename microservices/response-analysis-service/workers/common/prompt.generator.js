@@ -211,6 +211,18 @@ For candidates with 3-5 years of experience, use these scoring expectations:
 `;
 };
 
+const generateKeywordOnlyProtectionInstructions = () => {
+  return `
+**ANTI-KEYWORD-STUFFING PROTECTION:**
+- Do NOT award credit for bare topic labels, headings, or keyword lists without explanation.
+- A keyword mention alone is NOT a technical answer.
+- To count as coverage, the candidate must make a meaningful claim, explanation, comparison, example, or use-case statement.
+- If the answer mostly contains copied terms or labels from the question/topic with little or no explanation, treat it as weak or missing coverage.
+- For "difference/compare" questions, dimension names alone (e.g. "thread safety", "performance") are NOT enough; the answer must state how one side differs from the other.
+- For "list/mention/name/types/methods/examples" questions, a compact list of valid items can earn credit only if the question genuinely asks for listing items.
+`;
+};
+
 /**
  * Generate language detection instructions
  */
@@ -338,6 +350,9 @@ ${frontendContext}
 - NO non-Latin scripts (no Devanagari, Cyrillic, Arabic)
 - NO inline annotations like [unclear], [pause], [timestamp]
 - Record actual spoken language in languageDetection field
+- If no clearly audible human speech is present, set "transcription" to an empty string ("")
+- IMPORTANT: If you hear microphone noise/static/hum/fan noise/clicks/pops/beeps/music with No spoken words, set "transcription" to an empty string ("")
+- NEVER infer or guess transcript from question context, lip movement, or prior candidate responses
 
 **Output JSON Format:**
 {
@@ -502,6 +517,9 @@ ${frontendContext}
 - NO non-Latin scripts (no Devanagari, Cyrillic, Arabic)
 - NO inline annotations like [unclear], [pause], [timestamp]
 - Record actual spoken language in languageDetection field
+- If no clearly audible human speech is present, set "transcription" to an empty string ("")
+- IMPORTANT: If you hear microphone noise/static/hum/fan noise/clicks/pops/beeps/music with No spoken words, set "transcription" to an empty string ("")
+- NEVER infer or guess transcript from question context, lip movement, or prior candidate responses
 
 **Output JSON Format:**
 {
@@ -642,9 +660,14 @@ Paraphrases and different valid examples MUST receive full credit if the underly
 **EXPERIENCE:** ${responseData.experience} years
 **JOB ROLE:** ${responseData.jobRole}
 **Communication Style Observed:** ${typeof stage1Results.communication === "object"
-      ? stage1Results.communication.summary
-      : stage1Results.communication
-    }
+        ? stage1Results.communication.summary
+        : stage1Results.communication
+      }
+**Confidence Level Observed:** ${stage1Results.confidenceLevel ||
+      (typeof stage1Results.communication === "object"
+        ? stage1Results.communication.confidenceLevel
+        : "") ||
+      "N/A"}
 
 **RUBRIC POINTS (PRIMARY SCORING CHECKLIST):**
 ${rubricPoints}
@@ -654,6 +677,13 @@ ${rubricPoints}
 - Score only against the question and the rubric checklist; do not invent extra requirements beyond the rubric.
 - If the transcription is empty, only filler (e.g. "um", "I don't know" without substance), or unintelligible: set relevanceAssessment.score <= 0.3, set **every** rubricPointResults[].status to **missing**, correctPercentage **"0"** (or **"0"–"20"** only if a tiny on-topic fragment exists), and do not infer content that is not in the text.
 - If there are likely ASR/transcription errors, score based on the most reasonable recoverable meaning (do not over-penalize grammar).
+
+**ANTI-KEYWORD-STUFFING RULES (MANDATORY):**
+- A bare keyword/topic label without an explanatory statement is **NOT** rubric coverage.
+- "partial" requires at least one meaningful claim about the concept (what/why/how/comparison), not just naming the term.
+- If candidate only lists labels like "thread safety", "performance", "null handling" with no technical claim, mark rubric row **missing**.
+- If answer mostly discusses a different topic/domain, mark relevance low and keep unrelated content in extraPointResults as **irrelevant-neutral**.
+- Do not infer hidden understanding from headings, bullet titles, or copied rubric-like words.
 
 **WORKFLOW (MANDATORY ORDER):**
 1) Set **relevanceAssessment** vs the **question** (not vs the rubric wording alone).
@@ -665,6 +695,15 @@ ${rubricPoints}
    - **missing** => +0 (no deduction; just no credit for this rubric row)
    - **invalid** (conceptually wrong) => +0 (no deduction; just no credit for this rubric row)
    - NOTE: DEDUCTIONS apply ONLY to **wrong-invalid extras** in step 6 (and only when provisional score > 90). This "no deduction" rule applies ONLY to rubric rows.
+   - Strict gating for "partial":
+     - "missing": only keyword mention / heading / label, no technical claim.
+     - "partial": one-sided or incomplete technical claim, but still on-topic.
+     - "full": clear and correct explanation that satisfies the rubric intent.
+   - For **difference/compare** questions (e.g., "difference between A and B"):
+     - Candidate must explicitly compare both sides (A vs B). One-sided description is at most **partial**.
+     - Listing dimensions only ("thread safety", "performance") without A-vs-B statements is **missing**.
+     - If candidate compares wrong entities/topic, treat as irrelevant or mostly irrelevant.
+     - Compare evidence must be a short contrast claim, not a topic label.
 5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
    - status = **correct-valid** for extra correct concept
    - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
@@ -689,19 +728,31 @@ ${rubricPoints}
    - If 0.2 < relevanceAssessment.score < 0.5 → correctPercentage = string(min(R, 40))
    - If relevanceAssessment.score >= 0.5 → correctPercentage = string(R)
 9) **HARD:** If every rubricPointResults[].status is **full** and extraPointResults has no wrong-invalid rows (empty or only irrelevant-neutral), correctPercentage must be **"100"** (when relevance allows).
-10) overallRating = (numeric correctPercentage / 20) to one decimal; answerRating.rating must match overallRating.
+10) Compute **overallRating** as the average of:
+   - technicalDepth.rating
+   - technicalDepthAsPerExperience.rating
+   - answerRating.rating
+   - observed confidenceLevel
+   Round to one decimal.
 
 **DEDUCTIONS & SUGGESTIONS:**
-- answerRating.reasonForDeduction: list **missing** rubric concepts, **incorrect** rubric concepts, and **partial** rubric concepts using a clear prefix, e.g. "Partial: …", "Missing: …", "Incorrect: …" (no rubric index numbers).
+- answerRating.reasonForDeduction: summarize the important missing or weak points across the answer (no rubric index numbers, no "Partial/Missing" prefixes).
 - answerImprovementSuggestions: only rubric gaps (one per partial or missing row as before).
 
 **EVIDENCE (SHORT):**
 - Put extra narrative rubric evidence in **detailedSummary** only (1–3 lines optional "Rubric evidence" recap). Per-row evidence belongs in **rubricPointResults[].evidence**.
+- Each rubricPointResults[].evidence must be a SHORT CLAIM from the candidate answer-of-record, not just a topic label.
+- Bad evidence examples: "thread safety", "performance", "null handling"
+- Good evidence examples: "says HashMap is not thread-safe", "says ConcurrentHashMap does not allow nulls", "compares fail-fast vs weakly consistent iteration"
+- If no meaningful claim exists in the transcription for that rubric row, use status **missing** with evidence like "only label mentioned" or "not stated".
+- For compare/difference questions, evidence should preferably be a short contrast statement from the transcription, not a single-sided note.
 
 **NUMERIC FIELD CONSISTENCY:**
-- overallRating and answerRating.rating track correctPercentage / 20.
-- technicalDepth.rating and technicalDepthAsPerExperience.rating MUST be within **0.5** of overallRating (no exceptions).
-- answerEffectiveness.rating: within **0.5** of overallRating when relevanceAssessment.score >= 0.5.
+- Score anchor = (correctPercentage / 20) on the 0.0–5.0 scale.
+- answerRating.rating should track that score anchor.
+- technicalDepth.rating, technicalDepthAsPerExperience.rating, and answerRating.rating MUST each stay within **±2.0** of the score anchor.
+- confidenceLevel comes from observation of communication in video/audio recording;
+- overallRating is the average of those technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating, and confidenceLevel ratings.
 - responseCoherence / responseQuality: must not contradict the headline (e.g. responseQuality **high** with correctPercentage < 60 is invalid).
 
 **OTHER:**
@@ -730,7 +781,7 @@ ${rubricPoints}
   },
   "answerRating": {
     "rating": "<0.0-5.0>",
-    "reasonForDeduction": ["<missing / partial / incorrect rubric concepts>", "<...>"]
+    "reasonForDeduction": ["<summary of missing or weak points>", "<...>"]
   },
   "responseCoherence": "<0.0-5.0>",
   "responseQuality": "high|medium|low",
@@ -763,11 +814,18 @@ You are evaluating how well the candidate answered the specific question asked. 
       ? stage1Results.communication.summary
       : stage1Results.communication
     }
+- Confidence Level Observed: ${stage1Results.confidenceLevel ||
+    (typeof stage1Results.communication === "object"
+      ? stage1Results.communication.confidenceLevel
+      : "") ||
+    "N/A"}
 ${generateIdealAnswerBlock(responseData)}
 
 ${generateRelevanceInstructions(responseData)}
 
 ${generateScoringInstructions()}
+
+${generateKeywordOnlyProtectionInstructions()}
 
 **EVALUATION INSTRUCTIONS:**
 1. **First (MANDATORY)**: Check relevance - Does the answer address the question asked? Set relevanceAssessment.score FIRST
@@ -799,20 +857,20 @@ If candidate has 3-5 years experience AND answer is relevant:
 **Response JSON Format:**
 {
   "correctPercentage": "[0–100] - MUST follow relevance rules: 0 if relevanceAssessment.score <= 0.2, MAX 40 if score < 0.5, otherwise use formula: (Factual × 0.40 + Depth × 0.35 + Communication × 0.25) × Experience Factor",
-  "overallRating": "<String, 0.0–5.0> - MUST be proportional to correctPercentage (correctPercentage / 20)",
+  "overallRating": "<String, 0.0–5.0> - Average of technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating, and the observed confidenceLevel from Stage 1",
   "technicalDepth": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExplanation": "[PURELY TECHNICAL assessment - Excellent/Good/Fair/Needs Improvement with specific examples. NEVER mention integrity or cheating]",
+    "asPerExplanation": "[PURELY TECHNICAL assessment of content quality and depth relative to the asked question. NEVER mention integrity or cheating]",
     "experienceAdjusted": "[true/false - whether rating considers experience level]"
   },
   "technicalDepthAsPerExperience": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExperience": "[PURELY TECHNICAL assessment relative to ${responseData.experience
+    "asPerExperience": "[PURELY TECHNICAL level-adjusted assessment relative to ${responseData.experience
     } years experience. NEVER mention integrity or cheating]" 
   },
   "answerRating": {
     "rating": "<String, 0.0–5.0>",
-    "reasonForDeduction": ["[Specific technical reason for deduction if rating < 4.0 - e.g., 'Did not explain X concept', 'Missed key aspect Y', 'Incorrect understanding of Z']"]
+    "reasonForDeduction": ["[Summary of the important missing or weak points across the answer; do not use Partial/Missing tags]"]
   },
   "responseCoherence": "<String, 0.0–5.0> - Based on logical flow and structure of the transcribed answer",
   "relevanceAssessment": {
@@ -825,7 +883,7 @@ If candidate has 3-5 years experience AND answer is relevant:
   "detailedSummary": "[Comprehensive HR-friendly summary: What did the candidate demonstrate well? What was missing? How does their answer compare to expected knowledge for ${responseData.experience
     } years experience? Focus on technical competency. DO NOT mention integrity or cheating concerns]",
   "answerEffectiveness": {
-    "rating": "<String, 0.0–5.0> - Overall effectiveness of the answer in addressing the question"
+    "rating": "<String, 0.0–5.0> - How well the candidate directly answered the question"
   }
 }
 
@@ -834,6 +892,7 @@ If candidate has 3-5 years experience AND answer is relevant:
 - **If answer is irrelevant (relevanceAssessment.score <= 0.2):** correctPercentage MUST be 0, do NOT use scoring formula
 - **If answer is partially relevant (relevanceAssessment.score < 0.5):** correctPercentage MUST be capped at 40
 - **Only apply scoring formula if answer is relevant (relevanceAssessment.score >= 0.5)**
+- **overallRating rule**: overallRating is the average of technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating, and the observed confidenceLevel from Stage 1; keep each of those four within ±2.0 of (correctPercentage / 20)
 - **MID-LEVEL SCORING GUIDANCE ONLY APPLIES IF ANSWER IS RELEVANT (relevanceAssessment.score >= 0.6)**: Irrelevant answers = 0% regardless of experience
 - Focus ONLY on: Did they answer what was asked? How well? What's missing?
 - Be fair and consider their experience level in your evaluation (only if answer is relevant)
@@ -879,6 +938,13 @@ ${rubricPoints}
 - If the answer is empty, only filler, or too short to support any rubric row: set relevanceAssessment.score <= 0.3, set **every** rubricPointResults[].status to **missing**, correctPercentage **"0"** (or **"0"–"20"** only if a tiny on-topic fragment exists).
 - If there are likely typos, score based on recoverable meaning (do not over-penalize grammar).
 
+**ANTI-KEYWORD-STUFFING RULES (MANDATORY):**
+- Keyword presence alone does NOT earn coverage.
+- "partial" requires at least one meaningful technical claim; plain labels/headings are **missing**.
+- If candidate copies rubric-like terms but provides no explanation, mark those rows **missing**.
+- If most of the answer is about another topic (off-topic content), lower relevance and avoid awarding rubric credit from unrelated text.
+- Never upgrade "missing" to "partial" solely because a term overlaps with rubric wording.
+
 **WORKFLOW (MANDATORY ORDER):**
 1) Set **relevanceAssessment** vs the **question**.
 2) **Irrelevance (rule 0)** applies ONLY for wrong topic/domain, substance-free refusal, or gibberish — NOT for on-topic but shallow answers (use partial/missing rubric rows instead).
@@ -889,6 +955,15 @@ ${rubricPoints}
    - **missing** => +0 (no deduction; just no credit for this rubric row)
    - **invalid** (conceptually wrong) => +0 (no deduction; just no credit for this rubric row)
    - NOTE: DEDUCTIONS apply ONLY to **wrong-invalid extras** in step 6 (and only when provisional score > 90). This "no deduction" rule applies ONLY to rubric rows.
+   - Strict gating for "partial":
+     - "missing": term-only mention with no technical assertion.
+     - "partial": some correct but incomplete/on-sided explanation.
+     - "full": clear and correct explanation for the rubric requirement.
+   - For **difference/compare** questions:
+     - Require explicit A-vs-B contrast for coverage.
+     - Dimension labels without comparison statements are **missing**.
+     - Wrong-topic comparison should reduce relevance strongly.
+     - Compare evidence must be a short contrast claim, not a topic label.
 5) Detect extra on-topic concepts not present in rubric rows and fill **extraPointResults**:
    - status = **correct-valid** for extra correct concept
    - status = **wrong-invalid** only for clearly factually wrong statements (e.g., "Java strings are mutable")
@@ -913,17 +988,30 @@ ${rubricPoints}
    - If 0.2 < relevanceAssessment.score < 0.5 → correctPercentage = string(min(R, 40))
    - If relevanceAssessment.score >= 0.5 → correctPercentage = string(R)
 9) If every status is **full** and extraPointResults has no wrong-invalid rows (empty or only irrelevant-neutral), correctPercentage must be **"100"** (when relevance allows).
-10) overallRating and answerRating.rating = (numeric correctPercentage / 20) one decimal.
+10) Compute **overallRating** as the average of:
+   - technicalDepth.rating
+   - technicalDepthAsPerExperience.rating
+   - answerRating.rating
+   - confidenceLevel
+   Round to one decimal.
 
 **DEDUCTIONS & SUGGESTIONS:**
-- answerRating.reasonForDeduction: include **missing**, **partial** (prefix "Partial: …"), and **incorrect** rubric concepts; no rubric index numbers.
+- answerRating.reasonForDeduction: summarize the important missing or weak points across the answer (no rubric index numbers, no "Partial/Missing" prefixes).
 - answerImprovementSuggestions: only rubric gaps; one per partial/missing; not empty when correctPercentage < 100; [] when 100%.
 
 **EVIDENCE:** Per-row evidence in rubricPointResults[].evidence; optional 1–3 line recap in detailedSummary (not in technicalDepth.asPerExplanation).
+- Each rubricPointResults[].evidence must be a SHORT CLAIM from the candidate answer, not a bare keyword/title.
+- Bad evidence: "thread safety", "performance", "null key/value handling"
+- Good evidence: "says HashMap allows nulls but ConcurrentHashMap does not", "mentions ConcurrentHashMap is thread-safe"
+- If the answer only contains rubric-like labels with no real claim, mark the row **missing** and say "only label mentioned".
+- For compare/difference questions, evidence should be a short contrast statement rather than a one-sided note.
 
 **NUMERIC CONSISTENCY:**
-- technicalDepth / technicalDepthAsPerExperience: MUST be within **0.5** of overallRating (no exceptions).
-- answerEffectiveness.rating: within **0.5** of overallRating when relevance >= 0.5.
+- Score anchor = (correctPercentage / 20) on the 0.0–5.0 scale.
+- answerRating.rating should track that score anchor.
+- technicalDepth.rating, technicalDepthAsPerExperience.rating, and answerRating.rating MUST each stay within **±2.0** of the score anchor.
+- confidenceLevel comes from observation of communication in video/audio recording;
+- overallRating is the average of those technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating, and confidenceLevel ratings.
 - responseQuality **high** with correctPercentage < 60 is invalid.
 
 **Return JSON only:**
@@ -949,7 +1037,7 @@ ${rubricPoints}
   },
   "answerRating": {
     "rating": "<0.0-5.0>",
-    "reasonForDeduction": ["<missing / partial / incorrect rubric concepts>", "<...>"]
+    "reasonForDeduction": ["<summary of missing or weak points>", "<...>"]
   },
   "communicationRating": "<0.0-5.0>",
   "confidenceLevel": "<0.0-5.0>",
@@ -1066,6 +1154,8 @@ ${generateScoringInstructions()}
 
 ${generateTextLanguageDetectionInstructions()}
 
+${generateKeywordOnlyProtectionInstructions()}
+
 **Analysis Type**: Subjective text response
 
 **Question Asked**: "${responseData.question}"
@@ -1089,23 +1179,27 @@ If candidate has 3-5 years experience AND answer is relevant:
   - Communication: 4.0-5.0 if clear and structured (don't penalize for not being perfectly eloquent)
 - **Balance feedback**: Provide improvement suggestions, but recognize good answers appropriately
 
+**IMPORTANT NOTES:**
+- For compare/difference questions, dimension names alone are insufficient; the answer must state the contrast.
+- overallRating is the average of technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating, and confidenceLevel; keep each of those four within ±2.0 of (correctPercentage / 20).
+
 **Response JSON Format:**
 {
   "correctPercentage": "[0–100] - MUST follow relevance rules: 0 if relevanceAssessment.score <= 0.2, MAX 40 if score < 0.5, otherwise use formula",
-  "overallRating": "<String, 0.0–5.0>",
+  "overallRating": "<String, 0.0–5.0> - Average of technicalDepth.rating, technicalDepthAsPerExperience.rating, answerRating.rating, and confidenceLevel",
   "technicalDepth": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExplanation": "[PURELY TECHNICAL assessment]",
+    "asPerExplanation": "[PURELY TECHNICAL assessment of content quality and depth relative to the asked question]",
     "experienceAdjusted": "[true/false]"
   },
   "technicalDepthAsPerExperience": { 
     "rating": "<String, 0.0–5.0>", 
-    "asPerExperience": "[PURELY TECHNICAL assessment for ${responseData.experience
+    "asPerExperience": "[PURELY TECHNICAL level-adjusted assessment for ${responseData.experience
     } years experience]" 
   },
   "answerRating": {
     "rating": "<String, 0.0–5.0>",
-    "reasonForDeduction": ["[Specific reason if rating < 4.0]"]
+    "reasonForDeduction": ["[Summary of the important missing or weak points across the answer; do not use Partial/Missing tags]"]
   },
   "communicationRating": "<String, 0.0–5.0>",
   "confidenceLevel": "<String, 0.0–5.0>",
@@ -1119,7 +1213,7 @@ If candidate has 3-5 years experience AND answer is relevant:
   "answerImprovementSuggestions": ["[Improvement 1]", "[Improvement 2]"],
   "detailedSummary": "[Technical assessment summary - NO integrity concerns]",
   "answerEffectiveness": {
-    "rating": "<String, 0.0–5.0>",
+    "rating": "<String, 0.0–5.0> - How well the candidate directly answered the question",
     "relevanceBreakdown": {
       "relevantTimeSeconds": "<number>",
       "irrelevantTimeSeconds": "<number>",

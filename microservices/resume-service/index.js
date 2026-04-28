@@ -48,8 +48,91 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const pendingRequests = new Map();
 const responseCache = new Map();
+const REQUEST_TIMEOUT_MS = Number(process.env.RESUME_REQUEST_TIMEOUT_MS || 180000);
+const REQUEST_WATCHDOG_INTERVAL_MS = Number(
+  process.env.RESUME_REQUEST_WATCHDOG_INTERVAL_MS || 15000,
+);
 
 const numConsumers = 6;
+
+const summarizeResponses = (responses = []) => {
+  let successCount = 0;
+  let failedCount = 0;
+  for (const item of responses) {
+    if (item?.status === "Valid") {
+      successCount += 1;
+    } else {
+      failedCount += 1;
+    }
+  }
+  return { successCount, failedCount };
+};
+
+const finalizeRequest = async (requestId, reason = "completed") => {
+  const requestInfo = pendingRequests.get(requestId);
+  if (!requestInfo) return;
+
+  const responses = responseCache.get(requestId) || [];
+  const processed = responses.length;
+  const total = requestInfo.expectedResponses || processed;
+  const missingCount = Math.max(total - processed, 0);
+  const { successCount, failedCount } = summarizeResponses(responses);
+  const totalFailedCount = failedCount + missingCount;
+
+  io.emit(`completion:${requestId}`, {
+    requestId,
+    message:
+      reason === "timeout"
+        ? "Resume processing completed with timeout fallback"
+        : "All resumes processed",
+    jobId: requestInfo.jobId,
+    responses,
+    processed,
+    total,
+    successCount,
+    failedCount: totalFailedCount,
+    missingCount,
+    completionReason: reason,
+  });
+
+  if (total > 1) {
+    try {
+      await axios.post(
+        `${process.env.NOTIFICATION_SERVICE_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${total}`,
+      );
+
+      const db = mongoose.connection.db;
+      await db.collection("jobs").updateOne(
+        { _id: new ObjectId(requestInfo.jobId) },
+        {
+          $set: {
+            activeRequestId: requestId,
+            requestStatus: "Completed",
+          },
+        },
+      );
+    } catch (error) {
+      console.error("Error while completing request:", error);
+    }
+  }
+
+  requestInfo.res.json({
+    requestId,
+    message:
+      reason === "timeout"
+        ? "Processing completed with timeout fallback"
+        : "Processing completed",
+    responses,
+    processed,
+    total,
+    successCount,
+    failedCount: totalFailedCount,
+    missingCount,
+    completionReason: reason,
+  });
+  pendingRequests.delete(requestId);
+  responseCache.delete(requestId);
+};
 
 const createConsumerInstance = async (id) => {
   const consumer = kafka.consumer({ groupId: "response-resumes-screening" });
@@ -98,12 +181,19 @@ const createConsumerInstance = async (id) => {
           responseCache.get(requestId).push(responseData);
 
           const requestInfo = pendingRequests.get(requestId);
+          if (requestInfo) {
+            requestInfo.lastProgressAt = Date.now();
+          }
           if (requestInfo && requestInfo.expectedResponses > 1) {
+            const responses = responseCache.get(requestId);
+            const { successCount, failedCount } = summarizeResponses(responses);
             io.emit(`progress:${requestId}`, {
               requestId,
-              processed: responseCache.get(requestId).length,
+              processed: responses.length,
               total: requestInfo.expectedResponses,
               resume: responseData,
+              successCount,
+              failedCount,
             });
           }
 
@@ -112,40 +202,7 @@ const createConsumerInstance = async (id) => {
             responseCache.get(requestId).length ===
               requestInfo.expectedResponses
           ) {
-            io.emit(`completion:${requestId}`, {
-              requestId,
-              message: "All resumes processed",
-              jobId: requestInfo.jobId,
-              responses: responseCache.get(requestId),
-            });
-
-            if (requestInfo.expectedResponses > 1) {
-              try {
-                await axios.post(
-                  `${process.env.NOTIFICATION_SERVICE_URL}/pushNotification/request-completion?userId=${requestInfo.requestBy}&jobId=${requestInfo.jobId}&count=${requestInfo.expectedResponses}`,
-                );
-
-                const db = mongoose.connection.db;
-                await db.collection("jobs").updateOne(
-                  { _id: new ObjectId(requestInfo.jobId) },
-                  {
-                    $set: {
-                      activeRequestId: requestId,
-                      requestStatus: "Completed",
-                    },
-                  },
-                );
-              } catch (error) {
-                console.error("Error while completing request:", error);
-              }
-            }
-            requestInfo.res.json({
-              requestId,
-              message: "Processing completed",
-              responses: responseCache.get(requestId),
-            });
-            pendingRequests.delete(requestId);
-            responseCache.delete(requestId);
+            await finalizeRequest(requestId, "completed");
           }
         } catch (error) {
           console.error(`❌ Error in Kafka consumer ${id}:`, error);
@@ -181,6 +238,22 @@ app.use((req, res, next) => {
 });
 
 app.use("/resume", resumeScreeningRoutes);
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [requestId, requestInfo] of pendingRequests.entries()) {
+    const expected = requestInfo?.expectedResponses || 0;
+    if (expected <= 1) continue;
+    const responses = responseCache.get(requestId) || [];
+    if (responses.length >= expected) continue;
+    const lastActivity = requestInfo.lastProgressAt || requestInfo.createdAt || now;
+    if (now - lastActivity < REQUEST_TIMEOUT_MS) continue;
+
+    finalizeRequest(requestId, "timeout").catch((error) => {
+      console.error(`❌ Failed to timeout-finalize request ${requestId}:`, error);
+    });
+  }
+}, REQUEST_WATCHDOG_INTERVAL_MS);
 
 const PORT = process.env.PORT || 5010;
 server.listen(PORT, "0.0.0.0", () =>

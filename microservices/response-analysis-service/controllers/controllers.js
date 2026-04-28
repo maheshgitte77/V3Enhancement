@@ -14,6 +14,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const { checkMediaHasAudibleAudio } = require("../workers/common/mediaAudio.guard");
 const CandidateAnswerAiResponse = require("../model/CandidateAnswerAiResponse");
 const CandidateScreeningResult = require("../model/CandidateScreeningResult");
 const CandidateScreening = require("../model/CandidateScreening");
@@ -699,6 +700,72 @@ const healthCheckV2_5 = async (req, res) => {
 };
 
 /**
+ * HTTP endpoint to validate audio presence in media before screening starts.
+ * No Kafka usage - runs guard synchronously and returns immediately.
+ *
+ * Accepted input:
+ * - req.body.file_uri OR req.body.fileUri OR req.body.azureUrl (signed URL)
+ * - optional req.body.mimetype
+ */
+const validateAudioPresenceHTTP = async (req, res) => {
+  let fileToDelete = null;
+
+  try {
+    const remoteUrl = req.body?.file_uri || req.body?.fileUri || req.body?.azureUrl;
+    const mimetype = req.body?.mimetype || req.body?.mimeType || null;
+
+    if (!remoteUrl) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field: file_uri (or fileUri/azureUrl)",
+      });
+    }
+
+    // Reuse existing URI downloader helper to avoid duplicating stream logic.
+    const downloadedFile = await downloadFileFromUri(remoteUrl, mimetype);
+    fileToDelete = downloadedFile.path;
+
+    const guardResult = await checkMediaHasAudibleAudio(downloadedFile.path, logger);
+
+    return res.status(200).json({
+      success: true,
+      guardPassed: guardResult.guardPassed,
+      reason: guardResult.reason,
+      details: {
+        hasAudioStream: guardResult.hasAudioStream,
+        audioCodec: guardResult.audioCodec,
+        audioChannels: guardResult.audioChannels,
+        audioSampleRate: guardResult.audioSampleRate,
+        formatDurationSec: guardResult.formatDurationSec,
+        silenceCheck: guardResult.silenceCheck,
+      },
+    });
+  } catch (error) {
+    logger.error("Audio presence precheck failed", {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      error: "Audio presence validation failed",
+      message: error.message,
+    });
+  } finally {
+    if (fileToDelete && fs.existsSync(fileToDelete)) {
+      try {
+        fs.unlinkSync(fileToDelete);
+      } catch (cleanupError) {
+        logger.warn("Failed to cleanup precheck temp file", {
+          filePath: fileToDelete,
+          error: cleanupError.message,
+        });
+      }
+    }
+  }
+};
+
+/**
  * HTTP Programming Analysis Endpoint
  * Alternative to Kafka for triggering programming analysis
  * POST /api/analyze/programming
@@ -924,6 +991,7 @@ module.exports = {
   analyzeSubjectiveV2_5,
   analyzeScreeningV2_5,
   healthCheckV2_5,
+  validateAudioPresenceHTTP,
   analyzeProgrammingHTTP,
   generateAssessmentSummaryHTTP,
   recalculateScreeningRankingsHTTP,

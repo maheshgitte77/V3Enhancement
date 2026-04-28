@@ -17,6 +17,7 @@ const {
   analyzeSubjectiveV2_5,
   analyzeScreeningV2_5,
   healthCheckV2_5,
+  validateAudioPresenceHTTP,
   analyzeProgrammingHTTP,
   generateAssessmentSummaryHTTP,
   recalculateScreeningRankingsHTTP,
@@ -152,6 +153,17 @@ router.post(
 );
 
 /**
+ * @route POST /api/response/v2.5/validateAudioPresence
+ * @description Lightweight synchronous media audio precheck (no Kafka)
+ * @access Public
+ *
+ * Expected body:
+ * - file_uri | fileUri | azureUrl (signed URL)
+ * - optional mimetype
+ */
+router.post("/validateAudioPresence", uploadNone, validateAudioPresenceHTTP);
+
+/**
  * @route POST /api/response/v2.5/analyzeProgramming
  * @description Analyze programming code quality using AI (HTTP alternative to Kafka)
  * @access Public
@@ -268,6 +280,7 @@ router.get("/", (req, res) => {
       media: "POST /api/response/v2.5/analyzeMediaResponse",
       subjective: "POST /api/response/v2.5/analyzeSubjective",
       screening: "POST /api/response/v2.5/analyzeScreening",
+      audioPrecheck: "POST /api/response/v2.5/validateAudioPresence",
       health: "GET /api/response/v2.5/health",
     },
     improvements: [

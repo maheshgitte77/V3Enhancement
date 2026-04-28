@@ -8,6 +8,8 @@
 const path = require("path");
 const fs = require("fs").promises;
 const axios = require("axios");
+const { checkMediaHasAudibleAudio } = require("../common/mediaAudio.guard");
+const { detectHumanSpeechLikeActivity } = require("../common/speechVad.guard");
 const {
   applyRubricCalibrationNormalization,
 } = require("../common/rubricCalibration.normalizer");
@@ -135,6 +137,9 @@ const uploadFileFromUrl = async (azureUrl, fileName, mimeType) => {
       tempFilePath,
     });
 
+    const audioGuard = await checkMediaHasAudibleAudio(tempFilePath, logger);
+    const vadResult = await detectHumanSpeechLikeActivity(tempFilePath, logger);
+
     // Upload to Google AI from temp file
     const uploadedFile = await client.files.upload({
       file: tempFilePath,
@@ -151,7 +156,7 @@ const uploadFileFromUrl = async (azureUrl, fileName, mimeType) => {
       method: "memory-efficient-streaming",
     });
 
-    return uploadedFile;
+    return { uploadedFile, audioGuard, vadResult };
   } catch (error) {
     logger.error("V3: Memory-efficient streaming upload failed", {
       fileName,
@@ -295,6 +300,8 @@ const pollFileStatus = async (fileName) => {
 const processAudioResponse = async (responseData) => {
   const startTime = Date.now();
   let uploadedFileName = null; // Track for cleanup
+  let audioGuard = null;
+  let vadResult = null;
 
   logger.info("V3: Starting audio processing with multi-stage pipeline", {
     questionId: responseData.questionId,
@@ -328,7 +335,14 @@ const processAudioResponse = async (responseData) => {
         `audio-${Date.now()}.webm`;
 
       // Stream from Azure URL directly to Google AI
-      uploadedFile = await uploadFileFromUrl(azureUrl, fileName, fileMimetype);
+      const streamUploadResult = await uploadFileFromUrl(
+        azureUrl,
+        fileName,
+        fileMimetype,
+      );
+      uploadedFile = streamUploadResult.uploadedFile;
+      audioGuard = streamUploadResult.audioGuard;
+      vadResult = streamUploadResult.vadResult || null;
       uploadedFileName = uploadedFile.name;
     } else {
       // STANDARD PATH: Upload from local disk
@@ -382,6 +396,9 @@ const processAudioResponse = async (responseData) => {
         throw new Error(`Audio file not found: ${mediaPath}`);
       }
 
+      audioGuard = await checkMediaHasAudibleAudio(mediaPath, logger);
+      vadResult = await detectHumanSpeechLikeActivity(mediaPath, logger);
+
       // Upload file to Google AI from disk
       uploadedFile = await uploadFile(mediaPath, fileName, fileMimetype);
       uploadedFileName = uploadedFile.name; // Store for cleanup
@@ -423,6 +440,106 @@ const processAudioResponse = async (responseData) => {
       isOnlyOneVoice: stage1Results.isOnlyOneVoiceInAudio,
     });
 
+    if (vadResult && vadResult.checked && vadResult.speechPresent === false) {
+      logger.warn(
+        "V3: Speech VAD detected no human speech; forcing empty transcription",
+        {
+          questionId: responseData.questionId,
+          durationSec: vadResult.durationSec,
+          speechSeconds: vadResult.speechSeconds,
+          speechSegments: vadResult.speechSegments,
+          vadReason: vadResult.reason,
+        },
+      );
+
+      stage1Results.transcription = "";
+      stage1Results.transcriptionVAD = vadResult;
+      stage1Results.transcriptionGuard = {
+        applied: true,
+        type: "NO_HUMAN_SPEECH",
+        reason: vadResult.reason,
+      };
+    } else if (vadResult) {
+      stage1Results.transcriptionVAD = vadResult;
+    }
+
+    const hasStage1Transcription = Boolean(
+      String(stage1Results.transcription || "").trim(),
+    );
+    const canRunTranscriptionFallback =
+      (!audioGuard || audioGuard.guardPassed) &&
+      (!vadResult || vadResult.speechPresent !== false);
+    if (!hasStage1Transcription && canRunTranscriptionFallback) {
+      logger.warn(
+        "V3: Stage 1 missing transcription despite audible audio, starting fallback transcription",
+        {
+          questionId: responseData.questionId,
+          hasAudioGuard: !!audioGuard,
+          guardPassed: audioGuard?.guardPassed,
+        },
+      );
+
+      try {
+        const fallbackTranscription =
+          await aiExecutor.executeTranscriptionFallback(
+            fileInput,
+            responseData,
+            "audio",
+          );
+
+        const recoveredText = String(
+          fallbackTranscription?.transcription || "",
+        ).trim();
+        if (recoveredText) {
+          stage1Results.transcription = recoveredText;
+          stage1Results.transcriptionFallback = {
+            applied: true,
+            recovered: true,
+            source: fallbackTranscription.source || "gemini-reattempt",
+            metadata: fallbackTranscription.metadata || null,
+          };
+          logger.info("V3: Fallback transcription recovered transcript", {
+            questionId: responseData.questionId,
+            recoveredLength: recoveredText.length,
+          });
+        } else {
+          stage1Results.transcriptionFallback = {
+            applied: true,
+            recovered: false,
+            source: fallbackTranscription?.source || "gemini-reattempt",
+            metadata: fallbackTranscription?.metadata || null,
+          };
+          logger.warn("V3: Fallback transcription returned empty transcript", {
+            questionId: responseData.questionId,
+          });
+        }
+      } catch (fallbackError) {
+        logger.warn("V3: Fallback transcription failed, continuing pipeline", {
+          questionId: responseData.questionId,
+          error: fallbackError.message,
+        });
+      }
+    }
+
+    if (audioGuard && !audioGuard.guardPassed) {
+      logger.warn(
+        "V3: Audio guard blocked transcript inference for audio response",
+        {
+          questionId: responseData.questionId,
+          reason: audioGuard.reason,
+          hasAudioStream: audioGuard.hasAudioStream,
+          audioCodec: audioGuard.audioCodec,
+        },
+      );
+
+      stage1Results.transcription = "";
+      stage1Results.transcriptionGuard = {
+        applied: true,
+        type: "NO_AUDIBLE_AUDIO",
+        reason: audioGuard.reason,
+      };
+    }
+
     // ====== STAGES 2 & 3: Concurrent Execution ======
     logger.info("V3: Starting concurrent Stages 2 & 3");
 
@@ -438,6 +555,12 @@ const processAudioResponse = async (responseData) => {
         const calibrated = applyRubricCalibrationNormalization(
           results,
           responseData.rubricPoints,
+          {
+            confidenceLevel:
+              stage1Results.confidenceLevel ||
+              stage1Results.communication?.confidenceLevel ||
+              null,
+          },
         );
         logger.info("V3: Stage 2 - Scoring completed", {
           correctPercentage: calibrated.correctPercentage,

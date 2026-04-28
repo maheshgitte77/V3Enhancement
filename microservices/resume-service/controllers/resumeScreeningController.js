@@ -299,6 +299,8 @@ const analyzeResumes = async (req, res) => {
           expectedResponses: validFiles.length,
           jobId: jobId,
           requestBy: addedBy || null,
+          createdAt: Date.now(),
+          lastProgressAt: Date.now(),
         });
       }
     });

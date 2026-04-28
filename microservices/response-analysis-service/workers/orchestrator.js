@@ -80,7 +80,7 @@ const V2_5_CONFIG = {
     smartRetry: true,
   },
   ai: {
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     pricing: {
       inputRates: {
         text: 0.1,
@@ -219,7 +219,7 @@ const deductCreditsForQuestion = async (responseData, result, questionType) => {
       screeningAssessmentId:
         responseData.screeningAssessmentId || responseData.screeningTestId,
       assessmentId: responseData.assessmentId,
-      modelId: config?.ai?.model || "gemini-2.0-flash",
+      modelId: config?.ai?.model || "gemini-2.5-flash",
       referenceId: `${questionType}_analysis_${Date.now()}`,
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,

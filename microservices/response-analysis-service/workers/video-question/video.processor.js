@@ -8,6 +8,8 @@ const path = require("path");
 const fs = require("fs").promises;
 const axios = require("axios");
 const { Readable } = require("stream");
+const { checkMediaHasAudibleAudio } = require("../common/mediaAudio.guard");
+const { detectHumanSpeechLikeActivity } = require("../common/speechVad.guard");
 const {
   applyRubricCalibrationNormalization,
 } = require("../common/rubricCalibration.normalizer");
@@ -167,6 +169,9 @@ const uploadFileFromUrl = async (azureUrl, fileName, mimeType) => {
       tempFilePath,
     });
 
+    const audioGuard = await checkMediaHasAudibleAudio(tempFilePath, logger);
+    const vadResult = await detectHumanSpeechLikeActivity(tempFilePath, logger);
+
     // Upload to Google AI from temp file
     const uploadedFile = await client.files.upload({
       file: tempFilePath,
@@ -183,7 +188,7 @@ const uploadFileFromUrl = async (azureUrl, fileName, mimeType) => {
       method: "memory-efficient-streaming",
     });
 
-    return uploadedFile;
+    return { uploadedFile, audioGuard, vadResult };
   } catch (error) {
     logger.error("V2.5: Memory-efficient streaming upload failed", {
       fileName,
@@ -464,6 +469,14 @@ const mergeProctorSignalsIntoStage1 = (stage1Results, modelSignals) => {
   });
 
   stage1Results.integrityAnalysis.flags = mergedFlags;
+  logger.info("V2.5: Proctor->Stage1 merge audit", {
+    existingFlagsCount: existingFlags.length,
+    proctorRawFlagsCount: modelFlagsRaw.length,
+    proctorMappedFlagsCount: modelFlags.length,
+    mergedFlagsCount: mergedFlags.length,
+    addedFlagsCount: Math.max(0, mergedFlags.length - existingFlags.length),
+    mappedTypes: modelFlags.map((f) => f.type),
+  });
 
   const modelVerdict = modelSignals?.integrityAnalysis?.verdict;
   const modelConfidence = modelSignals?.integrityAnalysis?.confidenceScore;
@@ -480,6 +493,16 @@ const mergeProctorSignalsIntoStage1 = (stage1Results, modelSignals) => {
   ) {
     stage1Results.integrityAnalysis.confidenceScore = modelConfidence;
   }
+  logger.info("V2.5: Proctor->Stage1 verdict/confidence audit", {
+    proctorVerdict: modelVerdict || null,
+    finalStage1Verdict: stage1Results.integrityAnalysis.verdict || null,
+    proctorConfidence:
+      typeof modelConfidence === "number" ? modelConfidence : null,
+    finalStage1Confidence:
+      typeof stage1Results.integrityAnalysis.confidenceScore === "number"
+        ? stage1Results.integrityAnalysis.confidenceScore
+        : null,
+  });
 };
 
 const applyProctorFlagsToFlagResults = (flagResults, modelSignals) => {
@@ -522,10 +545,11 @@ const applyProctorFlagsToFlagResults = (flagResults, modelSignals) => {
       .filter(Boolean),
   );
 
-  return flagResults.map((f) => {
+  const overridden = [];
+  const next = flagResults.map((f) => {
     if (!targetFlags.has(f?.flag)) return f;
     const detected = detectedTargetFlags.has(f.flag);
-    return {
+    const updated = {
       ...f,
       detected,
       message: detected
@@ -533,7 +557,25 @@ const applyProctorFlagsToFlagResults = (flagResults, modelSignals) => {
         : negativeMessageByFlag[f.flag] || f.message,
       lastUpdated: new Date().toISOString(),
     };
+    if (
+      Boolean(f?.detected) !== Boolean(updated.detected) ||
+      String(f?.message || "") !== String(updated.message || "")
+    ) {
+      overridden.push({
+        flag: f.flag,
+        beforeDetected: Boolean(f?.detected),
+        afterDetected: Boolean(updated.detected),
+      });
+    }
+    return updated;
   });
+  logger.info("V2.5: Proctor flag override audit", {
+    proctorDetectedTypes: Array.from(detectedTypes),
+    mappedTargetFlags: Array.from(detectedTargetFlags),
+    overrideCount: overridden.length,
+    overrides: overridden,
+  });
+  return next;
 };
 
 /**
@@ -546,6 +588,8 @@ const applyProctorFlagsToFlagResults = (flagResults, modelSignals) => {
 const processVideoResponse = async (responseData) => {
   const startTime = Date.now();
   let uploadedFileName = null; // Track for cleanup
+  let audioGuard = null;
+  let vadResult = null;
 
   logger.info("V2.5: Starting video processing with multi-stage pipeline", {
     questionId: responseData.questionId,
@@ -579,7 +623,14 @@ const processVideoResponse = async (responseData) => {
         `video-${Date.now()}.webm`;
 
       // Stream from Azure URL directly to Google AI
-      uploadedFile = await uploadFileFromUrl(azureUrl, fileName, fileMimetype);
+      const streamUploadResult = await uploadFileFromUrl(
+        azureUrl,
+        fileName,
+        fileMimetype,
+      );
+      uploadedFile = streamUploadResult.uploadedFile;
+      audioGuard = streamUploadResult.audioGuard;
+      vadResult = streamUploadResult.vadResult || null;
       uploadedFileName = uploadedFile.name;
     } else {
       // STANDARD PATH: Upload from local disk
@@ -633,6 +684,9 @@ const processVideoResponse = async (responseData) => {
         throw new Error(`Video file not found: ${mediaPath}`);
       }
 
+      audioGuard = await checkMediaHasAudibleAudio(mediaPath, logger);
+      vadResult = await detectHumanSpeechLikeActivity(mediaPath, logger);
+
       // Upload file to Google AI from disk
       uploadedFile = await uploadFile(mediaPath, fileName, fileMimetype);
       uploadedFileName = uploadedFile.name; // Store for cleanup
@@ -669,10 +723,28 @@ const processVideoResponse = async (responseData) => {
 
     // Optional deterministic model signals (lip-sync + eye + head pose)
     const sourceVideoUrl = responseData.azureUrl || responseData.fileUri || null;
+    logger.info("V2.5: Proctor signal fetch start", {
+      questionId: responseData.questionId,
+      hasSourceVideoUrl: !!sourceVideoUrl,
+      asyncEnabled: PROCTOR_MODEL_ASYNC_ENABLED,
+      proctorSignalsEnabled: ENABLE_PROCTOR_MODEL_SIGNALS,
+    });
     const proctorModelSignals = await callProctorModelSignals(
       sourceVideoUrl,
       responseData
     );
+    logger.info("V2.5: Proctor signal fetch result", {
+      questionId: responseData.questionId,
+      hasSignals: !!proctorModelSignals,
+      proctorVerdict: proctorModelSignals?.integrityAnalysis?.verdict || null,
+      proctorFlagCount:
+        Array.isArray(proctorModelSignals?.integrityAnalysis?.flags)
+          ? proctorModelSignals.integrityAnalysis.flags.length
+          : 0,
+      proctorFlagTypes: Array.isArray(proctorModelSignals?.integrityAnalysis?.flags)
+        ? proctorModelSignals.integrityAnalysis.flags.map((f) => String(f?.type || ""))
+        : [],
+    });
     mergeProctorSignalsIntoStage1(stage1Results, proctorModelSignals);
 
     logger.info("V2.5: Stage 1 - Behavioral analysis completed", {
@@ -682,6 +754,106 @@ const processVideoResponse = async (responseData) => {
       isLipSync: stage1Results.isLipSync,
       usedModelSignals: !!proctorModelSignals,
     });
+
+    if (vadResult && vadResult.checked && vadResult.speechPresent === false) {
+      logger.warn(
+        "V2.5: Speech VAD detected no human speech; forcing empty transcription",
+        {
+          questionId: responseData.questionId,
+          durationSec: vadResult.durationSec,
+          speechSeconds: vadResult.speechSeconds,
+          speechSegments: vadResult.speechSegments,
+          vadReason: vadResult.reason,
+        },
+      );
+
+      stage1Results.transcription = "";
+      stage1Results.transcriptionVAD = vadResult;
+      stage1Results.transcriptionGuard = {
+        applied: true,
+        type: "NO_HUMAN_SPEECH",
+        reason: vadResult.reason,
+      };
+    } else if (vadResult) {
+      stage1Results.transcriptionVAD = vadResult;
+    }
+
+    const hasStage1Transcription = Boolean(
+      String(stage1Results.transcription || "").trim(),
+    );
+    const canRunTranscriptionFallback =
+      (!audioGuard || audioGuard.guardPassed) &&
+      (!vadResult || vadResult.speechPresent !== false);
+    if (!hasStage1Transcription && canRunTranscriptionFallback) {
+      logger.warn(
+        "V2.5: Stage 1 missing transcription despite audible audio, starting fallback transcription",
+        {
+          questionId: responseData.questionId,
+          hasAudioGuard: !!audioGuard,
+          guardPassed: audioGuard?.guardPassed,
+        },
+      );
+
+      try {
+        const fallbackTranscription =
+          await aiExecutor.executeTranscriptionFallback(
+            fileInput,
+            responseData,
+            "video",
+          );
+
+        const recoveredText = String(
+          fallbackTranscription?.transcription || "",
+        ).trim();
+        if (recoveredText) {
+          stage1Results.transcription = recoveredText;
+          stage1Results.transcriptionFallback = {
+            applied: true,
+            recovered: true,
+            source: fallbackTranscription.source || "gemini-reattempt",
+            metadata: fallbackTranscription.metadata || null,
+          };
+          logger.info("V2.5: Fallback transcription recovered transcript", {
+            questionId: responseData.questionId,
+            recoveredLength: recoveredText.length,
+          });
+        } else {
+          stage1Results.transcriptionFallback = {
+            applied: true,
+            recovered: false,
+            source: fallbackTranscription?.source || "gemini-reattempt",
+            metadata: fallbackTranscription?.metadata || null,
+          };
+          logger.warn("V2.5: Fallback transcription returned empty transcript", {
+            questionId: responseData.questionId,
+          });
+        }
+      } catch (fallbackError) {
+        logger.warn("V2.5: Fallback transcription failed, continuing pipeline", {
+          questionId: responseData.questionId,
+          error: fallbackError.message,
+        });
+      }
+    }
+
+    if (audioGuard && !audioGuard.guardPassed) {
+      logger.warn(
+        "V2.5: Audio guard blocked transcript inference for video response",
+        {
+          questionId: responseData.questionId,
+          reason: audioGuard.reason,
+          hasAudioStream: audioGuard.hasAudioStream,
+          audioCodec: audioGuard.audioCodec,
+        },
+      );
+
+      stage1Results.transcription = "";
+      stage1Results.transcriptionGuard = {
+        applied: true,
+        type: "NO_AUDIBLE_AUDIO",
+        reason: audioGuard.reason,
+      };
+    }
 
     // ====== STAGES 2 & 3: Concurrent Execution ======
     logger.info("V2.5: Starting concurrent Stages 2 & 3");
@@ -695,10 +867,41 @@ const processVideoResponse = async (responseData) => {
           responseData,
           "video",
         );
+        const preCalibrationSnapshot = {
+          overallRating: results?.overallRating ?? null,
+          correctPercentage: results?.correctPercentage ?? null,
+          technicalDepth: results?.technicalDepth?.rating ?? null,
+          technicalDepthAsPerExperience:
+            results?.technicalDepthAsPerExperience?.rating ?? null,
+          answerRating: results?.answerRating?.rating ?? null,
+          confidenceLevel:
+            stage1Results.confidenceLevel ||
+            stage1Results.communication?.confidenceLevel ||
+            results?.confidenceLevel ||
+            null,
+        };
         const calibrated = applyRubricCalibrationNormalization(
           results,
           responseData.rubricPoints,
+          {
+            confidenceLevel:
+              stage1Results.confidenceLevel ||
+              stage1Results.communication?.confidenceLevel ||
+              null,
+          },
         );
+        logger.info("V2.5: Stage 2 - Calibration audit", {
+          before: preCalibrationSnapshot,
+          after: {
+            overallRating: calibrated?.overallRating ?? null,
+            correctPercentage: calibrated?.correctPercentage ?? null,
+            technicalDepth: calibrated?.technicalDepth?.rating ?? null,
+            technicalDepthAsPerExperience:
+              calibrated?.technicalDepthAsPerExperience?.rating ?? null,
+            answerRating: calibrated?.answerRating?.rating ?? null,
+            confidenceLevel: calibrated?.confidenceLevel ?? null,
+          },
+        });
         logger.info("V2.5: Stage 2 - Scoring completed", {
           correctPercentage: calibrated.correctPercentage,
           overallRating: calibrated.overallRating,
@@ -750,11 +953,45 @@ const processVideoResponse = async (responseData) => {
 
     // Use validated flags (auto-corrected if needed)
     let validatedFlagResults = syncValidation.flagResults;
+    const beforeProctorOverrideFlags = Array.isArray(validatedFlagResults)
+      ? validatedFlagResults.map((f) => ({
+        flag: f?.flag,
+        detected: Boolean(f?.detected),
+        message: f?.message || "",
+      }))
+      : [];
     // Override mapped flags from deterministic proctor API without changing the rest.
     validatedFlagResults = applyProctorFlagsToFlagResults(
       validatedFlagResults,
       proctorModelSignals,
     );
+    const afterProctorOverrideFlags = Array.isArray(validatedFlagResults)
+      ? validatedFlagResults.map((f) => ({
+        flag: f?.flag,
+        detected: Boolean(f?.detected),
+        message: f?.message || "",
+      }))
+      : [];
+    const overrideDiffs = afterProctorOverrideFlags.filter((afterRow, idx) => {
+      const beforeRow = beforeProctorOverrideFlags[idx];
+      if (!beforeRow || beforeRow.flag !== afterRow.flag) return false;
+      return (
+        beforeRow.detected !== afterRow.detected ||
+        beforeRow.message !== afterRow.message
+      );
+    });
+    logger.info("V2.5: Final flag source audit before save", {
+      questionId: responseData.questionId,
+      hasProctorSignals: !!proctorModelSignals,
+      beforeOverrideFlaggedChecks: beforeProctorOverrideFlags.filter((f) => f.detected).length,
+      afterOverrideFlaggedChecks: afterProctorOverrideFlags.filter((f) => f.detected).length,
+      overrideDiffCount: overrideDiffs.length,
+      overrideDiffs: overrideDiffs.map((row) => ({
+        flag: row.flag,
+        finalDetected: row.detected,
+        finalMessage: row.message,
+      })),
+    });
     finalCheatingResults.flagResults = validatedFlagResults;
 
     // Update flag stats based on validated flags

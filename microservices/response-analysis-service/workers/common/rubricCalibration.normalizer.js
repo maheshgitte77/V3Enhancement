@@ -39,6 +39,92 @@ const parseRelevanceScore = (rel) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const parseRating = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(5, n));
+};
+
+const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const formatRating = (value) => {
+  if (!Number.isFinite(value)) return null;
+  return clampNumber(value, 0, 5).toFixed(1);
+};
+
+const averageNumbers = (values) => {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+};
+
+const clampToCenterWindow = (value, center, window = 1) => {
+  if (!Number.isFinite(value) || !Number.isFinite(center)) return null;
+  return clampNumber(value, Math.max(0, center - window), Math.min(5, center + window));
+};
+
+const synchronizeOverallAndComponentRatings = (
+  stage2Results,
+  pct,
+  externalConfidenceLevel = null,
+) => {
+  const scoreAnchor = clampNumber((Number(pct) || 0) / 20, 0, 5);
+  const anchorWindow = 2;
+  const clampToScoreAnchor = (value) =>
+    clampToCenterWindow(value, scoreAnchor, anchorWindow);
+
+  const rawRatings = {
+    technicalDepth: parseRating(stage2Results?.technicalDepth?.rating) ?? scoreAnchor,
+    technicalDepthAsPerExperience:
+      parseRating(stage2Results?.technicalDepthAsPerExperience?.rating) ?? scoreAnchor,
+    answerRating: scoreAnchor,
+    confidenceLevel:
+      parseRating(externalConfidenceLevel) ??
+      parseRating(stage2Results?.confidenceLevel) ??
+      scoreAnchor,
+  };
+
+  const synchronizedRatings = {
+    technicalDepth: clampToScoreAnchor(rawRatings.technicalDepth),
+    technicalDepthAsPerExperience: clampToScoreAnchor(
+      rawRatings.technicalDepthAsPerExperience,
+    ),
+    answerRating: clampToScoreAnchor(rawRatings.answerRating),
+    confidenceLevel: clampToScoreAnchor(rawRatings.confidenceLevel),
+  };
+
+  const finalOverall =
+    averageNumbers(Object.values(synchronizedRatings)) ?? scoreAnchor;
+
+  const answerEffectiveness = parseRating(stage2Results?.answerEffectiveness?.rating);
+  const responseCoherence = parseRating(stage2Results?.responseCoherence);
+
+  return {
+    overallRating: formatRating(finalOverall),
+    technicalDepthRating: formatRating(synchronizedRatings.technicalDepth),
+    technicalDepthAsPerExperienceRating: formatRating(
+      synchronizedRatings.technicalDepthAsPerExperience,
+    ),
+    answerRating: formatRating(synchronizedRatings.answerRating),
+    answerEffectivenessRating:
+      answerEffectiveness != null
+        ? formatRating(
+          clampToCenterWindow(
+            answerEffectiveness,
+            finalOverall,
+            2,
+          ),
+        )
+        : null,
+    responseCoherence:
+      responseCoherence != null
+        ? formatRating(clampToCenterWindow(responseCoherence, finalOverall, 1))
+        : null,
+    confidenceLevel: formatRating(synchronizedRatings.confidenceLevel),
+  };
+};
+
 const parseExtraValidQuestionPoints = (value) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -86,7 +172,7 @@ const parseExtraPointResults = (value) => {
 
 /**
  * When rubricPointResults is present and valid, recompute correctPercentage,
- * overallRating, and answerRating.rating from deterministic rubric math:
+ * overallRating and rating fields from deterministic rubric math:
  * - full => +X, partial => +(X/2), missing => +0, invalid => +0
  * - extraPointResults[] with status correct-valid/wrong-invalid/irrelevant-neutral (preferred source)
  * - extraValidQuestionPoints => +(X/2) each (fallback/compat bonus count)
@@ -94,12 +180,21 @@ const parseExtraPointResults = (value) => {
  * Deduction for wrong-invalid extras applies only when provisional score is > 90.
  * where X = 100 / total rubric points.
  * Final score is clamped to [0, 100]. Legacy relevance caps are still applied.
+ * overallRating is the average of technicalDepth.rating,
+ * technicalDepthAsPerExperience.rating, answerRating.rating, and confidenceLevel
+ * after each of those four is clamped to ±2.0 of correctPercentage / 20 (no separate overall clamp).
  *
  * @param {object} stage2Results - Parsed scoring JSON
  * @param {string[]} rubricPoints - Rubric strings from responseData
+ * @param {object} [options]
+ * @param {string|number|null} [options.confidenceLevel]
  * @returns {object} Mutated copy of stage2Results
  */
-const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
+const applyRubricCalibrationNormalization = (
+  stage2Results,
+  rubricPoints,
+  options = {},
+) => {
   if (!stage2Results || typeof stage2Results !== "object") return stage2Results;
 
   const points = Array.isArray(rubricPoints)
@@ -133,6 +228,11 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
       },
       technicalDepthAsPerExperience: {
         ...(stage2Results.technicalDepthAsPerExperience || {}),
+        rating: "0.0",
+      },
+      confidenceLevel: "0.0",
+      answerEffectiveness: {
+        ...(stage2Results.answerEffectiveness || {}),
         rating: "0.0",
       },
     };
@@ -179,34 +279,11 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
     pct = Math.min(pct, 40);
   }
 
-  const overall = (pct / 20).toFixed(1);
-
-  const clampRatingToOverallWindow = (rawRating, rawOverall, window = 0.5) => {
-    const r = Number(rawRating);
-    const o = Number(rawOverall);
-    if (!Number.isFinite(r) || !Number.isFinite(o)) return null;
-    const min = Math.max(0, o - window);
-    const max = Math.min(5, o + window);
-    const clamped = Math.max(min, Math.min(max, r));
-    return clamped.toFixed(1);
-  };
-
-  const technicalDepthRating =
-    stage2Results?.technicalDepth?.rating != null
-      ? clampRatingToOverallWindow(stage2Results.technicalDepth.rating, overall, 0.5)
-      : null;
-  const technicalDepthAsPerExperienceRating =
-    stage2Results?.technicalDepthAsPerExperience?.rating != null
-      ? clampRatingToOverallWindow(
-        stage2Results.technicalDepthAsPerExperience.rating,
-        overall,
-        0.5,
-      )
-      : null;
-  const answerEffectivenessRating =
-    stage2Results?.answerEffectiveness?.rating != null
-      ? clampRatingToOverallWindow(stage2Results.answerEffectiveness.rating, overall, 0.5)
-      : null;
+  const synchronizedRatings = synchronizeOverallAndComponentRatings(
+    stage2Results,
+    pct,
+    options.confidenceLevel,
+  );
 
   const out = {
     ...stage2Results,
@@ -214,24 +291,34 @@ const applyRubricCalibrationNormalization = (stage2Results, rubricPoints) => {
     extraValidQuestionPoints,
     extraInvalidQuestionPoints,
     correctPercentage: String(pct),
-    overallRating: overall,
+    overallRating: synchronizedRatings.overallRating,
     answerRating: {
       ...(stage2Results.answerRating || {}),
-      rating: overall,
+      rating:
+        synchronizedRatings.answerRating ??
+        stage2Results?.answerRating?.rating,
     },
     technicalDepth: {
       ...(stage2Results.technicalDepth || {}),
-      rating: technicalDepthRating ?? stage2Results?.technicalDepth?.rating,
+      rating:
+        synchronizedRatings.technicalDepthRating ??
+        stage2Results?.technicalDepth?.rating,
     },
     technicalDepthAsPerExperience: {
       ...(stage2Results.technicalDepthAsPerExperience || {}),
       rating:
-        technicalDepthAsPerExperienceRating ??
+        synchronizedRatings.technicalDepthAsPerExperienceRating ??
         stage2Results?.technicalDepthAsPerExperience?.rating,
     },
+    confidenceLevel:
+      synchronizedRatings.confidenceLevel ?? stage2Results?.confidenceLevel,
+    responseCoherence:
+      synchronizedRatings.responseCoherence ?? stage2Results?.responseCoherence,
     answerEffectiveness: {
       ...(stage2Results.answerEffectiveness || {}),
-      rating: answerEffectivenessRating ?? stage2Results?.answerEffectiveness?.rating,
+      rating:
+        synchronizedRatings.answerEffectivenessRating ??
+        stage2Results?.answerEffectiveness?.rating,
     },
   };
   return out;

@@ -737,7 +737,7 @@ const processAssessmentSummary = async (requestData) => {
 
       const aiStartTime = Date.now();
       const result = await client.models.generateContent({
-        model: v2_5ConfigGlobal?.ai?.model || "gemini-1.5-flash",
+        model: v2_5ConfigGlobal?.ai?.model || "gemini-2.5-flash",
         contents: [{ text: prompt }],
       });
 
@@ -808,7 +808,7 @@ const processAssessmentSummary = async (requestData) => {
       creditServiceClient
         .deductAiUsage({
           clientId: clientId,
-          modelId: v2_5ConfigGlobal?.ai?.model || "gemini-1.5-flash",
+          modelId: v2_5ConfigGlobal?.ai?.model || "gemini-2.5-flash",
           serviceKey: "AI_SUMMARY_GENERATION",
           itemKey: "ASSESSMENT_SUMMARY",
           tokens: totalTokensUsed,

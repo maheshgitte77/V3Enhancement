@@ -4,6 +4,7 @@
  */
 
 const { GoogleGenAI } = require("@google/genai");
+const axios = require("axios");
 const {
   generateVideoBehavioralPrompt,
   generateAudioBehavioralPrompt,
@@ -16,6 +17,15 @@ const {
 let logger = console;
 let V2_CONFIG = null;
 let client = null;
+const ASSEMBLY_AI_API_URL = "https://api.assemblyai.com/v2";
+const ASSEMBLY_AI_POLL_INTERVAL_MS = Number(
+  process.env.ASSEMBLY_AI_POLL_INTERVAL_MS || 3000,
+);
+const ASSEMBLY_AI_TIMEOUT_MS = Number(
+  process.env.ASSEMBLY_AI_TIMEOUT_MS || 180000,
+);
+const DEEPGRAM_API_URL = "https://api.deepgram.com/v1/listen";
+const DEEPGRAM_TIMEOUT_MS = Number(process.env.DEEPGRAM_TIMEOUT_MS || 120000);
 
 /**
  * Initialize the AI executor with dependencies
@@ -446,6 +456,254 @@ const executeBehavioralAnalysis = async (fileInput, responseData, type) => {
   };
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const executeDeepgramTranscriptionFallback = async (responseData, type) => {
+  const apiKey = process.env.DEEPGRAM_API_KEY;
+  if (!apiKey) {
+    logger.warn("Deepgram fallback skipped: API key missing", {
+      questionId: responseData?.questionId,
+      type,
+    });
+    return "";
+  }
+
+  const mediaUrl = responseData?.azureUrl || responseData?.fileUri || "";
+  if (!mediaUrl) {
+    logger.warn("Deepgram fallback skipped: media URL missing", {
+      questionId: responseData?.questionId,
+      type,
+    });
+    return "";
+  }
+
+  const model = process.env.DEEPGRAM_MODEL || "nova-2";
+  logger.info("Stage 1: Deepgram fallback transcription started", {
+    questionId: responseData?.questionId,
+    type,
+    hasMediaUrl: true,
+    model,
+  });
+
+  try {
+    const { data } = await axios.post(
+      `${DEEPGRAM_API_URL}?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true`,
+      { url: mediaUrl },
+      {
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        timeout: DEEPGRAM_TIMEOUT_MS,
+      },
+    );
+
+    const transcriptText = String(
+      data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "",
+    ).trim();
+
+    logger.info("Stage 1: Deepgram fallback transcription completed", {
+      questionId: responseData?.questionId,
+      type,
+      hasTranscription: Boolean(transcriptText),
+      transcriptLength: transcriptText.length,
+    });
+
+    return transcriptText;
+  } catch (error) {
+    logger.warn("Deepgram fallback transcription failed", {
+      questionId: responseData?.questionId,
+      type,
+      error: error.message,
+    });
+    return "";
+  }
+};
+
+const executeAssemblyTranscriptionFallback = async (responseData, type) => {
+  const apiKey = process.env.ASSEMBLY_AI_API_KEY;
+  if (!apiKey) {
+    logger.warn("AssemblyAI fallback skipped: API key missing", {
+      questionId: responseData?.questionId,
+      type,
+    });
+    return "";
+  }
+
+  const mediaUrl = responseData?.azureUrl || responseData?.fileUri || "";
+  if (!mediaUrl) {
+    logger.warn("AssemblyAI fallback skipped: media URL missing", {
+      questionId: responseData?.questionId,
+      type,
+    });
+    return "";
+  }
+
+  const headers = {
+    authorization: apiKey,
+    "content-type": "application/json",
+  };
+
+  logger.info("Stage 1: AssemblyAI fallback transcription started", {
+    questionId: responseData?.questionId,
+    type,
+    hasMediaUrl: true,
+    speechModels: ["universal-2"],
+  });
+
+  try {
+    const submitResponse = await axios.post(
+      `${ASSEMBLY_AI_API_URL}/transcript`,
+      {
+        audio_url: mediaUrl,
+        speech_models: ["universal-2"],
+      },
+      {
+        headers,
+        timeout: Math.min(60000, ASSEMBLY_AI_TIMEOUT_MS),
+      },
+    );
+
+    const transcriptId = submitResponse?.data?.id;
+    if (!transcriptId) {
+      throw new Error("AssemblyAI transcript id missing");
+    }
+
+    const deadline = Date.now() + ASSEMBLY_AI_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await wait(ASSEMBLY_AI_POLL_INTERVAL_MS);
+
+      const statusResponse = await axios.get(
+        `${ASSEMBLY_AI_API_URL}/transcript/${transcriptId}`,
+        {
+          headers,
+          timeout: Math.min(60000, ASSEMBLY_AI_TIMEOUT_MS),
+        },
+      );
+
+      const status = String(statusResponse?.data?.status || "").toLowerCase();
+      if (status === "completed") {
+        const transcriptText = String(statusResponse?.data?.text || "").trim();
+        logger.info("Stage 1: AssemblyAI fallback transcription completed", {
+          questionId: responseData?.questionId,
+          type,
+          hasTranscription: Boolean(transcriptText),
+          transcriptLength: transcriptText.length,
+        });
+        return transcriptText;
+      }
+
+      if (status === "error") {
+        throw new Error(
+          statusResponse?.data?.error || "AssemblyAI transcription failed",
+        );
+      }
+    }
+
+    throw new Error("AssemblyAI transcription timed out");
+  } catch (error) {
+    logger.warn("AssemblyAI fallback transcription failed", {
+      questionId: responseData?.questionId,
+      type,
+      error: error.message,
+    });
+    return "";
+  }
+};
+
+/**
+ * Fallback transcription call for media responses.
+ * Used when Stage 1 behavioral analysis returns empty transcription
+ * despite audible audio being present.
+ */
+const executeTranscriptionFallback = async (fileInput, responseData, type) => {
+  logger.info("Stage 1: Starting fallback transcription", {
+    type,
+    questionId: responseData?.questionId,
+  });
+
+  const startTime = Date.now();
+  const prompt = `
+You are a transcription assistant.
+
+Task:
+- Transcribe the provided ${type} response into English text only.
+- If candidate speaks non-English, translate to English.
+- Return strict JSON only.
+- If no clearly audible human speech exists, return empty transcription.
+- Do not infer or guess words from context.
+
+Return JSON:
+{
+  "transcription": "<english transcription or empty string>"
+}
+`;
+
+  const { parsedAnalysis, tokenUsage } = await executeAICall(
+    fileInput,
+    prompt,
+    responseData,
+    "1-Transcription-Fallback",
+    2,
+  );
+
+  const processingCost = calculateProcessingCost(
+    tokenUsage.inputTokens,
+    tokenUsage.outputTokens,
+    type,
+  );
+
+  const duration = Date.now() - startTime;
+  const transcription =
+    typeof parsedAnalysis?.transcription === "string"
+      ? parsedAnalysis.transcription
+      : "";
+
+  logger.info("Stage 1: Fallback transcription completed", {
+    type,
+    questionId: responseData?.questionId,
+    duration,
+    hasTranscription: Boolean(transcription.trim()),
+  });
+
+  let finalTranscription = transcription;
+  let source = "gemini-reattempt";
+
+  if (!finalTranscription.trim()) {
+    const deepgramTranscription = await executeDeepgramTranscriptionFallback(
+      responseData,
+      type,
+    );
+    if (deepgramTranscription.trim()) {
+      finalTranscription = deepgramTranscription.trim();
+      source = "deepgram";
+    }
+  }
+
+  if (!finalTranscription.trim()) {
+    const assemblyTranscription = await executeAssemblyTranscriptionFallback(
+      responseData,
+      type,
+    );
+    if (assemblyTranscription.trim()) {
+      finalTranscription = assemblyTranscription.trim();
+      source = "assemblyai";
+    }
+  }
+
+  return {
+    transcription: finalTranscription,
+    source,
+    metadata: {
+      stage: "1-Transcription-Fallback",
+      type,
+      duration,
+      tokenUsage,
+      processingCost,
+    },
+  };
+};
+
 /**
  * Stage 2: Execute Scoring for Video/Audio
  */
@@ -652,6 +910,7 @@ const executeProgrammingAnalysis = async (responseData) => {
 module.exports = {
   initializeAIExecutor,
   executeBehavioralAnalysis,
+  executeTranscriptionFallback,
   executeScoring,
   executeSubjectiveScoring,
   executeProgrammingAnalysis,
